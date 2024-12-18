@@ -1,0 +1,173 @@
+# Defines the build system used for the project. For pure-python projects, uses the hatchling build system, which is
+# used internally by scikit-build for our C-extension projects. Therefore, there is clear continuity between our
+# c-extension and pure-python projcts.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Project metdata section. Provides the genral ID information about the project.
+[project]
+name = "YOUR-PROJECT-NAME"
+version = "1.0.0"
+description = "Short description of your project"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "YOUR_AUTHOR_NAME", email = "YOUR_EMAIL" },
+]
+maintainers = [
+    { name = "YOUR_AUTHOR_NAME", email = "YOUR_EMAIL" },
+]
+
+# The list of keywords that describe your project
+keywords = []
+
+# Additional classifiers used by PIP to group repositories.
+classifiers = [
+    # Development status
+    "Development Status :: 5 - Production/Stable",
+    # Intended audience and project topic
+    "Intended Audience :: Developers",
+    "Topic :: Software Development",
+    # License
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    # Supported Python Versions
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    # Supported Operating Systems
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X"
+]
+
+# Project-wide dependencies.
+dependencies = [
+    "click",
+    "ataraxis-automation",
+]
+
+[project.urls]
+Homepage = "https://github.com/Sun-Lab-NBB/YOUR-PROJECT-NAME"
+Documentation = "https://YOUR-PROJECT-NAME-api-docs.netlify.app/"
+
+# Specifies additional build dependencies.
+[project.optional-dependencies]
+
+# A shorhand specification that installs tox and all packages required for development tasks. This specification can
+# be used by developers to quickly install all necessary compontents for working on this project.
+dev = [
+    # Packages avaialble from conda and pip for all supported OS versions.
+    "tox>=4",
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "coverage[toml]",
+    "junitparser",
+    "sphinx",
+    "importlib_metadata",
+    "sphinx-rtd-theme",
+    "sphinx-click",
+    "mypy",
+    "ruff",
+    "build",
+    "twine",
+    "grayskull",
+    "hatchling",
+    "black",
+    # Packages that may not be available from conda for all supported OS versions.
+    "tox-uv",
+]
+
+# Use this section to expose scripts as short commands callable from the shell. The line below is just an
+# example. Generally, this section is used to expose benchmark and cli/gui-based runtimes.
+[project.scripts]
+# benchmark-module = "YOUR_PROJECT_NAME:benchmark"
+
+# Specifies files that should not be included in the source-code distribution, but are also not part of gitignore.
+[tool.hatch.build.targets.sdist]
+exclude = [".github", "recipe"]
+
+# Specifies the library structure. In the vast majority of cases, this should be pointing to the 'main' library
+# package stored directly under 'src' directory. This arrangement assumes there is a single 'library' package and
+# nothing else under /src directory.
+[tool.hatch.build.targets.wheel]
+packages = ["src/YOUR_LIBRARY_NAME"]
+
+# Ruff section. This section is used to configure Ruff runtime, which is used by the tox 'lint' command.
+[tool.ruff]
+line-length = 120  # Maximum column length is set to 120 for this project.
+src = ["src"]  # The name of the source directory
+
+# Excludes 'service' .py files, such as sphinx configuration file. Add any other .py service files you may have to this
+# list.
+extend-exclude = [
+    "conf.py",
+]
+
+# Same as the 'basepython' version in the tox.ini 'lint' section, see comments for that section for more details.
+target-version = "py310"
+# Checks for all potential violations and uses the exclusions below to target-disable specific ones.
+lint.select = ["ALL"]
+
+# General ignore directives.
+lint.ignore = [
+    "COM812", # Conflicts with the formatter
+    "ISC001", # Conflicts with the formatter
+    "ANN101", # "missing-type-self"
+    "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
+    "PT004", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
+    "PT005", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
+    "PT023", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
+    "D107", # Project-specific, __init__ is documented inside the main class docstring where applicable
+    "D205", # Bugs out for file descriptions
+    "PLW0603", # While global statement usage is not ideal, it greatly streamlines certain development patterns
+    "T201", # Print is frequently used throughout the project for information reporting
+]
+
+# Additional, file-specific 'ignore' directives.
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = [
+    "F401", # Imported but unused
+    "F403", # Wildcard imports
+]
+"docs/**" = [
+    "INP001", # Requires __init__.py, but docs folder is not a package.
+]
+
+[tool.ruff.lint.pyupgrade]
+# Preserves types, even if a file imports `from __future__ import annotations`
+# (https://github.com/astral-sh/ruff/issues/5434)
+keep-runtime-typing = true
+
+# Specifies the docstring style
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# MyPy configuration section. MyPy is used to enforce typing in python and verify that all varaibles are correctly
+# typed. This is used by tox 'lint' command. Note, for mypy to work correctly, you may need to manually resolve any
+# stubs issues (tox -e stubs to resolve locally or see mypy output hints to resolve pacakge-related errors).
+[tool.mypy]
+disallow_untyped_defs = true # Enforces function annotation
+warn_unused_ignores = true  # Warns against using 'type: ignore' for packages that have type stubs available.
+exclude = [
+    "YOUR-PROJECT-NAME-\\d+", # Ignores temporary folder created by setuptools when building the sdist
+    "venv.*/", # Ignores virtual environments
+    "build/", # Ignores the sdist folder
+    "dist/", # Ignores the wheel folder
+    "docs/", # Ignores the sphinx files stored inside the docs folder
+    "stubs/", # Ignores stubs folder (stubgen output target)
+    "recipe/", # Ignores recipe folder (grayskull output target)
+    "tests/", # Ignores the tests folder, as tests frequently (and purposefully) violate typing to test exceptions.
+]
+
+# This is used by the '-test' tox command to aggreagte coverage data produced during pytest runtime.
+[tool.coverage.paths]
+
+# Maps coverage measured in site-packages to source files in src
+source = ["src/", ".tox/*/lib/python*/site-packages/"]
+
+# Same as above, specifies the output directory for the coverage .html report
+[tool.coverage.html]
+directory = "reports/coverage_html"
