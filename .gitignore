@@ -1,3 +1,4 @@
+
 # This version of gitignore is designed to work for python projects using C++ computational core. It has been
 # configured, it to exclude certain jetbrains files, but additional configuration may be needed for contributors
 # seeking to use VSCode or other IDE / code editor.
@@ -209,3 +210,4 @@ cython_debug/
 /.pypirc
 
 # Project: Add any project-specific exclusions here
+/temp
