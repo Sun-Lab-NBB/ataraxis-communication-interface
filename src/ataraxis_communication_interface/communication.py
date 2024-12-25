@@ -9,7 +9,7 @@ Additionally, this module exposes message and helper structures used to serializ
 
 from enum import IntEnum
 from queue import Queue
-from typing import Any
+from typing import Any, Dict, Union
 from dataclasses import field, dataclass
 from collections.abc import Callable
 from multiprocessing import Queue as MPQueue
@@ -21,8 +21,7 @@ import paho.mqtt.client as mqtt
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import LogPackage
 from ataraxis_time.time_helpers import get_timestamp
-
-from .transport_layer import SerialTransportLayer
+from ataraxis_transport_layer_pc import TransportLayer
 
 
 class SerialProtocols(IntEnum):
@@ -30,8 +29,8 @@ class SerialProtocols(IntEnum):
 
     Each sent and received message starts with the specific protocol code from this enumeration that instructs the
     receiver on how to process the rest of the data payload. The codes available through this class have to match the
-    contents of the kProtocols Enumeration available from the AtaraxisMicroController library
-    (communication_assets namespace).
+    contents of the kProtocols Enumeration available from the ataraxis-micro-controller library
+    (axmc_communication_assets namespace).
 
     Notes:
         The values available through this enumeration should be read through their 'as_uint8' property to enforce the
@@ -82,10 +81,17 @@ class SerialProtocols(IntEnum):
     this service protocol to acknowledge message reception. Currently, this protocol is only intended for testing 
     purposes, as at this time the Communication class does not explicitly ensure message delivery."""
 
-    IDENTIFICATION = 12
+    CONTROLLER_IDENTIFICATION = 12
     """Protocol used to identify the controller connected to a particular USB port. This service protocol is used by 
-    the controller that receives the 'Identify' Kernel-addressed command and replies with it's ID code. This protocol 
-    is automatically used by the Communication class during initialization and should not be used manually."""
+    the controller that receives the 'IdentifyController' Kernel-addressed command and replies with it's ID code. 
+    This protocol is automatically used by the MicrocontrollerInterface class during initialization and should not be 
+    used manually."""
+
+    MODULE_IDENTIFICATION = 13
+    """Protocol used to identify all hardware module instances managed by the connected microcontroller. This service 
+    protocol is used by the controller that receives the 'IdentifyModules' Kernel-addressed command and sequentially 
+    transmits the combined type_id uint16 code for each managed module instance. This protocol is automatically used
+    by the MicrocontrollerInterface class during initialization and should not be used manually."""
 
     def as_uint8(self) -> np.uint8:
         """Convert the enum value to numpy.uint8 type.
@@ -96,14 +102,232 @@ class SerialProtocols(IntEnum):
         return np.uint8(self.value)
 
 
-# Defines prototype factories used by the SerialPrototypes enumeration (below) to return prototype objects.
-_PROTOTYPE_FACTORIES: dict[int, Callable[[], NDArray[np.uint8] | np.uint8 | np.uint16 | np.uint32]] = {
-    1: lambda: np.uint8(0),
-    2: lambda: np.zeros(shape=2, dtype=np.uint8),
-    3: lambda: np.zeros(shape=3, dtype=np.uint8),
-    4: lambda: np.zeros(shape=4, dtype=np.uint8),
-    5: lambda: np.uint32(0),
-    6: lambda: np.uint16(0),
+# Type alias for supported numpy types
+NumericType = Union[
+    np.bool_, np.uint8, np.int8, np.uint16, np.int16, np.uint32, np.int32, np.uint64, np.int64, np.float32, np.float64
+]
+PrototypeType = Union[
+    NumericType,
+    NDArray[np.bool_],
+    NDArray[np.uint8],
+    NDArray[np.int8],
+    NDArray[np.uint16],
+    NDArray[np.int16],
+    NDArray[np.uint32],
+    NDArray[np.int32],
+    NDArray[np.uint64],
+    NDArray[np.int64],
+    NDArray[np.float32],
+    NDArray[np.float64],
+]
+
+
+# Defines prototype factories for all supported types
+_PROTOTYPE_FACTORIES: Dict[int, Callable[[], PrototypeType]] = {
+    # 1 byte total
+    1: lambda: np.bool_(0),  # kOneBool
+    2: lambda: np.uint8(0),  # kOneUint8
+    3: lambda: np.int8(0),  # kOneInt8
+    # 2 bytes total
+    4: lambda: np.zeros(2, dtype=np.bool_),  # kTwoBools
+    5: lambda: np.zeros(2, dtype=np.uint8),  # kTwoUint8s
+    6: lambda: np.zeros(2, dtype=np.int8),  # kTwoInt8s
+    7: lambda: np.uint16(0),  # kOneUint16
+    8: lambda: np.int16(0),  # kOneInt16
+    # 3 bytes total
+    9: lambda: np.zeros(3, dtype=np.bool_),  # kThreeBools
+    10: lambda: np.zeros(3, dtype=np.uint8),  # kThreeUint8s
+    11: lambda: np.zeros(3, dtype=np.int8),  # kThreeInt8s
+    # 4 bytes total
+    12: lambda: np.zeros(4, dtype=np.bool_),  # kFourBools
+    13: lambda: np.zeros(4, dtype=np.uint8),  # kFourUint8s
+    14: lambda: np.zeros(4, dtype=np.int8),  # kFourInt8s
+    15: lambda: np.zeros(2, dtype=np.uint16),  # kTwoUint16s
+    16: lambda: np.zeros(2, dtype=np.int16),  # kTwoInt16s
+    17: lambda: np.uint32(0),  # kOneUint32
+    18: lambda: np.int32(0),  # kOneInt32
+    19: lambda: np.float32(0),  # kOneFloat32
+    # 5 bytes total
+    20: lambda: np.zeros(5, dtype=np.bool_),  # kFiveBools
+    21: lambda: np.zeros(5, dtype=np.uint8),  # kFiveUint8s
+    22: lambda: np.zeros(5, dtype=np.int8),  # kFiveInt8s
+    # 6 bytes total
+    23: lambda: np.zeros(6, dtype=np.bool_),  # kSixBools
+    24: lambda: np.zeros(6, dtype=np.uint8),  # kSixUint8s
+    25: lambda: np.zeros(6, dtype=np.int8),  # kSixInt8s
+    26: lambda: np.zeros(3, dtype=np.uint16),  # kThreeUint16s
+    27: lambda: np.zeros(3, dtype=np.int16),  # kThreeInt16s
+    # 7 bytes total
+    28: lambda: np.zeros(7, dtype=np.bool_),  # kSevenBools
+    29: lambda: np.zeros(7, dtype=np.uint8),  # kSevenUint8s
+    30: lambda: np.zeros(7, dtype=np.int8),  # kSevenInt8s
+    # 8 bytes total
+    31: lambda: np.zeros(8, dtype=np.bool_),  # kEightBools
+    32: lambda: np.zeros(8, dtype=np.uint8),  # kEightUint8s
+    33: lambda: np.zeros(8, dtype=np.int8),  # kEightInt8s
+    34: lambda: np.zeros(4, dtype=np.uint16),  # kFourUint16s
+    35: lambda: np.zeros(4, dtype=np.int16),  # kFourInt16s
+    36: lambda: np.zeros(2, dtype=np.uint32),  # kTwoUint32s
+    37: lambda: np.zeros(2, dtype=np.int32),  # kTwoInt32s
+    38: lambda: np.zeros(2, dtype=np.float32),  # kTwoFloat32s
+    39: lambda: np.uint64(0),  # kOneUint64
+    40: lambda: np.int64(0),  # kOneInt64
+    41: lambda: np.float64(0),  # kOneFloat64
+    # 9 bytes total
+    42: lambda: np.zeros(9, dtype=np.bool_),  # kNineBools
+    43: lambda: np.zeros(9, dtype=np.uint8),  # kNineUint8s
+    44: lambda: np.zeros(9, dtype=np.int8),  # kNineInt8s
+    # 10 bytes total
+    45: lambda: np.zeros(10, dtype=np.bool_),  # kTenBools
+    46: lambda: np.zeros(10, dtype=np.uint8),  # kTenUint8s
+    47: lambda: np.zeros(10, dtype=np.int8),  # kTenInt8s
+    48: lambda: np.zeros(5, dtype=np.uint16),  # kFiveUint16s
+    49: lambda: np.zeros(5, dtype=np.int16),  # kFiveInt16s
+    # 11 bytes total
+    50: lambda: np.zeros(11, dtype=np.bool_),  # kElevenBools
+    51: lambda: np.zeros(11, dtype=np.uint8),  # kElevenUint8s
+    52: lambda: np.zeros(11, dtype=np.int8),  # kElevenInt8s
+    # 12 bytes total
+    53: lambda: np.zeros(12, dtype=np.bool_),  # kTwelveBools
+    54: lambda: np.zeros(12, dtype=np.uint8),  # kTwelveUint8s
+    55: lambda: np.zeros(12, dtype=np.int8),  # kTwelveInt8s
+    56: lambda: np.zeros(6, dtype=np.uint16),  # kSixUint16s
+    57: lambda: np.zeros(6, dtype=np.int16),  # kSixInt16s
+    58: lambda: np.zeros(3, dtype=np.uint32),  # kThreeUint32s
+    59: lambda: np.zeros(3, dtype=np.int32),  # kThreeInt32s
+    60: lambda: np.zeros(3, dtype=np.float32),  # kThreeFloat32s
+    # 13 bytes total
+    61: lambda: np.zeros(13, dtype=np.bool_),  # kThirteenBools
+    62: lambda: np.zeros(13, dtype=np.uint8),  # kThirteenUint8s
+    63: lambda: np.zeros(13, dtype=np.int8),  # kThirteenInt8s
+    # 14 bytes total
+    64: lambda: np.zeros(14, dtype=np.bool_),  # kFourteenBools
+    65: lambda: np.zeros(14, dtype=np.uint8),  # kFourteenUint8s
+    66: lambda: np.zeros(14, dtype=np.int8),  # kFourteenInt8s
+    67: lambda: np.zeros(7, dtype=np.uint16),  # kSevenUint16s
+    68: lambda: np.zeros(7, dtype=np.int16),  # kSevenInt16s
+    # 15 bytes total
+    69: lambda: np.zeros(15, dtype=np.bool_),  # kFifteenBools
+    70: lambda: np.zeros(15, dtype=np.uint8),  # kFifteenUint8s
+    71: lambda: np.zeros(15, dtype=np.int8),  # kFifteenInt8s
+    # 16 bytes total
+    72: lambda: np.zeros(8, dtype=np.uint16),  # kEightUint16s
+    73: lambda: np.zeros(8, dtype=np.int16),  # kEightInt16s
+    74: lambda: np.zeros(4, dtype=np.uint32),  # kFourUint32s
+    75: lambda: np.zeros(4, dtype=np.int32),  # kFourInt32s
+    76: lambda: np.zeros(4, dtype=np.float32),  # kFourFloat32s
+    77: lambda: np.zeros(2, dtype=np.uint64),  # kTwoUint64s
+    78: lambda: np.zeros(2, dtype=np.int64),  # kTwoInt64s
+    79: lambda: np.zeros(2, dtype=np.float64),  # kTwoFloat64s
+    # 18 bytes total
+    80: lambda: np.zeros(9, dtype=np.uint16),  # kNineUint16s
+    81: lambda: np.zeros(9, dtype=np.int16),  # kNineInt16s
+    # 20 bytes total
+    82: lambda: np.zeros(10, dtype=np.uint16),  # kTenUint16s
+    83: lambda: np.zeros(10, dtype=np.int16),  # kTenInt16s
+    84: lambda: np.zeros(5, dtype=np.uint32),  # kFiveUint32s
+    85: lambda: np.zeros(5, dtype=np.int32),  # kFiveInt32s
+    86: lambda: np.zeros(5, dtype=np.float32),  # kFiveFloat32s
+    # 22 bytes total
+    87: lambda: np.zeros(11, dtype=np.uint16),  # kElevenUint16s
+    88: lambda: np.zeros(11, dtype=np.int16),  # kElevenInt16s
+    # 24 bytes total
+    89: lambda: np.zeros(12, dtype=np.uint16),  # kTwelveUint16s
+    90: lambda: np.zeros(12, dtype=np.int16),  # kTwelveInt16s
+    91: lambda: np.zeros(6, dtype=np.uint32),  # kSixUint32s
+    92: lambda: np.zeros(6, dtype=np.int32),  # kSixInt32s
+    93: lambda: np.zeros(6, dtype=np.float32),  # kSixFloat32s
+    94: lambda: np.zeros(3, dtype=np.uint64),  # kThreeUint64s
+    95: lambda: np.zeros(3, dtype=np.int64),  # kThreeInt64s
+    96: lambda: np.zeros(3, dtype=np.float64),  # kThreeFloat64s
+    # 26 bytes total
+    97: lambda: np.zeros(13, dtype=np.uint16),  # kThirteenUint16s
+    98: lambda: np.zeros(13, dtype=np.int16),  # kThirteenInt16s
+    # 28 bytes total
+    99: lambda: np.zeros(14, dtype=np.uint16),  # kFourteenUint16s
+    100: lambda: np.zeros(14, dtype=np.int16),  # kFourteenInt16s
+    101: lambda: np.zeros(7, dtype=np.uint32),  # kSevenUint32s
+    102: lambda: np.zeros(7, dtype=np.int32),  # kSevenInt32s
+    103: lambda: np.zeros(7, dtype=np.float32),  # kSevenFloat32s
+    # 30 bytes total
+    104: lambda: np.zeros(15, dtype=np.uint16),  # kFifteenUint16s
+    105: lambda: np.zeros(15, dtype=np.int16),  # kFifteenInt16s
+    # 32 bytes total
+    106: lambda: np.zeros(8, dtype=np.uint32),  # kEightUint32s
+    107: lambda: np.zeros(8, dtype=np.int32),  # kEightInt32s
+    108: lambda: np.zeros(8, dtype=np.float32),  # kEightFloat32s
+    109: lambda: np.zeros(4, dtype=np.uint64),  # kFourUint64s
+    110: lambda: np.zeros(4, dtype=np.int64),  # kFourInt64s
+    111: lambda: np.zeros(4, dtype=np.float64),  # kFourFloat64s
+    # 36 bytes total
+    112: lambda: np.zeros(9, dtype=np.uint32),  # kNineUint32s
+    113: lambda: np.zeros(9, dtype=np.int32),  # kNineInt32s
+    114: lambda: np.zeros(9, dtype=np.float32),  # kNineFloat32s
+    # 40 bytes total
+    115: lambda: np.zeros(10, dtype=np.uint32),  # kTenUint32s
+    116: lambda: np.zeros(10, dtype=np.int32),  # kTenInt32s
+    117: lambda: np.zeros(10, dtype=np.float32),  # kTenFloat32s
+    118: lambda: np.zeros(5, dtype=np.uint64),  # kFiveUint64s
+    119: lambda: np.zeros(5, dtype=np.int64),  # kFiveInt64s
+    120: lambda: np.zeros(5, dtype=np.float64),  # kFiveFloat64s
+    # 44 bytes total
+    121: lambda: np.zeros(11, dtype=np.uint32),  # kElevenUint32s
+    122: lambda: np.zeros(11, dtype=np.int32),  # kElevenInt32s
+    123: lambda: np.zeros(11, dtype=np.float32),  # kElevenFloat32s
+    # 48 bytes total
+    124: lambda: np.zeros(12, dtype=np.uint32),  # kTwelveUint32s
+    125: lambda: np.zeros(12, dtype=np.int32),  # kTwelveInt32s
+    126: lambda: np.zeros(12, dtype=np.float32),  # kTwelveFloat32s
+    127: lambda: np.zeros(6, dtype=np.uint64),  # kSixUint64s
+    128: lambda: np.zeros(6, dtype=np.int64),  # kSixInt64s
+    129: lambda: np.zeros(6, dtype=np.float64),  # kSixFloat64s
+    # 52 bytes total
+    130: lambda: np.zeros(13, dtype=np.uint32),  # kThirteenUint32s
+    131: lambda: np.zeros(13, dtype=np.int32),  # kThirteenInt32s
+    132: lambda: np.zeros(13, dtype=np.float32),  # kThirteenFloat32s
+    # 56 bytes total
+    133: lambda: np.zeros(14, dtype=np.uint32),  # kFourteenUint32s
+    134: lambda: np.zeros(14, dtype=np.int32),  # kFourteenInt32s
+    135: lambda: np.zeros(14, dtype=np.float32),  # kFourteenFloat32s
+    136: lambda: np.zeros(7, dtype=np.uint64),  # kSevenUint64s
+    137: lambda: np.zeros(7, dtype=np.int64),  # kSevenInt64s
+    138: lambda: np.zeros(7, dtype=np.float64),  # kSevenFloat64s
+    # 60 bytes total
+    139: lambda: np.zeros(15, dtype=np.uint32),  # kFifteenUint32s
+    140: lambda: np.zeros(15, dtype=np.int32),  # kFifteenInt32s
+    141: lambda: np.zeros(15, dtype=np.float32),  # kFifteenFloat32s
+    # 64 bytes total
+    142: lambda: np.zeros(8, dtype=np.uint64),  # kEightUint64s
+    143: lambda: np.zeros(8, dtype=np.int64),  # kEightInt64s
+    144: lambda: np.zeros(8, dtype=np.float64),  # kEightFloat64s
+    # 72 bytes total
+    145: lambda: np.zeros(9, dtype=np.uint64),  # kNineUint64s
+    146: lambda: np.zeros(9, dtype=np.int64),  # kNineInt64s
+    147: lambda: np.zeros(9, dtype=np.float64),  # kNineFloat64s
+    # 80 bytes total
+    148: lambda: np.zeros(10, dtype=np.uint64),  # kTenUint64s
+    149: lambda: np.zeros(10, dtype=np.int64),  # kTenInt64s
+    150: lambda: np.zeros(10, dtype=np.float64),  # kTenFloat64s
+    # 88 bytes total
+    151: lambda: np.zeros(11, dtype=np.uint64),  # kElevenUint64s
+    152: lambda: np.zeros(11, dtype=np.int64),  # kElevenInt64s
+    153: lambda: np.zeros(11, dtype=np.float64),  # kElevenFloat64s
+    # 96 bytes total
+    154: lambda: np.zeros(12, dtype=np.uint64),  # kTwelveUint64s
+    155: lambda: np.zeros(12, dtype=np.int64),  # kTwelveInt64s
+    156: lambda: np.zeros(12, dtype=np.float64),  # kTwelveFloat64s
+    # 104 bytes total
+    157: lambda: np.zeros(13, dtype=np.uint64),  # kThirteenUint64s
+    158: lambda: np.zeros(13, dtype=np.int64),  # kThirteenInt64s
+    159: lambda: np.zeros(13, dtype=np.float64),  # kThirteenFloat64s
+    # 112 bytes total
+    160: lambda: np.zeros(14, dtype=np.uint64),  # kFourteenUint64s
+    161: lambda: np.zeros(14, dtype=np.int64),  # kFourteenInt64s
+    162: lambda: np.zeros(14, dtype=np.float64),  # kFourteenFloat64s
+    # 120 bytes total
+    163: lambda: np.zeros(15, dtype=np.uint64),  # kFifteenUint64s
+    164: lambda: np.zeros(15, dtype=np.int64),  # kFifteenInt64s
+    165: lambda: np.zeros(15, dtype=np.float64),  # kFifteenFloat64s
 }
 
 
@@ -120,23 +344,413 @@ class SerialPrototypes(IntEnum):
         value), this number should be enough to support many unique runtime configurations.
     """
 
-    ONE_UNSIGNED_BYTE = 1
-    """The prototype code for a single uint8_t value."""
+    # 1 byte total
+    ONE_BOOL = 1
+    """1 8-bit boolean"""
+    ONE_UINT8 = 2
+    """1 unsigned 8-bit integer"""
+    ONE_INT8 = 3
+    """1 signed 8-bit integer"""
 
-    TWO_UNSIGNED_BYTES = 2
-    """The prototype code for an array of two uint8_t values."""
+    # 2 bytes total
+    TWO_BOOLS = 4
+    """An array of 2 8-bit booleans"""
+    TWO_UINT8S = 5
+    """An array of 2 unsigned 8-bit integers"""
+    TWO_INT8S = 6
+    """An array of 2 signed 8-bit integers"""
+    ONE_UINT16 = 7
+    """1 unsigned 16-bit integer"""
+    ONE_INT16 = 8
+    """1 signed 16-bit integer"""
 
-    THREE_UNSIGNED_BYTES = 3
-    """The prototype code for an array of three uint8_t values."""
+    # 3 bytes total
+    THREE_BOOLS = 9
+    """An array of 3 8-bit booleans"""
+    THREE_UINT8S = 10
+    """An array of 3 unsigned 8-bit integers"""
+    THREE_INT8S = 11
+    """An array of 3 signed 8-bit integers"""
 
-    FOUR_UNSIGNED_BYTES = 4
-    """The prototype code for an array of four uint8_t values."""
+    # 4 bytes total
+    FOUR_BOOLS = 12
+    """An array of 4 8-bit booleans"""
+    FOUR_UINT8S = 13
+    """An array of 4 unsigned 8-bit integers"""
+    FOUR_INT8S = 14
+    """An array of 4 signed 8-bit integers"""
+    TWO_UINT16S = 15
+    """An array of 2 unsigned 16-bit integers"""
+    TWO_INT16S = 16
+    """An array of 2 signed 16-bit integers"""
+    ONE_UINT32 = 17
+    """1 unsigned 32-bit integer"""
+    ONE_INT32 = 18
+    """1 signed 32-bit integer"""
+    ONE_FLOAT32 = 19
+    """1 single-precision 32-bit floating-point number"""
 
-    ONE_UNSIGNED_LONG = 5
-    """The prototype code for a single uint32_t value."""
+    # 5 bytes total
+    FIVE_BOOLS = 20
+    """An array of 5 8-bit booleans"""
+    FIVE_UINT8S = 21
+    """An array of 5 unsigned 8-bit integers"""
+    FIVE_INT8S = 22
+    """An array of 5 signed 8-bit integers"""
 
-    ONE_UNSIGNED_SHORT = 6
-    """The prototype code for a single uint16_t value."""
+    # 6 bytes total
+    SIX_BOOLS = 23
+    """An array of 6 8-bit booleans"""
+    SIX_UINT8S = 24
+    """An array of 6 unsigned 8-bit integers"""
+    SIX_INT8S = 25
+    """An array of 6 signed 8-bit integers"""
+    THREE_UINT16S = 26
+    """An array of 3 unsigned 16-bit integers"""
+    THREE_INT16S = 27
+    """An array of 3 signed 16-bit integers"""
+
+    # 7 bytes total
+    SEVEN_BOOLS = 28
+    """An array of 7 8-bit booleans"""
+    SEVEN_UINT8S = 29
+    """An array of 7 unsigned 8-bit integers"""
+    SEVEN_INT8S = 30
+    """An array of 7 signed 8-bit integers"""
+
+    # 8 bytes total
+    EIGHT_BOOLS = 31
+    """An array of 8 8-bit booleans"""
+    EIGHT_UINT8S = 32
+    """An array of 8 unsigned 8-bit integers"""
+    EIGHT_INT8S = 33
+    """An array of 8 signed 8-bit integers"""
+    FOUR_UINT16S = 34
+    """An array of 4 unsigned 16-bit integers"""
+    FOUR_INT16S = 35
+    """An array of 4 signed 16-bit integers"""
+    TWO_UINT32S = 36
+    """An array of 2 unsigned 32-bit integers"""
+    TWO_INT32S = 37
+    """An array of 2 signed 32-bit integers"""
+    TWO_FLOAT32S = 38
+    """An array of 2 single-precision 32-bit floating-point numbers"""
+    ONE_UINT64 = 39
+    """1 unsigned 64-bit integer"""
+    ONE_INT64 = 40
+    """1 signed 64-bit integer"""
+    ONE_FLOAT64 = 41
+    """1 double-precision 64-bit floating-point number"""
+
+    # 9 bytes total
+    NINE_BOOLS = 42
+    """An array of 9 8-bit booleans"""
+    NINE_UINT8S = 43
+    """An array of 9 unsigned 8-bit integers"""
+    NINE_INT8S = 44
+    """An array of 9 signed 8-bit integers"""
+
+    # 10 bytes total
+    TEN_BOOLS = 45
+    """An array of 10 8-bit booleans"""
+    TEN_UINT8S = 46
+    """An array of 10 unsigned 8-bit integers"""
+    TEN_INT8S = 47
+    """An array of 10 signed 8-bit integers"""
+    FIVE_UINT16S = 48
+    """An array of 5 unsigned 16-bit integers"""
+    FIVE_INT16S = 49
+    """An array of 5 signed 16-bit integers"""
+
+    # 11 bytes total
+    ELEVEN_BOOLS = 50
+    """An array of 11 8-bit booleans"""
+    ELEVEN_UINT8S = 51
+    """An array of 11 unsigned 8-bit integers"""
+    ELEVEN_INT8S = 52
+    """An array of 11 signed 8-bit integers"""
+
+    # 12 bytes total
+    TWELVE_BOOLS = 53
+    """An array of 12 8-bit booleans"""
+    TWELVE_UINT8S = 54
+    """An array of 12 unsigned 8-bit integers"""
+    TWELVE_INT8S = 55
+    """An array of 12 signed 8-bit integers"""
+    SIX_UINT16S = 56
+    """An array of 6 unsigned 16-bit integers"""
+    SIX_INT16S = 57
+    """An array of 6 signed 16-bit integers"""
+    THREE_UINT32S = 58
+    """An array of 3 unsigned 32-bit integers"""
+    THREE_INT32S = 59
+    """An array of 3 signed 32-bit integers"""
+    THREE_FLOAT32S = 60
+    """An array of 3 single-precision 32-bit floating-point numbers"""
+
+    # 13 bytes total
+    THIRTEEN_BOOLS = 61
+    """An array of 13 8-bit booleans"""
+    THIRTEEN_UINT8S = 62
+    """An array of 13 unsigned 8-bit integers"""
+    THIRTEEN_INT8S = 63
+    """An array of 13 signed 8-bit integers"""
+
+    # 14 bytes total
+    FOURTEEN_BOOLS = 64
+    """An array of 14 8-bit booleans"""
+    FOURTEEN_UINT8S = 65
+    """An array of 14 unsigned 8-bit integers"""
+    FOURTEEN_INT8S = 66
+    """An array of 14 signed 8-bit integers"""
+    SEVEN_UINT16S = 67
+    """An array of 7 unsigned 16-bit integers"""
+    SEVEN_INT16S = 68
+    """An array of 7 signed 16-bit integers"""
+
+    # 15 bytes total
+    FIFTEEN_BOOLS = 69
+    """An array of 15 8-bit booleans"""
+    FIFTEEN_UINT8S = 70
+    """An array of 15 unsigned 8-bit integers"""
+    FIFTEEN_INT8S = 71
+    """An array of 15 signed 8-bit integers"""
+
+    # 16 bytes total
+    EIGHT_UINT16S = 72
+    """An array of 8 unsigned 16-bit integers"""
+    EIGHT_INT16S = 73
+    """An array of 8 signed 16-bit integers"""
+    FOUR_UINT32S = 74
+    """An array of 4 unsigned 32-bit integers"""
+    FOUR_INT32S = 75
+    """An array of 4 signed 32-bit integers"""
+    FOUR_FLOAT32S = 76
+    """An array of 4 single-precision 32-bit floating-point numbers"""
+    TWO_UINT64S = 77
+    """An array of 2 unsigned 64-bit integers"""
+    TWO_INT64S = 78
+    """An array of 2 signed 64-bit integers"""
+    TWO_FLOAT64S = 79
+    """An array of 2 double-precision 64-bit floating-point numbers"""
+
+    # 18 bytes total
+    NINE_UINT16S = 80
+    """An array of 9 unsigned 16-bit integers"""
+    NINE_INT16S = 81
+    """An array of 9 signed 16-bit integers"""
+
+    # 20 bytes total
+    TEN_UINT16S = 82
+    """An array of 10 unsigned 16-bit integers"""
+    TEN_INT16S = 83
+    """An array of 10 signed 16-bit integers"""
+    FIVE_UINT32S = 84
+    """An array of 5 unsigned 32-bit integers"""
+    FIVE_INT32S = 85
+    """An array of 5 signed 32-bit integers"""
+    FIVE_FLOAT32S = 86
+    """An array of 5 single-precision 32-bit floating-point numbers"""
+
+    # 22 bytes total
+    ELEVEN_UINT16S = 87
+    """An array of 11 unsigned 16-bit integers"""
+    ELEVEN_INT16S = 88
+    """An array of 11 signed 16-bit integers"""
+
+    # 24 bytes total
+    TWELVE_UINT16S = 89
+    """An array of 12 unsigned 16-bit integers"""
+    TWELVE_INT16S = 90
+    """An array of 12 signed 16-bit integers"""
+    SIX_UINT32S = 91
+    """An array of 6 unsigned 32-bit integers"""
+    SIX_INT32S = 92
+    """An array of 6 signed 32-bit integers"""
+    SIX_FLOAT32S = 93
+    """An array of 6 single-precision 32-bit floating-point numbers"""
+    THREE_UINT64S = 94
+    """An array of 3 unsigned 64-bit integers"""
+    THREE_INT64S = 95
+    """An array of 3 signed 64-bit integers"""
+    THREE_FLOAT64S = 96
+    """An array of 3 double-precision 64-bit floating-point numbers"""
+
+    # 26 bytes total
+    THIRTEEN_UINT16S = 97
+    """An array of 13 unsigned 16-bit integers"""
+    THIRTEEN_INT16S = 98
+    """An array of 13 signed 16-bit integers"""
+
+    # 28 bytes total
+    FOURTEEN_UINT16S = 99
+    """An array of 14 unsigned 16-bit integers"""
+    FOURTEEN_INT16S = 100
+    """An array of 14 signed 16-bit integers"""
+    SEVEN_UINT32S = 101
+    """An array of 7 unsigned 32-bit integers"""
+    SEVEN_INT32S = 102
+    """An array of 7 signed 32-bit integers"""
+    SEVEN_FLOAT32S = 103
+    """An array of 7 single-precision 32-bit floating-point numbers"""
+
+    # 30 bytes total
+    FIFTEEN_UINT16S = 104
+    """An array of 15 unsigned 16-bit integers"""
+    FIFTEEN_INT16S = 105
+    """An array of 15 signed 16-bit integers"""
+
+    # 32 bytes total
+    EIGHT_UINT32S = 106
+    """An array of 8 unsigned 32-bit integers"""
+    EIGHT_INT32S = 107
+    """An array of 8 signed 32-bit integers"""
+    EIGHT_FLOAT32S = 108
+    """An array of 8 single-precision 32-bit floating-point numbers"""
+    FOUR_UINT64S = 109
+    """An array of 4 unsigned 64-bit integers"""
+    FOUR_INT64S = 110
+    """An array of 4 signed 64-bit integers"""
+    FOUR_FLOAT64S = 111
+    """An array of 4 double-precision 64-bit floating-point numbers"""
+
+    # 36 bytes total
+    NINE_UINT32S = 112
+    """An array of 9 unsigned 32-bit integers"""
+    NINE_INT32S = 113
+    """An array of 9 signed 32-bit integers"""
+    NINE_FLOAT32S = 114
+    """An array of 9 single-precision 32-bit floating-point numbers"""
+
+    # 40 bytes total
+    TEN_UINT32S = 115
+    """An array of 10 unsigned 32-bit integers"""
+    TEN_INT32S = 116
+    """An array of 10 signed 32-bit integers"""
+    TEN_FLOAT32S = 117
+    """An array of 10 single-precision 32-bit floating-point numbers"""
+    FIVE_UINT64S = 118
+    """An array of 5 unsigned 64-bit integers"""
+    FIVE_INT64S = 119
+    """An array of 5 signed 64-bit integers"""
+    FIVE_FLOAT64S = 120
+    """An array of 5 double-precision 64-bit floating-point numbers"""
+
+    # 44 bytes total
+    ELEVEN_UINT32S = 121
+    """An array of 11 unsigned 32-bit integers"""
+    ELEVEN_INT32S = 122
+    """An array of 11 signed 32-bit integers"""
+    ELEVEN_FLOAT32S = 123
+    """An array of 11 single-precision 32-bit floating-point numbers"""
+
+    # 48 bytes total
+    TWELVE_UINT32S = 124
+    """An array of 12 unsigned 32-bit integers"""
+    TWELVE_INT32S = 125
+    """An array of 12 signed 32-bit integers"""
+    TWELVE_FLOAT32S = 126
+    """An array of 12 single-precision 32-bit floating-point numbers"""
+    SIX_UINT64S = 127
+    """An array of 6 unsigned 64-bit integers"""
+    SIX_INT64S = 128
+    """An array of 6 signed 64-bit integers"""
+    SIX_FLOAT64S = 129
+    """An array of 6 double-precision 64-bit floating-point numbers"""
+
+    # 52 bytes total
+    THIRTEEN_UINT32S = 130
+    """An array of 13 unsigned 32-bit integers"""
+    THIRTEEN_INT32S = 131
+    """An array of 13 signed 32-bit integers"""
+    THIRTEEN_FLOAT32S = 132
+    """An array of 13 single-precision 32-bit floating-point numbers"""
+
+    # 56 bytes total
+    FOURTEEN_UINT32S = 133
+    """An array of 14 unsigned 32-bit integers"""
+    FOURTEEN_INT32S = 134
+    """An array of 14 signed 32-bit integers"""
+    FOURTEEN_FLOAT32S = 135
+    """An array of 14 single-precision 32-bit floating-point numbers"""
+    SEVEN_UINT64S = 136
+    """An array of 7 unsigned 64-bit integers"""
+    SEVEN_INT64S = 137
+    """An array of 7 signed 64-bit integers"""
+    SEVEN_FLOAT64S = 138
+    """An array of 7 double-precision 64-bit floating-point numbers"""
+
+    # 60 bytes total
+    FIFTEEN_UINT32S = 139
+    """An array of 15 unsigned 32-bit integers"""
+    FIFTEEN_INT32S = 140
+    """An array of 15 signed 32-bit integers"""
+    FIFTEEN_FLOAT32S = 141
+    """An array of 15 single-precision 32-bit floating-point numbers"""
+
+    # 64 bytes total
+    EIGHT_UINT64S = 142
+    """An array of 8 unsigned 64-bit integers"""
+    EIGHT_INT64S = 143
+    """An array of 8 signed 64-bit integers"""
+    EIGHT_FLOAT64S = 144
+    """An array of 8 double-precision 64-bit floating-point numbers"""
+
+    # 72 bytes total
+    NINE_UINT64S = 145
+    """An array of 9 unsigned 64-bit integers"""
+    NINE_INT64S = 146
+    """An array of 9 signed 64-bit integers"""
+    NINE_FLOAT64S = 147
+    """An array of 9 double-precision 64-bit floating-point numbers"""
+
+    # 80 bytes total
+    TEN_UINT64S = 148
+    """An array of 10 unsigned 64-bit integers"""
+    TEN_INT64S = 149
+    """An array of 10 signed 64-bit integers"""
+    TEN_FLOAT64S = 150
+    """An array of 10 double-precision 64-bit floating-point numbers"""
+
+    # 88 bytes total
+    ELEVEN_UINT64S = 151
+    """An array of 11 unsigned 64-bit integers"""
+    ELEVEN_INT64S = 152
+    """An array of 11 signed 64-bit integers"""
+    ELEVEN_FLOAT64S = 153
+    """An array of 11 double-precision 64-bit floating-point numbers"""
+
+    # 96 bytes total
+    TWELVE_UINT64S = 154
+    """An array of 12 unsigned 64-bit integers"""
+    TWELVE_INT64S = 155
+    """An array of 12 signed 64-bit integers"""
+    TWELVE_FLOAT64S = 156
+    """An array of 12 double-precision 64-bit floating-point numbers"""
+
+    # 104 bytes total
+    THIRTEEN_UINT64S = 157
+    """An array of 13 unsigned 64-bit integers"""
+    THIRTEEN_INT64S = 158
+    """An array of 13 signed 64-bit integers"""
+    THIRTEEN_FLOAT64S = 159
+    """An array of 13 double-precision 64-bit floating-point numbers"""
+
+    # 112 bytes total
+    FOURTEEN_UINT64S = 160
+    """An array of 14 unsigned 64-bit integers"""
+    FOURTEEN_INT64S = 161
+    """An array of 14 signed 64-bit integers"""
+    FOURTEEN_FLOAT64S = 162
+    """An array of 14 double-precision 64-bit floating-point numbers"""
+
+    # 120 bytes total
+    FIFTEEN_UINT64S = 163
+    """An array of 15 unsigned 64-bit integers"""
+    FIFTEEN_INT64S = 164
+    """An array of 15 signed 64-bit integers"""
+    FIFTEEN_FLOAT64S = 165
+    """An array of 15 double-precision 64-bit floating-point numbers"""
 
     def as_uint8(self) -> np.uint8:
         """Converts the enum value to numpy.uint8 type.
@@ -146,10 +760,10 @@ class SerialPrototypes(IntEnum):
         """
         return np.uint8(self.value)
 
-    def get_prototype(self) -> NDArray[np.uint8] | np.uint8 | np.uint16 | np.uint32:
+    def get_prototype(self) -> PrototypeType:
         """Returns the prototype object associated with this prototype enum value.
 
-        The prototype object returned by this method can be passed to the reading method of the SerialTransportLayer
+        The prototype object returned by this method can be passed to the reading method of the TransportLayer
         class to deserialize the received data object. This should be automatically done by the SerialCommunication
         class that uses this enum class.
 
@@ -159,10 +773,10 @@ class SerialPrototypes(IntEnum):
         return _PROTOTYPE_FACTORIES[self.value]()
 
     @classmethod
-    def get_prototype_for_code(cls, code: np.uint8) -> NDArray[np.uint8] | np.uint8 | np.uint16 | np.uint32 | None:
+    def get_prototype_for_code(cls, code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.
 
-        The prototype object returned by this method can be passed to the reading method of the SerialTransportLayer
+        The prototype object returned by this method can be passed to the reading method of the TransportLayer
         class to deserialize the received data object. This should be automatically done by the SerialCommunication
         class that uses this enum.
 
@@ -480,7 +1094,7 @@ class ModuleData:
         _transport_layer: Stores the reference to the TransportLayer class.
     """
 
-    def __init__(self, transport_layer: SerialTransportLayer) -> None:
+    def __init__(self, transport_layer: TransportLayer) -> None:
         # Initializes non-placeholder attributes.
         self.protocol_code: np.uint8 = SerialProtocols.MODULE_DATA.as_uint8()
 
@@ -564,7 +1178,7 @@ class KernelData:
         _transport_layer: Stores the reference to the TransportLayer class.
     """
 
-    def __init__(self, transport_layer: SerialTransportLayer) -> None:
+    def __init__(self, transport_layer: TransportLayer) -> None:
         # Initializes non-placeholder attributes.
         self.protocol_code: np.uint8 = SerialProtocols.KERNEL_DATA.as_uint8()
 
@@ -643,7 +1257,7 @@ class ModuleState:
         event: The code of the event that prompted sending the message.
     """
 
-    def __init__(self, transport_layer: SerialTransportLayer) -> None:
+    def __init__(self, transport_layer: TransportLayer) -> None:
         # Initializes non-placeholder attributes.
         self.protocol_code: np.uint8 = SerialProtocols.MODULE_STATE.as_uint8()
 
@@ -705,7 +1319,7 @@ class KernelState:
         event: The code of the event that prompted sending the message.
     """
 
-    def __init__(self, transport_layer: SerialTransportLayer) -> None:
+    def __init__(self, transport_layer: TransportLayer) -> None:
         # Initializes non-placeholder attributes.
         self.protocol_code: np.uint8 = SerialProtocols.KERNEL_STATE.as_uint8()
 
@@ -759,7 +1373,7 @@ class ReceptionCode:
         reception_code: The reception code originally sent as part of the outgoing Command or Parameters messages.
     """
 
-    def __init__(self, transport_layer: SerialTransportLayer) -> None:
+    def __init__(self, transport_layer: TransportLayer) -> None:
         # Initializes non-placeholder attributes.
         self.protocol_code: np.uint8 = SerialProtocols.RECEPTION_CODE.as_uint8()
 
@@ -794,7 +1408,7 @@ class ReceptionCode:
         return message
 
 
-class Identification:
+class ControllerIdentification:
     """Identifies the connected microcontroller by communicating its unique byte id-code.
 
     For the ID codes to be unique, they have to be manually assigned to the Kernel class of each concurrently
@@ -815,9 +1429,9 @@ class Identification:
 
     """
 
-    def __init__(self, transport_layer: SerialTransportLayer) -> None:
+    def __init__(self, transport_layer: TransportLayer) -> None:
         # Initializes non-placeholder attributes.
-        self.protocol_code: np.uint8 = SerialProtocols.IDENTIFICATION.as_uint8()
+        self.protocol_code: np.uint8 = SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8()
 
         # Initializes placeholder attributes. These fields are overwritten with data when update_message_data() method
         # is called.
@@ -845,16 +1459,73 @@ class Identification:
         self.controller_id = self.message[1]
 
     def __repr__(self) -> str:
-        """Returns a string representation of the Identification object."""
-        message = f"Identification(controller_id={self.controller_id})."
+        """Returns a string representation of the ControllerIdentification object."""
+        message = f"ControllerIdentification(controller_id={self.controller_id})."
+        return message
+
+
+class ModuleIdentification:
+    """Identifies a hardware module instance by communicating its combined type + id 16-bit code.
+
+    It is expected that each hardware module instance will have a unique combination of type (family) code and instance
+    (ID) code. The user assigns both type and ID codes at their discretion when writing the main .cpp file for each
+    microcontroller.
+
+    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its
+    lifetime to call update_message_data() method when necessary to parse valid incoming message data.
+
+    Args:
+        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
+            SerialCommunication class. This reference is used to read and parse the message data.
+
+    Attributes:
+        protocol_code: Stores the protocol code used by this type of messages.
+        message: Stores the serialized message payload.
+        module_type_id: The unique uint16 code that results from combining the type and ID codes of the module instance.
+
+    """
+
+    def __init__(self, transport_layer: TransportLayer) -> None:
+        # Initializes non-placeholder attributes.
+        self.protocol_code: np.uint8 = SerialProtocols.MODULE_IDENTIFICATION.as_uint8()
+
+        # Initializes placeholder attributes. These fields are overwritten with data when update_message_data() method
+        # is called.
+        self.message: NDArray[np.uint8] = np.empty(1, dtype=np.uint8)
+        self.module_type_id: np.uint16 = np.uint16(0)
+
+        # Saves transport_layer reference into an attribute.
+        self._transport_layer = transport_layer
+
+    def update_message_data(self) -> None:
+        """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
+        attributes.
+
+        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
+        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
+        and attempt to parse the data.
+        """
+        # First, uses the payload size to read the entire message into the _message field. The whole message is stored
+        # separately from parsed data to simplify data logging
+        payload_size = self._transport_layer.bytes_in_reception_buffer
+        # noinspection PyTypeChecker
+        self.message, _ = self._transport_layer.read_data(data_object=np.empty(payload_size, dtype=np.uint8))
+
+        # Parses the message data. Ignores the protocol code stored under index 0 and reads the 2-byte combined code
+        # value
+        self.module_type_id, _ = self._transport_layer.read_data(data_object=np.uint16(0), start_index=1)
+
+    def __repr__(self) -> str:
+        """Returns a string representation of the ModuleIdentification object."""
+        message = f"ModuleIdentification(module_type_id={self.module_type_id})."
         return message
 
 
 class SerialCommunication:
-    """Wraps a SerialTransportLayer class instance and exposes methods that allow communicating with a microcontroller
-    running AtaraxisMicroController firmware using the USB or UART protocol.
+    """Wraps a TransportLayer class instance and exposes methods that allow communicating with a microcontroller
+    running ataraxis-micro-controller library using the USB or UART protocol.
 
-    This class is built on top of the SerialTransportLayer, designed to provide the microcontroller communication
+    This class is built on top of the TransportLayer, designed to provide the microcontroller communication
     interface (API) for other Ataraxis libraries. This class is not designed to be instantiated directly and
     should instead be used through the MicroControllerInterface class available through this library!
 
@@ -869,20 +1540,20 @@ class SerialCommunication:
         The DataLogger is used to write all incoming and outgoing messages to disk as serialized message payloads.
 
     Args:
+        source_id: The ID code to identify the source of the logged messages. This is used by the DataLogger to
+            distinguish between log sources (classes that sent data to be logged) and, therefore, has to be unique for
+            all Ataraxis classes that use DataLogger and are active at the same time.
+        microcontroller_serial_buffer_size: The size, in bytes, of the buffer used by the target microcontroller's
+            Serial buffer. Usually, this information is available from the microcontroller's manufacturer
+            (UART / USB controller specification).
         usb_port: The name of the USB port to use for communication to, e.g.: 'COM3' or '/dev/ttyUSB0'. This has to be
             the port to which the target microcontroller is connected. Use the list_available_ports() function available
             from this library to get the list of discoverable serial port names.
         logger_queue: The multiprocessing Queue object exposed by the DataLogger class (via 'input_queue' property).
             This queue is used to buffer and pipe data to be logged to the logger cores.
-        source_id: The ID code to identify the source of the logged messages. This is used by the DataLogger to
-            distinguish between log sources (classes that sent data to be logged) and, therefore, has to be unique for
-            all Ataraxis classes that use DataLogger and are active at the same time.
         baudrate: The baudrate to use for the communication over the UART protocol. Should match the value used by
             the microcontrollers that only support UART protocol. This is ignored for microcontrollers that use the
             USB protocol.
-        maximum_transmitted_payload_size: The maximum size of the payload that will be sent to the microcontroller in
-            a single message. in bytes. This value has to match the expected maximum payload size of the target
-            microcontroller.
         verbose: Determines whether to print sent and received data messages to console. This is used during debugging
             and should be disabled during production runtimes. The class itself does NOT enable the console, so the
             console has to be enabled manually for this flag to have an effect.
@@ -895,7 +1566,8 @@ class SerialCommunication:
         _kernel_data: Received KernelData messages are unpacked into this structure.
         _module_state: Received ModuleState messages are unpacked into this structure.
         _kernel_state: Received KernelState messages are unpacked into this structure.
-        _identification: Received Identification messages are unpacked into this structure.
+        _controller_identification: Received ControllerIdentification messages are unpacked into this structure.
+        _module_identification: Received ModuleIdentification messages are unpacked into this structure.
         _reception_code: Received ReceptionCode messages are unpacked into this structure.
         _timestamp_timer: The PrecisionTimer instance used to stamp incoming and outgoing data as it is logged.
         _source_id: Stores the unique integer-code that identifies the class instance in data logs.
@@ -906,11 +1578,11 @@ class SerialCommunication:
 
     def __init__(
         self,
+        source_id: np.uint8,
+        microcontroller_serial_buffer_size: int,
         usb_port: str,
         logger_queue: MPQueue,  # type: ignore
-        source_id: np.uint8,
         baudrate: int = 115200,
-        maximum_transmitted_payload_size: int = 254,
         *,
         verbose: bool = False,
         test_mode: bool = False,
@@ -918,13 +1590,13 @@ class SerialCommunication:
         # Initializes the TransportLayer to mostly match a similar specialization carried out by the microcontroller
         # Communication class. This doubles up as an input argument check, as the class will raise an error if any
         # input argument is not valid.
-        self._transport_layer = SerialTransportLayer(
+        self._transport_layer = TransportLayer(
             port=usb_port,
             baudrate=baudrate,
             polynomial=np.uint16(0x1021),
             initial_crc_value=np.uint16(0xFFFF),
             final_crc_xor_value=np.uint16(0x0000),
-            maximum_transmitted_payload_size=maximum_transmitted_payload_size,
+            microcontroller_serial_buffer_size=microcontroller_serial_buffer_size,
             minimum_received_payload_size=2,  # Protocol (1) and Service Message byte-code (1), 2 bytes total
             start_byte=129,
             delimiter_byte=0,
@@ -937,7 +1609,8 @@ class SerialCommunication:
         self._kernel_data = KernelData(self._transport_layer)
         self._module_state = ModuleState(self._transport_layer)
         self._kernel_state = KernelState(self._transport_layer)
-        self._identification = Identification(self._transport_layer)
+        self._controller_identification = ControllerIdentification(self._transport_layer)
+        self._module_identification = ModuleIdentification(self._transport_layer)
         self._reception_code = ReceptionCode(self._transport_layer)
 
         # Initializes the trackers used to id-stamp data sent to the logger via the logger_queue.
@@ -977,14 +1650,14 @@ class SerialCommunication:
 
         This method relies on every valid outgoing message structure exposing a packed_data attribute, that contains
         the serialized payload data to be sent. Functionally, this method is a wrapper around the
-        SerialTransportLayer's write_data() and send_data() methods.
+        TransportLayer's write_data() and send_data() methods.
 
         Args:
             message: The command or parameters message to send to the microcontroller.
         """
         # Writes the pre-packaged data into the transmission buffer. Mypy flags packed_data as potentially None, but for
         # valid messages packed_data cannot be None, so this is a false positive.
-        self._transport_layer.write_data(data_object=message.packed_data)  # type: ignore
+        self._transport_layer.write_data(data_object=message.packed_data)
 
         # Constructs and sends the data message to the connected system.
         self._transport_layer.send_data()
@@ -995,7 +1668,16 @@ class SerialCommunication:
 
     def receive_message(
         self,
-    ) -> ModuleData | ModuleState | KernelData | KernelState | Identification | ReceptionCode | None:
+    ) -> (
+        ModuleData
+        | ModuleState
+        | KernelData
+        | KernelState
+        | ControllerIdentification
+        | ModuleIdentification
+        | ReceptionCode
+        | None
+    ):
         """Receives the incoming message from the connected microcontroller and parses into the appropriate structure.
 
         This method uses the protocol code, assumed to be stored in the first variable of each received payload, to
@@ -1057,10 +1739,15 @@ class SerialCommunication:
             self._log_data(stamp, self._reception_code.message, output=False)
             return self._reception_code
 
-        if protocol == SerialProtocols.IDENTIFICATION.as_uint8():
-            self._identification.update_message_data()
-            self._log_data(stamp, self._identification.message, output=False)
-            return self._identification
+        if protocol == SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8():
+            self._controller_identification.update_message_data()
+            self._log_data(stamp, self._controller_identification.message, output=False)
+            return self._controller_identification
+
+        if protocol == SerialProtocols.MODULE_IDENTIFICATION.as_uint8():
+            self._module_identification.update_message_data()
+            self._log_data(stamp, self._module_identification.message, output=False)
+            return self._module_identification
 
         # If the protocol code is not resolved by any conditional above, it is not valid. Terminates runtime with a
         # ValueError

@@ -27,7 +27,6 @@ from .communication import (
     ModuleData,
     ModuleState,
     KernelCommand,
-    Identification,
     KernelParameters,
     ModuleParameters,
     UnityCommunication,
@@ -35,6 +34,7 @@ from .communication import (
     SerialCommunication,
     DequeueModuleCommand,
     RepeatedModuleCommand,
+    ControllerIdentification,
 )
 
 
@@ -893,7 +893,7 @@ class MicroControllerInterface:  # pragma: no cover
         terminator_array: SharedMemoryArray,
         usb_port: str,
         baudrate: int,
-        payload_size: int,
+        microcontroller_buffer_size: int,
         unity_ip: str,
         unity_port: int,
         verbose: bool = False,
@@ -919,7 +919,7 @@ class MicroControllerInterface:  # pragma: no cover
             usb_port: The serial port to which the target microcontroller is connected.
             baudrate: The communication baudrate to use. This option is ignored for controllers that use USB interface,
                  but is essential for controllers that use the UART interface.
-            payload_size: The maximum size of the payload the managed microcontroller can receive. This is used to
+            microcontroller_buffer_size: The maximum size of the payload the managed microcontroller can receive. This is used to
                 ensure all outgoing messages fit inside the Serial reception buffer of the microcontroller.
             unity_ip: The IP-address of the MQTT broker to use for communication with Unity game engine.
             unity_port: The port number of the MQTT broker to use for communication with Unity game engine.
@@ -981,7 +981,7 @@ class MicroControllerInterface:  # pragma: no cover
             source_id=controller_id,
             logger_queue=logger_queue,
             baudrate=baudrate,
-            maximum_transmitted_payload_size=payload_size,
+            microcontroller_serial_buffer_size=microcontroller_buffer_size,
             verbose=verbose,
         )
 
@@ -1064,7 +1064,7 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Whenever the incoming message is the Identification message, ensures that the received controller_id
                 # matches the ID expected by the class.
-                elif isinstance(in_data, Identification):
+                elif isinstance(in_data, ControllerIdentification):
                     if in_data.controller_id != controller_id:
                         # Raises the error.
                         message = (

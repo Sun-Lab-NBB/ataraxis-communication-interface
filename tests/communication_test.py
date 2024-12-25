@@ -10,16 +10,15 @@ import pytest
 import paho.mqtt.client as mqtt
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import DataLogger
+from ataraxis_transport_layer_pc import TransportLayer
 
-from ataraxis_transport_layer import SerialTransportLayer
-from ataraxis_transport_layer.communication import (
+from ataraxis_communication_interface.communication import (
     KernelData,
     ModuleData,
     KernelState,
     ModuleState,
     KernelCommand,
     ReceptionCode,
-    Identification,
     SerialProtocols,
     KernelParameters,
     ModuleParameters,
@@ -28,14 +27,16 @@ from ataraxis_transport_layer.communication import (
     OneOffModuleCommand,
     SerialCommunication,
     DequeueModuleCommand,
+    ModuleIdentification,
     RepeatedModuleCommand,
+    ControllerIdentification,
 )
 
 
 @pytest.fixture
-def transport_layer() -> SerialTransportLayer:
+def transport_layer() -> TransportLayer:
     """Creates a transport layer instance in test mode."""
-    return SerialTransportLayer(port="TEST", test_mode=True)
+    return TransportLayer(port="TEST", test_mode=True, microcontroller_serial_buffer_size=300, baudrate=115200)
 
 
 @pytest.fixture
@@ -59,7 +60,8 @@ def test_serial_protocols_members() -> None:
     assert SerialProtocols.MODULE_STATE.value == 9
     assert SerialProtocols.KERNEL_STATE.value == 10
     assert SerialProtocols.RECEPTION_CODE.value == 11
-    assert SerialProtocols.IDENTIFICATION.value == 12
+    assert SerialProtocols.CONTROLLER_IDENTIFICATION.value == 12
+    assert SerialProtocols.MODULE_IDENTIFICATION.value == 13
 
 
 @pytest.mark.parametrize(
@@ -68,7 +70,7 @@ def test_serial_protocols_members() -> None:
         (SerialProtocols.UNDEFINED, 0),
         (SerialProtocols.REPEATED_MODULE_COMMAND, 1),
         (SerialProtocols.MODULE_DATA, 7),
-        (SerialProtocols.IDENTIFICATION, 12),
+        (SerialProtocols.CONTROLLER_IDENTIFICATION, 12),
     ],
 )
 def test_serial_protocols_as_uint8(protocol, expected_value) -> None:
@@ -81,7 +83,7 @@ def test_serial_protocols_as_uint8(protocol, expected_value) -> None:
 def test_serial_protocols_comparison() -> None:
     """Verifies SerialProtocols enum comparison operations."""
     assert SerialProtocols.UNDEFINED < SerialProtocols.REPEATED_MODULE_COMMAND
-    assert SerialProtocols.IDENTIFICATION > SerialProtocols.RECEPTION_CODE
+    assert SerialProtocols.CONTROLLER_IDENTIFICATION > SerialProtocols.RECEPTION_CODE
     assert SerialProtocols.MODULE_DATA == SerialProtocols.MODULE_DATA
     assert SerialProtocols.MODULE_DATA != SerialProtocols.KERNEL_DATA
     assert SerialProtocols.UNDEFINED == 0
@@ -89,21 +91,21 @@ def test_serial_protocols_comparison() -> None:
 
 def test_serial_prototypes_members() -> None:
     """Verifies that SerialPrototypes enum has correct values."""
-    assert SerialPrototypes.ONE_UNSIGNED_BYTE.value == 1
-    assert SerialPrototypes.TWO_UNSIGNED_BYTES.value == 2
-    assert SerialPrototypes.THREE_UNSIGNED_BYTES.value == 3
-    assert SerialPrototypes.FOUR_UNSIGNED_BYTES.value == 4
-    assert SerialPrototypes.ONE_UNSIGNED_LONG.value == 5
-    assert SerialPrototypes.ONE_UNSIGNED_SHORT.value == 6
+    assert SerialPrototypes.ONE_BOOL.value == 1
+    assert SerialPrototypes.SIX_INT8S.value == 25
+    assert SerialPrototypes.ELEVEN_FLOAT64S.value == 153
+    assert SerialPrototypes.FIFTEEN_INT64S.value == 164
+    assert SerialPrototypes.TWO_INT32S.value == 37
 
 
 @pytest.mark.parametrize(
     "prototype,expected_value",
     [
-        (SerialPrototypes.ONE_UNSIGNED_BYTE, 1),
-        (SerialPrototypes.TWO_UNSIGNED_BYTES, 2),
-        (SerialPrototypes.ONE_UNSIGNED_LONG, 5),
-        (SerialPrototypes.ONE_UNSIGNED_SHORT, 6),
+        (SerialPrototypes.ONE_BOOL, 1),
+        (SerialPrototypes.SIX_INT8S, 25),
+        (SerialPrototypes.ELEVEN_FLOAT64S, 153),
+        (SerialPrototypes.FIFTEEN_INT64S, 164),
+        (SerialPrototypes.TWO_INT32S, 37),
     ],
 )
 def test_serial_prototypes_as_uint8(prototype, expected_value) -> None:
@@ -116,12 +118,11 @@ def test_serial_prototypes_as_uint8(prototype, expected_value) -> None:
 @pytest.mark.parametrize(
     "prototype,expected_type,expected_shape,expected_dtype",
     [
-        (SerialPrototypes.ONE_UNSIGNED_BYTE, np.uint8, None, None),
-        (SerialPrototypes.TWO_UNSIGNED_BYTES, np.ndarray, (2,), np.uint8),
-        (SerialPrototypes.THREE_UNSIGNED_BYTES, np.ndarray, (3,), np.uint8),
-        (SerialPrototypes.FOUR_UNSIGNED_BYTES, np.ndarray, (4,), np.uint8),
-        (SerialPrototypes.ONE_UNSIGNED_LONG, np.uint32, None, None),
-        (SerialPrototypes.ONE_UNSIGNED_SHORT, np.uint16, None, None),
+        (SerialPrototypes.ONE_BOOL, np.bool, None, None),
+        (SerialPrototypes.SIX_INT8S, np.ndarray, (6,), np.int8),
+        (SerialPrototypes.ELEVEN_FLOAT64S, np.ndarray, (11,), np.float64),
+        (SerialPrototypes.FIFTEEN_INT64S, np.ndarray, (15,), np.int64),
+        (SerialPrototypes.TWO_INT32S, np.ndarray, (2,), np.int32),
     ],
 )
 def test_serial_prototypes_get_prototype(prototype, expected_type, expected_shape, expected_dtype) -> None:
@@ -137,10 +138,11 @@ def test_serial_prototypes_get_prototype(prototype, expected_type, expected_shap
 @pytest.mark.parametrize(
     "code,expected_result",
     [
-        (np.uint8(1), np.uint8(0)),  # ONE_UNSIGNED_BYTE
-        (np.uint8(2), np.zeros(2, dtype=np.uint8)),  # TWO_UNSIGNED_BYTES
-        (np.uint8(5), np.uint32(0)),  # ONE_UNSIGNED_LONG
-        (np.uint8(6), np.uint16(0)),  # ONE_UNSIGNED_SHORT
+        (np.uint8(1), np.bool(0)),  # ONE_BOOL
+        (np.uint8(25), np.zeros(6, dtype=np.int8)),  # SIX_INT8S
+        (np.uint8(153), np.zeros(11, dtype=np.float64)),  # ELEVEN_FLOAT64S
+        (np.uint8(164), np.zeros(15, dtype=np.int64)),  # FIFTEEN_INT64S
+        (np.uint8(37), np.zeros(2, dtype=np.int32)),  # TWO_INT32S
         (np.uint8(255), None),  # Invalid code
     ],
 )
@@ -157,15 +159,6 @@ def test_serial_prototypes_get_prototype_for_code(code, expected_result) -> None
             assert np.array_equal(result, expected_result)
         else:
             assert result == expected_result
-
-
-def test_serial_prototypes_comparison() -> None:
-    """Verifies SerialPrototypes enum comparison operations."""
-    assert SerialPrototypes.ONE_UNSIGNED_BYTE < SerialPrototypes.TWO_UNSIGNED_BYTES
-    assert SerialPrototypes.ONE_UNSIGNED_SHORT > SerialPrototypes.ONE_UNSIGNED_BYTE
-    assert SerialPrototypes.THREE_UNSIGNED_BYTES == SerialPrototypes.THREE_UNSIGNED_BYTES
-    assert SerialPrototypes.THREE_UNSIGNED_BYTES != SerialPrototypes.FOUR_UNSIGNED_BYTES
-    assert SerialPrototypes.ONE_UNSIGNED_BYTE == 1
 
 
 def test_repeated_module_command() -> None:
@@ -385,7 +378,7 @@ def test_module_data_update(transport_layer) -> None:
     data = ModuleData(transport_layer)
 
     # Setup mock message in transport layer's reception buffer
-    message = np.array([7, 1, 2, 3, 4, 1, 42], dtype=np.uint8)  # 1 is prototype for ONE_UNSIGNED_BYTE
+    message = np.array([7, 1, 2, 3, 4, 2, 42], dtype=np.uint8)  # 2 is prototype for ONE_UNSIGNED_BYTE
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
 
@@ -435,7 +428,7 @@ def test_kernel_data_update(transport_layer) -> None:
     data = KernelData(transport_layer)
 
     # Setup mock message in transport layer's reception buffer
-    message = np.array([8, 1, 2, 1, 42], dtype=np.uint8)  # 1 is prototype for ONE_UNSIGNED_BYTE
+    message = np.array([8, 1, 2, 2, 42], dtype=np.uint8)  # 2 is prototype for ONE_UNSIGNED_BYTE
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
 
@@ -549,19 +542,19 @@ def test_reception_code_update(transport_layer) -> None:
     assert np.array_equal(code.message, message)
 
 
-def test_identification_init(transport_layer) -> None:
-    """Verifies Identification initialization."""
-    ident = Identification(transport_layer)
+def test_controller_identification_init(transport_layer) -> None:
+    """Verifies ControllerIdentification initialization."""
+    ident = ControllerIdentification(transport_layer)
 
-    assert ident.protocol_code == SerialProtocols.IDENTIFICATION.as_uint8()
+    assert ident.protocol_code == SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8()
     assert isinstance(ident.message, np.ndarray)
     assert ident.controller_id == 0
     assert ident._transport_layer == transport_layer
 
 
-def test_identification_update(transport_layer) -> None:
-    """Verifies the functioning of Identification update_message_data() method."""
-    ident = Identification(transport_layer)
+def test_controller_identification_update(transport_layer) -> None:
+    """Verifies the functioning of ControllerIdentification update_message_data() method."""
+    ident = ControllerIdentification(transport_layer)
 
     # Setup mock message in transport layer's reception buffer
     message = np.array([12, 42], dtype=np.uint8)
@@ -574,6 +567,31 @@ def test_identification_update(transport_layer) -> None:
     assert np.array_equal(ident.message, message)
 
 
+def test_module_identification_init(transport_layer) -> None:
+    """Verifies ModuleIdentification initialization."""
+    ident = ModuleIdentification(transport_layer)
+
+    assert ident.protocol_code == SerialProtocols.MODULE_IDENTIFICATION.as_uint8()
+    assert isinstance(ident.message, np.ndarray)
+    assert ident.module_type_id == 0
+    assert ident._transport_layer == transport_layer
+
+
+def test_module_identification_update(transport_layer) -> None:
+    """Verifies the functioning of ModuleIdentification update_message_data() method."""
+    ident = ModuleIdentification(transport_layer)
+
+    # Setup mock message in transport layer's reception buffer
+    message = np.array([13, 255, 255], dtype=np.uint8)
+    transport_layer._reception_buffer[: len(message)] = message
+    transport_layer._bytes_in_reception_buffer = len(message)
+
+    ident.update_message_data()
+
+    assert ident.module_type_id == 65535
+    assert np.array_equal(ident.message, message)
+
+
 @pytest.mark.parametrize(
     "message_class,expected_repr,init_data,message_data",
     [
@@ -581,13 +599,13 @@ def test_identification_update(transport_layer) -> None:
             ModuleData,
             "ModuleData(protocol_code=7, module_type=1, module_id=2, command=3, event=4, data_object=42).",
             {},
-            np.array([7, 1, 2, 3, 4, 1, 42], dtype=np.uint8),
+            np.array([7, 1, 2, 3, 4, 2, 42], dtype=np.uint8),
         ),
         (
             KernelData,
             "KernelData(protocol_code=8, command=1, event=2, data_object=42).",
             {},
-            np.array([8, 1, 2, 1, 42], dtype=np.uint8),
+            np.array([8, 1, 2, 2, 42], dtype=np.uint8),
         ),
         (
             ModuleState,
@@ -597,7 +615,18 @@ def test_identification_update(transport_layer) -> None:
         ),
         (KernelState, "KernelState(command=1, event=2).", {}, np.array([10, 1, 2], dtype=np.uint8)),
         (ReceptionCode, "ReceptionCode(reception_code=42).", {}, np.array([11, 42], dtype=np.uint8)),
-        (Identification, "Identification(controller_id=42).", {}, np.array([12, 42], dtype=np.uint8)),
+        (
+            ControllerIdentification,
+            "ControllerIdentification(controller_id=42).",
+            {},
+            np.array([12, 42], dtype=np.uint8),
+        ),
+        (
+            ModuleIdentification,
+            "ModuleIdentification(module_type_id=65535).",
+            {},
+            np.array([12, 255, 255], dtype=np.uint8),
+        ),
     ],
 )
 def test_message_repr(transport_layer, message_class, expected_repr, init_data, message_data) -> None:
@@ -615,7 +644,13 @@ def test_message_repr(transport_layer, message_class, expected_repr, init_data, 
 
 def test_serial_communication_init_and_repr(logger_queue) -> None:
     """Verifies SerialCommunication initialization and string representation."""
-    comm = SerialCommunication(usb_port="TEST", logger_queue=logger_queue, source_id=np.uint8(1), test_mode=True)
+    comm = SerialCommunication(
+        usb_port="TEST",
+        logger_queue=logger_queue,
+        source_id=np.uint8(1),
+        microcontroller_serial_buffer_size=300,
+        test_mode=True,
+    )
 
     # Test initialization
     assert comm._transport_layer is not None
@@ -623,7 +658,8 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
     assert isinstance(comm._kernel_data, KernelData)
     assert isinstance(comm._module_state, ModuleState)
     assert isinstance(comm._kernel_state, KernelState)
-    assert isinstance(comm._identification, Identification)
+    assert isinstance(comm._controller_identification, ControllerIdentification)
+    assert isinstance(comm._module_identification, ModuleIdentification)
     assert isinstance(comm._reception_code, ReceptionCode)
     assert comm._source_id == 1
     assert comm._usb_port == "TEST"
@@ -637,7 +673,12 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
 def test_serial_communication_send_message(logger_queue) -> None:
     """Verifies the functionality of the SerialCommunication send_message() method."""
     comm = SerialCommunication(
-        usb_port="TEST", logger_queue=logger_queue, source_id=np.uint8(1), verbose=True, test_mode=True
+        usb_port="TEST",
+        logger_queue=logger_queue,
+        source_id=np.uint8(1),
+        verbose=True,
+        test_mode=True,
+        microcontroller_serial_buffer_size=300,
     )
 
     # Creates the test message
@@ -656,7 +697,7 @@ def test_serial_communication_send_message(logger_queue) -> None:
     [
         # ModuleData message (protocol code 7)
         (
-            np.array([7, 1, 2, 3, 4, 1, 42], dtype=np.uint8),
+            np.array([7, 1, 2, 3, 4, 2, 42], dtype=np.uint8),
             ModuleData,
             {
                 "module_type": 1,
@@ -668,7 +709,7 @@ def test_serial_communication_send_message(logger_queue) -> None:
         ),
         # KernelData message (protocol code 8)
         (
-            np.array([8, 1, 2, 1, 42], dtype=np.uint8),
+            np.array([8, 1, 2, 2, 42], dtype=np.uint8),
             KernelData,
             {
                 "command": 1,
@@ -704,12 +745,20 @@ def test_serial_communication_send_message(logger_queue) -> None:
                 "reception_code": 42,
             },
         ),
-        # Identification message (protocol code 12)
+        # ControllerIdentification message (protocol code 12)
         (
             np.array([12, 42], dtype=np.uint8),
-            Identification,
+            ControllerIdentification,
             {
                 "controller_id": 42,
+            },
+        ),
+        # ModuleIdentification message (protocol code 13)
+        (
+            np.array([13, 255, 255], dtype=np.uint8),
+            ModuleIdentification,
+            {
+                "module_type_id": 65535,
             },
         ),
     ],
@@ -718,7 +767,12 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
     """Verifies the functioning of SerialCommunication receive_message(0 method."""
     # Initialize communication
     comm = SerialCommunication(
-        usb_port="TEST", logger_queue=logger_queue, source_id=np.uint8(1), verbose=True, test_mode=True
+        usb_port="TEST",
+        logger_queue=logger_queue,
+        source_id=np.uint8(1),
+        verbose=True,
+        test_mode=True,
+        microcontroller_serial_buffer_size=300,
     )
 
     # First verifies that the method returns None when there is no data to receive.
@@ -742,7 +796,13 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
 
 def test_serial_communication_receive_message_error(logger_queue) -> None:
     """Verifies the error handling of the SerialCommunication receive_data() method."""
-    comm = SerialCommunication(usb_port="TEST", logger_queue=logger_queue, source_id=np.uint8(1), test_mode=True)
+    comm = SerialCommunication(
+        usb_port="TEST",
+        logger_queue=logger_queue,
+        source_id=np.uint8(1),
+        test_mode=True,
+        microcontroller_serial_buffer_size=300,
+    )
 
     # Test receiving the message with invalid protocol code
     message_data = np.array([255, 1, 2], dtype=np.uint8)  # Invalid protocol code

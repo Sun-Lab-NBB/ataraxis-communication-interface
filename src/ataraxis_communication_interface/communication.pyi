@@ -8,16 +8,15 @@ import numpy as np
 from _typeshed import Incomplete
 from numpy.typing import NDArray
 import paho.mqtt.client as mqtt
-
-from .transport_layer import SerialTransportLayer as SerialTransportLayer
+from ataraxis_transport_layer_pc import TransportLayer
 
 class SerialProtocols(IntEnum):
     """Stores the protocol codes used in data transmission between the PC and the microcontroller over the serial port.
 
     Each sent and received message starts with the specific protocol code from this enumeration that instructs the
     receiver on how to process the rest of the data payload. The codes available through this class have to match the
-    contents of the kProtocols Enumeration available from the AtaraxisMicroController library
-    (communication_assets namespace).
+    contents of the kProtocols Enumeration available from the ataraxis-micro-controller library
+    (axmc_communication_assets namespace).
 
     Notes:
         The values available through this enumeration should be read through their 'as_uint8' property to enforce the
@@ -36,7 +35,8 @@ class SerialProtocols(IntEnum):
     MODULE_STATE: int
     KERNEL_STATE: int
     RECEPTION_CODE: int
-    IDENTIFICATION: int
+    CONTROLLER_IDENTIFICATION: int
+    MODULE_IDENTIFICATION: int
     def as_uint8(self) -> np.uint8:
         """Convert the enum value to numpy.uint8 type.
 
@@ -44,7 +44,9 @@ class SerialProtocols(IntEnum):
             np.uint8: The enum value as a numpy unsigned 8-bit integer.
         """
 
-_PROTOTYPE_FACTORIES: dict[int, Callable[[], NDArray[np.uint8] | np.uint8 | np.uint16 | np.uint32]]
+NumericType: Incomplete
+PrototypeType: Incomplete
+_PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]]
 
 class SerialPrototypes(IntEnum):
     """Stores the prototype codes used in data transmission between the PC and the microcontroller over the serial port.
@@ -59,22 +61,181 @@ class SerialPrototypes(IntEnum):
         value), this number should be enough to support many unique runtime configurations.
     """
 
-    ONE_UNSIGNED_BYTE: int
-    TWO_UNSIGNED_BYTES: int
-    THREE_UNSIGNED_BYTES: int
-    FOUR_UNSIGNED_BYTES: int
-    ONE_UNSIGNED_LONG: int
-    ONE_UNSIGNED_SHORT: int
+    ONE_BOOL: int
+    ONE_UINT8: int
+    ONE_INT8: int
+    TWO_BOOLS: int
+    TWO_UINT8S: int
+    TWO_INT8S: int
+    ONE_UINT16: int
+    ONE_INT16: int
+    THREE_BOOLS: int
+    THREE_UINT8S: int
+    THREE_INT8S: int
+    FOUR_BOOLS: int
+    FOUR_UINT8S: int
+    FOUR_INT8S: int
+    TWO_UINT16S: int
+    TWO_INT16S: int
+    ONE_UINT32: int
+    ONE_INT32: int
+    ONE_FLOAT32: int
+    FIVE_BOOLS: int
+    FIVE_UINT8S: int
+    FIVE_INT8S: int
+    SIX_BOOLS: int
+    SIX_UINT8S: int
+    SIX_INT8S: int
+    THREE_UINT16S: int
+    THREE_INT16S: int
+    SEVEN_BOOLS: int
+    SEVEN_UINT8S: int
+    SEVEN_INT8S: int
+    EIGHT_BOOLS: int
+    EIGHT_UINT8S: int
+    EIGHT_INT8S: int
+    FOUR_UINT16S: int
+    FOUR_INT16S: int
+    TWO_UINT32S: int
+    TWO_INT32S: int
+    TWO_FLOAT32S: int
+    ONE_UINT64: int
+    ONE_INT64: int
+    ONE_FLOAT64: int
+    NINE_BOOLS: int
+    NINE_UINT8S: int
+    NINE_INT8S: int
+    TEN_BOOLS: int
+    TEN_UINT8S: int
+    TEN_INT8S: int
+    FIVE_UINT16S: int
+    FIVE_INT16S: int
+    ELEVEN_BOOLS: int
+    ELEVEN_UINT8S: int
+    ELEVEN_INT8S: int
+    TWELVE_BOOLS: int
+    TWELVE_UINT8S: int
+    TWELVE_INT8S: int
+    SIX_UINT16S: int
+    SIX_INT16S: int
+    THREE_UINT32S: int
+    THREE_INT32S: int
+    THREE_FLOAT32S: int
+    THIRTEEN_BOOLS: int
+    THIRTEEN_UINT8S: int
+    THIRTEEN_INT8S: int
+    FOURTEEN_BOOLS: int
+    FOURTEEN_UINT8S: int
+    FOURTEEN_INT8S: int
+    SEVEN_UINT16S: int
+    SEVEN_INT16S: int
+    FIFTEEN_BOOLS: int
+    FIFTEEN_UINT8S: int
+    FIFTEEN_INT8S: int
+    EIGHT_UINT16S: int
+    EIGHT_INT16S: int
+    FOUR_UINT32S: int
+    FOUR_INT32S: int
+    FOUR_FLOAT32S: int
+    TWO_UINT64S: int
+    TWO_INT64S: int
+    TWO_FLOAT64S: int
+    NINE_UINT16S: int
+    NINE_INT16S: int
+    TEN_UINT16S: int
+    TEN_INT16S: int
+    FIVE_UINT32S: int
+    FIVE_INT32S: int
+    FIVE_FLOAT32S: int
+    ELEVEN_UINT16S: int
+    ELEVEN_INT16S: int
+    TWELVE_UINT16S: int
+    TWELVE_INT16S: int
+    SIX_UINT32S: int
+    SIX_INT32S: int
+    SIX_FLOAT32S: int
+    THREE_UINT64S: int
+    THREE_INT64S: int
+    THREE_FLOAT64S: int
+    THIRTEEN_UINT16S: int
+    THIRTEEN_INT16S: int
+    FOURTEEN_UINT16S: int
+    FOURTEEN_INT16S: int
+    SEVEN_UINT32S: int
+    SEVEN_INT32S: int
+    SEVEN_FLOAT32S: int
+    FIFTEEN_UINT16S: int
+    FIFTEEN_INT16S: int
+    EIGHT_UINT32S: int
+    EIGHT_INT32S: int
+    EIGHT_FLOAT32S: int
+    FOUR_UINT64S: int
+    FOUR_INT64S: int
+    FOUR_FLOAT64S: int
+    NINE_UINT32S: int
+    NINE_INT32S: int
+    NINE_FLOAT32S: int
+    TEN_UINT32S: int
+    TEN_INT32S: int
+    TEN_FLOAT32S: int
+    FIVE_UINT64S: int
+    FIVE_INT64S: int
+    FIVE_FLOAT64S: int
+    ELEVEN_UINT32S: int
+    ELEVEN_INT32S: int
+    ELEVEN_FLOAT32S: int
+    TWELVE_UINT32S: int
+    TWELVE_INT32S: int
+    TWELVE_FLOAT32S: int
+    SIX_UINT64S: int
+    SIX_INT64S: int
+    SIX_FLOAT64S: int
+    THIRTEEN_UINT32S: int
+    THIRTEEN_INT32S: int
+    THIRTEEN_FLOAT32S: int
+    FOURTEEN_UINT32S: int
+    FOURTEEN_INT32S: int
+    FOURTEEN_FLOAT32S: int
+    SEVEN_UINT64S: int
+    SEVEN_INT64S: int
+    SEVEN_FLOAT64S: int
+    FIFTEEN_UINT32S: int
+    FIFTEEN_INT32S: int
+    FIFTEEN_FLOAT32S: int
+    EIGHT_UINT64S: int
+    EIGHT_INT64S: int
+    EIGHT_FLOAT64S: int
+    NINE_UINT64S: int
+    NINE_INT64S: int
+    NINE_FLOAT64S: int
+    TEN_UINT64S: int
+    TEN_INT64S: int
+    TEN_FLOAT64S: int
+    ELEVEN_UINT64S: int
+    ELEVEN_INT64S: int
+    ELEVEN_FLOAT64S: int
+    TWELVE_UINT64S: int
+    TWELVE_INT64S: int
+    TWELVE_FLOAT64S: int
+    THIRTEEN_UINT64S: int
+    THIRTEEN_INT64S: int
+    THIRTEEN_FLOAT64S: int
+    FOURTEEN_UINT64S: int
+    FOURTEEN_INT64S: int
+    FOURTEEN_FLOAT64S: int
+    FIFTEEN_UINT64S: int
+    FIFTEEN_INT64S: int
+    FIFTEEN_FLOAT64S: int
     def as_uint8(self) -> np.uint8:
         """Converts the enum value to numpy.uint8 type.
 
         Returns:
             The enum value as a numpy unsigned 8-bit integer.
         """
-    def get_prototype(self) -> NDArray[np.uint8] | np.uint8 | np.uint16 | np.uint32:
+    def get_prototype(self) -> PrototypeType:
         """Returns the prototype object associated with this prototype enum value.
 
-        The prototype object returned by this method can be passed to the reading method of the SerialTransportLayer
+        The prototype object returned by this method can be passed to the reading method of the TransportLayer
         class to deserialize the received data object. This should be automatically done by the SerialCommunication
         class that uses this enum class.
 
@@ -82,10 +243,10 @@ class SerialPrototypes(IntEnum):
             The prototype object that is either a numpy scalar or shallow array type.
         """
     @classmethod
-    def get_prototype_for_code(cls, code: np.uint8) -> NDArray[np.uint8] | np.uint8 | np.uint16 | np.uint32 | None:
+    def get_prototype_for_code(cls, code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.
 
-        The prototype object returned by this method can be passed to the reading method of the SerialTransportLayer
+        The prototype object returned by this method can be passed to the reading method of the TransportLayer
         class to deserialize the received data object. This should be automatically done by the SerialCommunication
         class that uses this enum.
 
@@ -229,7 +390,7 @@ class ModuleData:
     event: Incomplete
     data_object: Incomplete
     _transport_layer: Incomplete
-    def __init__(self, transport_layer: SerialTransportLayer) -> None: ...
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
@@ -270,7 +431,7 @@ class KernelData:
     event: Incomplete
     data_object: Incomplete
     _transport_layer: Incomplete
-    def __init__(self, transport_layer: SerialTransportLayer) -> None: ...
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
@@ -311,7 +472,7 @@ class ModuleState:
     command: Incomplete
     event: Incomplete
     _transport_layer: Incomplete
-    def __init__(self, transport_layer: SerialTransportLayer) -> None: ...
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
@@ -346,7 +507,7 @@ class KernelState:
     command: Incomplete
     event: Incomplete
     _transport_layer: Incomplete
-    def __init__(self, transport_layer: SerialTransportLayer) -> None: ...
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
@@ -379,7 +540,7 @@ class ReceptionCode:
     message: Incomplete
     reception_code: Incomplete
     _transport_layer: Incomplete
-    def __init__(self, transport_layer: SerialTransportLayer) -> None: ...
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
@@ -391,7 +552,7 @@ class ReceptionCode:
     def __repr__(self) -> str:
         """Returns a string representation of the ReceptionCode object."""
 
-class Identification:
+class ControllerIdentification:
     """Identifies the connected microcontroller by communicating its unique byte id-code.
 
     For the ID codes to be unique, they have to be manually assigned to the Kernel class of each concurrently
@@ -416,7 +577,7 @@ class Identification:
     message: Incomplete
     controller_id: Incomplete
     _transport_layer: Incomplete
-    def __init__(self, transport_layer: SerialTransportLayer) -> None: ...
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
@@ -426,13 +587,50 @@ class Identification:
         and attempt to parse the data.
         """
     def __repr__(self) -> str:
-        """Returns a string representation of the Identification object."""
+        """Returns a string representation of the ControllerIdentification object."""
+
+class ModuleIdentification:
+    """Identifies a hardware module instance by communicating its combined type + id 16-bit code.
+
+    It is expected that each hardware module instance will have a unique combination of type (family) code and instance
+    (ID) code. The user assigns both type and ID codes at their discretion when writing the main .cpp file for each
+    microcontroller.
+
+    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its
+    lifetime to call update_message_data() method when necessary to parse valid incoming message data.
+
+    Args:
+        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
+            SerialCommunication class. This reference is used to read and parse the message data.
+
+    Attributes:
+        protocol_code: Stores the protocol code used by this type of messages.
+        message: Stores the serialized message payload.
+        module_type_id: The unique uint16 code that results from combining the type and ID codes of the module instance.
+
+    """
+
+    protocol_code: Incomplete
+    message: Incomplete
+    module_type_id: Incomplete
+    _transport_layer: Incomplete
+    def __init__(self, transport_layer: TransportLayer) -> None: ...
+    def update_message_data(self) -> None:
+        """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
+        attributes.
+
+        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
+        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
+        and attempt to parse the data.
+        """
+    def __repr__(self) -> str:
+        """Returns a string representation of the ModuleIdentification object."""
 
 class SerialCommunication:
-    """Wraps a SerialTransportLayer class instance and exposes methods that allow communicating with a microcontroller
-    running AtaraxisMicroController firmware using the USB or UART protocol.
+    """Wraps a TransportLayer class instance and exposes methods that allow communicating with a microcontroller
+    running ataraxis-micro-controller library using the USB or UART protocol.
 
-    This class is built on top of the SerialTransportLayer, designed to provide the microcontroller communication
+    This class is built on top of the TransportLayer, designed to provide the microcontroller communication
     interface (API) for other Ataraxis libraries. This class is not designed to be instantiated directly and
     should instead be used through the MicroControllerInterface class available through this library!
 
@@ -447,20 +645,20 @@ class SerialCommunication:
         The DataLogger is used to write all incoming and outgoing messages to disk as serialized message payloads.
 
     Args:
+        source_id: The ID code to identify the source of the logged messages. This is used by the DataLogger to
+            distinguish between log sources (classes that sent data to be logged) and, therefore, has to be unique for
+            all Ataraxis classes that use DataLogger and are active at the same time.
+        microcontroller_serial_buffer_size: The size, in bytes, of the buffer used by the target microcontroller's
+            Serial buffer. Usually, this information is available from the microcontroller's manufacturer
+            (UART / USB controller specification).
         usb_port: The name of the USB port to use for communication to, e.g.: 'COM3' or '/dev/ttyUSB0'. This has to be
             the port to which the target microcontroller is connected. Use the list_available_ports() function available
             from this library to get the list of discoverable serial port names.
         logger_queue: The multiprocessing Queue object exposed by the DataLogger class (via 'input_queue' property).
             This queue is used to buffer and pipe data to be logged to the logger cores.
-        source_id: The ID code to identify the source of the logged messages. This is used by the DataLogger to
-            distinguish between log sources (classes that sent data to be logged) and, therefore, has to be unique for
-            all Ataraxis classes that use DataLogger and are active at the same time.
         baudrate: The baudrate to use for the communication over the UART protocol. Should match the value used by
             the microcontrollers that only support UART protocol. This is ignored for microcontrollers that use the
             USB protocol.
-        maximum_transmitted_payload_size: The maximum size of the payload that will be sent to the microcontroller in
-            a single message. in bytes. This value has to match the expected maximum payload size of the target
-            microcontroller.
         verbose: Determines whether to print sent and received data messages to console. This is used during debugging
             and should be disabled during production runtimes. The class itself does NOT enable the console, so the
             console has to be enabled manually for this flag to have an effect.
@@ -473,7 +671,8 @@ class SerialCommunication:
         _kernel_data: Received KernelData messages are unpacked into this structure.
         _module_state: Received ModuleState messages are unpacked into this structure.
         _kernel_state: Received KernelState messages are unpacked into this structure.
-        _identification: Received Identification messages are unpacked into this structure.
+        _controller_identification: Received ControllerIdentification messages are unpacked into this structure.
+        _module_identification: Received ModuleIdentification messages are unpacked into this structure.
         _reception_code: Received ReceptionCode messages are unpacked into this structure.
         _timestamp_timer: The PrecisionTimer instance used to stamp incoming and outgoing data as it is logged.
         _source_id: Stores the unique integer-code that identifies the class instance in data logs.
@@ -487,7 +686,8 @@ class SerialCommunication:
     _kernel_data: Incomplete
     _module_state: Incomplete
     _kernel_state: Incomplete
-    _identification: Incomplete
+    _controller_identification: Incomplete
+    _module_identification: Incomplete
     _reception_code: Incomplete
     _timestamp_timer: Incomplete
     _source_id: Incomplete
@@ -496,11 +696,11 @@ class SerialCommunication:
     _usb_port: Incomplete
     def __init__(
         self,
+        source_id: np.uint8,
+        microcontroller_serial_buffer_size: int,
         usb_port: str,
         logger_queue: MPQueue,
-        source_id: np.uint8,
         baudrate: int = 115200,
-        maximum_transmitted_payload_size: int = 254,
         *,
         verbose: bool = False,
         test_mode: bool = False,
@@ -520,14 +720,23 @@ class SerialCommunication:
 
         This method relies on every valid outgoing message structure exposing a packed_data attribute, that contains
         the serialized payload data to be sent. Functionally, this method is a wrapper around the
-        SerialTransportLayer's write_data() and send_data() methods.
+        TransportLayer's write_data() and send_data() methods.
 
         Args:
             message: The command or parameters message to send to the microcontroller.
         """
     def receive_message(
         self,
-    ) -> ModuleData | ModuleState | KernelData | KernelState | Identification | ReceptionCode | None:
+    ) -> (
+        ModuleData
+        | ModuleState
+        | KernelData
+        | KernelState
+        | ControllerIdentification
+        | ModuleIdentification
+        | ReceptionCode
+        | None
+    ):
         """Receives the incoming message from the connected microcontroller and parses into the appropriate structure.
 
         This method uses the protocol code, assumed to be stored in the first variable of each received payload, to

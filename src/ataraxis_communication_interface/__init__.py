@@ -5,14 +5,8 @@ API documentation: https://ataraxis-transport-layer-api-docs.netlify.app/
 Author: Ivan Kondratyev (Inkaros)
 """
 
-from .microcontroller import MicroControllerInterface
-from .custom_interfaces import TTLInterface, LickInterface, BreakInterface, ValveInterface, EncoderInterface
+from .microcontroller_interface import MicroControllerInterface
 
 __all__ = [
-    "BreakInterface",
-    "EncoderInterface",
-    "LickInterface",
     "MicroControllerInterface",
-    "TTLInterface",
-    "ValveInterface",
 ]

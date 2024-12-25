@@ -10,7 +10,6 @@ from .communication import (
     ModuleData as ModuleData,
     ModuleState as ModuleState,
     KernelCommand as KernelCommand,
-    Identification as Identification,
     KernelParameters as KernelParameters,
     ModuleParameters as ModuleParameters,
     UnityCommunication as UnityCommunication,
@@ -18,6 +17,7 @@ from .communication import (
     SerialCommunication as SerialCommunication,
     DequeueModuleCommand as DequeueModuleCommand,
     RepeatedModuleCommand as RepeatedModuleCommand,
+    ControllerIdentification as ControllerIdentification,
 )
 
 class ModuleInterface:
@@ -418,7 +418,7 @@ class MicroControllerInterface:
         terminator_array: SharedMemoryArray,
         usb_port: str,
         baudrate: int,
-        payload_size: int,
+        microcontroller_buffer_size: int,
         unity_ip: str,
         unity_port: int,
         verbose: bool = False,
@@ -444,7 +444,7 @@ class MicroControllerInterface:
             usb_port: The serial port to which the target microcontroller is connected.
             baudrate: The communication baudrate to use. This option is ignored for controllers that use USB interface,
                  but is essential for controllers that use the UART interface.
-            payload_size: The maximum size of the payload the managed microcontroller can receive. This is used to
+            microcontroller_buffer_size: The maximum size of the payload the managed microcontroller can receive. This is used to
                 ensure all outgoing messages fit inside the Serial reception buffer of the microcontroller.
             unity_ip: The IP-address of the MQTT broker to use for communication with Unity game engine.
             unity_port: The port number of the MQTT broker to use for communication with Unity game engine.
