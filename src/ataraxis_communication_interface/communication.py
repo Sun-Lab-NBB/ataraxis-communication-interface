@@ -18,7 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
 import paho.mqtt.client as mqtt
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import console
 from ataraxis_data_structures import LogPackage
 from ataraxis_time.time_helpers import get_timestamp
 from ataraxis_transport_layer_pc import TransportLayer
@@ -1554,9 +1554,6 @@ class SerialCommunication:
         baudrate: The baudrate to use for the communication over the UART protocol. Should match the value used by
             the microcontrollers that only support UART protocol. This is ignored for microcontrollers that use the
             USB protocol.
-        verbose: Determines whether to print sent and received data messages to console. This is used during debugging
-            and should be disabled during production runtimes. The class itself does NOT enable the console, so the
-            console has to be enabled manually for this flag to have an effect.
         test_mode: This parameter is only used during testing. When True, it initializes the underlying TransportLayer
             class in the test configuration. Make sure this is set to False during production runtime.
 
@@ -1572,7 +1569,6 @@ class SerialCommunication:
         _timestamp_timer: The PrecisionTimer instance used to stamp incoming and outgoing data as it is logged.
         _source_id: Stores the unique integer-code that identifies the class instance in data logs.
         _logger_queue: Stores the multiprocessing Queue that buffers and pipes the data to the Logger process(es).
-        _verbose: Stores the verbose flag.
         _usb_port: Stores the ID of the USB port used for communication.
     """
 
@@ -1584,7 +1580,6 @@ class SerialCommunication:
         logger_queue: MPQueue,  # type: ignore
         baudrate: int = 115200,
         *,
-        verbose: bool = False,
         test_mode: bool = False,
     ) -> None:
         # Initializes the TransportLayer to mostly match a similar specialization carried out by the microcontroller
@@ -1597,7 +1592,7 @@ class SerialCommunication:
             initial_crc_value=np.uint16(0xFFFF),
             final_crc_xor_value=np.uint16(0x0000),
             microcontroller_serial_buffer_size=microcontroller_serial_buffer_size,
-            minimum_received_payload_size=2,  # Protocol (1) and Service Message byte-code (1), 2 bytes total
+            minimum_received_payload_size=2,  # Protocol (1) and uint8_t Service Message byte-code (1), 2 bytes total
             start_byte=129,
             delimiter_byte=0,
             timeout=20000,
@@ -1627,13 +1622,11 @@ class SerialCommunication:
         # relative to the onset timestamp.
         package = LogPackage(self._source_id, 0, onset)  # Packages the id, timestamp, and data.
         self._logger_queue.put(package)
-
-        self._verbose = verbose
         self._usb_port = usb_port
 
     def __repr__(self) -> str:
         """Returns a string representation of the SerialCommunication object."""
-        return f"SerialCommunication(usb_port={self._usb_port}, source_id={self._source_id}, verbose={self._verbose})."
+        return f"SerialCommunication(usb_port={self._usb_port}, source_id={self._source_id})."
 
     def send_message(
         self,
@@ -1664,7 +1657,7 @@ class SerialCommunication:
         stamp = self._timestamp_timer.elapsed  # Stamps transmission time.
 
         # Logs the transmitted message data
-        self._log_data(stamp, message.packed_data, output=True)  # type: ignore
+        self._log_data(stamp, message.packed_data)  # type: ignore
 
     def receive_message(
         self,
@@ -1716,37 +1709,37 @@ class SerialCommunication:
         # payload.
         if protocol == SerialProtocols.MODULE_DATA.as_uint8():
             self._module_data.update_message_data()
-            self._log_data(stamp, self._module_data.message, output=False)
+            self._log_data(stamp, self._module_data.message)
             return self._module_data
 
         if protocol == SerialProtocols.KERNEL_DATA.as_uint8():
             self._kernel_data.update_message_data()
-            self._log_data(stamp, self._kernel_data.message, output=False)
+            self._log_data(stamp, self._kernel_data.message)
             return self._kernel_data
 
         if protocol == SerialProtocols.MODULE_STATE.as_uint8():
             self._module_state.update_message_data()
-            self._log_data(stamp, self._module_state.message, output=False)
+            self._log_data(stamp, self._module_state.message)
             return self._module_state
 
         if protocol == SerialProtocols.KERNEL_STATE.as_uint8():
             self._kernel_state.update_message_data()
-            self._log_data(stamp, self._kernel_state.message, output=False)
+            self._log_data(stamp, self._kernel_state.message)
             return self._kernel_state
 
         if protocol == SerialProtocols.RECEPTION_CODE.as_uint8():
             self._reception_code.update_message_data()
-            self._log_data(stamp, self._reception_code.message, output=False)
+            self._log_data(stamp, self._reception_code.message)
             return self._reception_code
 
         if protocol == SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8():
             self._controller_identification.update_message_data()
-            self._log_data(stamp, self._controller_identification.message, output=False)
+            self._log_data(stamp, self._controller_identification.message)
             return self._controller_identification
 
         if protocol == SerialProtocols.MODULE_IDENTIFICATION.as_uint8():
             self._module_identification.update_message_data()
-            self._log_data(stamp, self._module_identification.message, output=False)
+            self._log_data(stamp, self._module_identification.message)
             return self._module_identification
 
         # If the protocol code is not resolved by any conditional above, it is not valid. Terminates runtime with a
@@ -1760,29 +1753,19 @@ class SerialCommunication:
         # Fallback to appease mypy
         raise ValueError(message)  # pragma: no cover
 
-    def _log_data(self, timestamp: int, data: NDArray[np.uint8], *, output: bool = False) -> None:
+    def _log_data(self, timestamp: int, data: NDArray[np.uint8]) -> None:
         """Packages and sends the input data to teh DataLogger instance that writes it to disk.
 
         Args:
             timestamp: The value of the timestamp timer 'elapsed' property that communicates the number of elapsed
                 microseconds relative to the 'onset' timestamp.
             data: The byte-serialized message payload that was sent or received.
-            output: Determines whether the logged data was sent or received. This is only used if the class is
-                initialized in verbose mode to format messages displayed via the terminal.
         """
         # Packages the data to be logged into the appropriate tuple format (with ID variables)
         package = LogPackage(self._source_id, timestamp, data)
 
         # Sends the data to the logger
         self._logger_queue.put(package)
-
-        if self._verbose:
-            if output:
-                message = f"Source {self._source_id} sent data: {data}"
-            else:
-                message = f"Source {self._source_id} received data: {data}"
-
-            console.echo(message=message, level=LogLevel.INFO)
 
 
 class UnityCommunication:

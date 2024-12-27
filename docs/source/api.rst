@@ -8,8 +8,8 @@ Communication
    :undoc-members:
    :show-inheritance:
 
-Interfaces
-==========
+MicroController Interface
+=========================
 .. automodule:: ataraxis_communication_interface.microcontroller_interface
    :members:
    :undoc-members:

@@ -1,9 +1,11 @@
-"""This module provides the ModuleInterface and MicroControllerInterface classes that aggregate the methods to
-bidirectionally transmit data between PC, microcontrollers, and Unity game engine.
+"""This module provides the ModuleInterface and MicroControllerInterface classes. They aggregate the methods to
+enable the Python clients and unity game engine instances running on the PC to bidirectionally interface with custom
+hardware modules managed by an Arduino or Teensy microcontroller.
 
-Each microcontroller module that manages physical hardware should be matched to a specialized interface derived from
-the base ModuleInterface class. Similarly, for each concurrently active microcontroller, there has to be a specific
-MicroControllerInterface instance that manages the ModuleInterface instances for the modules of that controller.
+Each microcontroller hardware module that manages physical hardware should be matched to a specialized interface
+derived from the base ModuleInterface class. Similarly, for each concurrently active microcontroller, there has to be a
+specific MicroControllerInterface instance that manages the ModuleInterface instances for the modules of that
+controller.
 """
 
 from abc import abstractmethod
@@ -16,12 +18,15 @@ from multiprocessing import (
 )
 from multiprocessing.managers import SyncManager
 from multiprocessing.shared_memory import SharedMemory
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from numpy.lib.npyio import NpzFile
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger, LogPackage, SharedMemoryArray
+from pathlib import Path
 
 from .communication import (
     ModuleData,
@@ -35,6 +40,8 @@ from .communication import (
     DequeueModuleCommand,
     RepeatedModuleCommand,
     ControllerIdentification,
+    SerialProtocols,
+    SerialPrototypes,
 )
 
 
@@ -42,61 +49,57 @@ class ModuleInterface:  # pragma: no cover
     """The base class from which all custom ModuleInterface classes should inherit.
 
     Inheriting from this class grants all subclasses the static API that the MicroControllerInterface class uses to
-    interface with specific modules. In addition to the inherited API, each ModuleInterface subclass should encapsulate
-    module-specific parameters and data handling methods unique for each module family. See Notes for more details.
+    interface with specific module interfaces. It is essential that all abstract methods defined in this class are
+    implemented for each custom module interface implementation that subclasses this class.
 
     Notes:
-        Due to a high degree of custom module variability, it is currently not possible to provide a 'one-fits-all'
-        module Interface that is also highly efficient for real time communication. Therefore, similar to
-        ataraxis-micro-controller (AXMC) library, the interface for each custom module has to be implemented separately
-        on a need-base method. The (base) class exposes the static API that MicroControllerInterface class can use to
+        Similar to the ataraxis-micro-controller (AXMC) library, the interface class has to be implemented separately
+        for each custom module. The (base) class exposes the static API used by the MicroControllerInterface class to
         integrate each custom interface implementation with the general communication runtime cycle. To make this
         integration possible, this class defines some abstract (pure virtual) methods that developers have to implement
         for their interfaces. Follow the implementation guidelines in the docstrings of each abstract method and check
-        the default modules included with the library distribution for guidance.
+        the examples for further guidelines on how to implement each abstract method.
 
         When inheriting from this class, remember to call the parent's init method in the child class init method by
         using 'super().__init__()'! If this is not done, the MicroControllerInterface class will likely not be able to
-        properly interact with your ModuleInterface!
+        properly interact with your custom interface class!
 
         All data received from or sent to the microcontroller is automatically logged as byte-serialized numpy arrays.
-        Therefore, if you do not need any additional processing steps, such as sending or receiving data from Unity,
-        do not enable any custom processing flags. You will, however, have to implement all abstract methods, even if
-        the class instance does not use them due to its flag-configuration.
+        If you do not need any additional processing steps, such as sending or receiving data from Unity, do not enable
+        any custom processing flags when initializing this superclass!
+
+        In addition to interfacing with the module, the class also contains methods used to parse logged module data.
 
     Args:
-        module_type: The id-code that describes the broad type (family) of Modules managed by this interface class. This
-            value has to match the code used by the module implementation on the microcontroller. Valid byte-codes range
-            from 1 to 255.
-        type_name: The human-readable name for the type (family) of Modules managed by this interface class, e.g.:
-            'Rotary_Encoder'. This name is used in messages and some log files to help human operators in identifying
-            the module family.
-        module_id: The code that identifies the specific Module instance managed by the Interface class instance. This
-            is used to identify unique instances of the same module family, such as different rotary encoders if more
-            than one is used at the same time. Valid byte-codes range from 1 to 255.
-        instance_name: The human-readable name for the specific Module instance managed by the Interface class instance,
-            e.g.: 'Left_Corner_Touch_Sensor'. This name is used in messages and some log files to help human operators
-            in identifying the module instance.
-        unity_input_topics: A list of MQTT topics used by Unity to send commands to the module accessible through this
-            Interface instance. If the module should not receive commands from Unity, set to None. This list will be
-            used to initialize the UnityCommunication class instance to monitor the requested topics. If the module
-            supports receiving commands from Unity, use get_from_unity() method to implement the logic for accessing
-            and handling the incoming commands.
-        output_data: Determines whether the module accessible through this Interface instance sends data to Unity or
-            other processes. If the module is designed to output data in addition to logging it, use send_data()
-            method to implement the logic for pre-processing and sending the data.
+        module_type: The id-code that describes the broad type (family) of custom hardware modules managed by this
+            interface class. This value has to match the code used by the custom module implementation on the
+            microcontroller. Valid byte-codes range from 1 to 255.
+        module_id: The code that identifies the specific custom hardware module instance managed by the interface class
+            instance. This is used to identify unique modules in a broader module family, such as different rotary
+            encoders if more than one is used at the same time. Valid byte-codes range from 1 to 255.
+        error_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate runtime
+            errors. This set will be used during runtime to identify and raise error messages in response to
+            managed module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
+            for internal library use and should NOT be used as part of this set or custom hardware module class design.
+        unity_command_topics: A list of MQTT topics used by Unity to send commands to the module accessible through this
+            interface instance. If the interface does not receive commands from Unity, set this to None. The
+            MicroControllerInterface list will use this list to initialize the UnityCommunication class instance to
+            monitor the requested topics and will use the use parse_unity_command() method to convert Unity messages to
+            module-addressed command structures.
+        process_incoming_data: Determines whether the hardware module accessible through this interface instance sends
+            data that needs additional processing, other than logging (saving) it to disk. If this flag is set to True,
+            the MicroControllerInterface will use the process_received_data() method to process incoming module-sent
+            data.
 
     Attributes:
         _module_type: Stores the type (family) of the interfaced module.
-        _type_name: Stores the human-readable name of the module type (family).
         _module_id: Stores the specific module instance ID within the broader type (family).
-        _instance_name: Stores the human-readable name of the specific module instance.
         _type_id: Stores the type and id combined into a single uint16 value. This value should be unique for all
             possible type-id pairs and is used to ensure that each used module instance has a unique ID-type
             combination.
-        _output_data: Determines whether the instance outputs data to Unity or other processes.
-        _unity_input: Determines whether to receive commands from Unity.
-        _unity_input_topics: Stores the list of Unity topics to monitor for incoming commands.
+        _data_processing: Determines whether the instance contains additional processing steps for incoming data.
+        _unity_command_topics: Stores the list of Unity topics to monitor for incoming commands.
+        _error_codes: Stores all expected error-codes as a set.
 
     Raises:
         TypeError: If input arguments are not of the expected type.
@@ -105,54 +108,53 @@ class ModuleInterface:  # pragma: no cover
     def __init__(
         self,
         module_type: np.uint8,
-        type_name: str,
         module_id: np.uint8,
-        instance_name: str,
-        unity_input_topics: tuple[str, ...] | None,
+        error_codes: set,
+        unity_command_topics: tuple[str, ...] | None = None,
         *,
-        output_data: bool = False,
+        process_incoming_data: bool = False,
     ) -> None:
         # Ensures that input byte-codes use valid value ranges
-        if not isinstance(type_name, str):
-            message = (
-                f"Unable to initialize the ModuleInterface instance. Expected an string for 'type_name' argument, but "
-                f"encountered {type_name} of type {type(type_name).__name__}."
-            )
-            console.error(message=message, error=TypeError)
-        if not isinstance(instance_name, str):
-            message = (
-                f"Unable to initialize the ModuleInterface instance. Expected an string for 'instance_name' argument, "
-                f"but encountered {instance_name} of type {type(instance_name).__name__}."
-            )
-            console.error(message=message, error=TypeError)
         if not isinstance(module_type, np.uint8) or not 1 <= module_type <= 255:
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {instance_name} of type {type_name}. "
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_type' argument, but encountered "
                 f"{module_type} of type {type(module_type).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(module_id, np.uint8) or not 1 <= module_id <= 255:
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {instance_name} of type {type_name}. "
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_id' argument, but encountered "
                 f"{module_id} of type {type(module_id).__name__}."
             )
             console.error(message=message, error=TypeError)
-        if unity_input_topics is not None and not all(isinstance(topic, str) for topic in unity_input_topics):
+        if (
+            unity_command_topics is not None
+            or not isinstance(unity_command_topics, tuple)
+            or (
+                isinstance(unity_command_topics, tuple)
+                and not all(isinstance(topic, str) for topic in unity_command_topics)
+            )
+        ):
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {instance_name} of type {type_name}. "
-                f"Expected a tuple of strings or None for 'unity_input_topics' argument, but encountered "
-                f"{unity_input_topics} of type {type(unity_input_topics).__name__} and / or at least one non-string "
-                f"item."
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Expected a tuple of strings or None for 'unity_command_topics' argument, but encountered "
+                f"{unity_command_topics} of type {type(unity_command_topics).__name__} and / or at least one "
+                f"non-string item."
+            )
+            console.error(message=message, error=TypeError)
+        if not isinstance(error_codes, set) or not all(isinstance(code, np.uint8) for code in error_codes):
+            message = (
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Expected a set that stores numpy uint8 error event codes for the interfaced module, but encountered "
+                f"{error_codes} of type {type(error_codes).__name__} and / or at least one non-uint8 item."
             )
             console.error(message=message, error=TypeError)
 
         # Saves type and ID data into class attributes
         self._module_type: np.uint8 = module_type
-        self._type_name: str = str(type_name)
         self._module_id: np.uint8 = module_id
-        self._instance_name: str = str(instance_name)
 
         # Combines type and ID codes into a 16-bit value. This is used to ensure every module instance has a unique
         # ID + Type combination. This method is position-aware, so inverse type-id pairs will be coded as different
@@ -163,93 +165,95 @@ class ModuleInterface:  # pragma: no cover
 
         # Additional processing flags. Unity input is set based on whether there are input topics, other flags are
         # boolean and obtained from input arguments.
-        self._unity_input_topics: tuple[str, ...] = unity_input_topics if unity_input_topics is not None else tuple()
-        self._unity_input: bool = True if len(self._unity_input_topics) > 0 else False
-        self._output_data: bool = output_data if isinstance(output_data, bool) else False
+        self._unity_command_topics: tuple[str, ...] = (
+            unity_command_topics if unity_command_topics is not None else tuple()
+        )
+        self._data_processing: bool = process_incoming_data if isinstance(process_incoming_data, bool) else False
+
+        # Adds error-handling support. This allows raising errors when the module sends a message with an error code
+        # from the microcontroller to the PC.
+        self._error_codes: set = error_codes
 
     def __repr__(self) -> str:
         """Returns the string representation of the ModuleInterface instance."""
         message = (
-            f"ModuleInterface(type_code={self._module_type}, type_name={self._type_name}, "
-            f"instance_code={self._module_id}, instance_name={self._instance_name}, output_data={self._output_data}, "
-            f"unity_input_topics={self._unity_input_topics})"
+            f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
+            f"combined_type_id={self._type_id}, process_incoming_data={self._data_processing}, "
+            f"unity_command_topics={self._unity_command_topics}, error_codes={sorted(self._error_codes)})"
         )
         return message
 
     @abstractmethod
-    def get_from_unity(
+    def parse_unity_command(
         self, topic: str, payload: bytes | bytearray
     ) -> OneOffModuleCommand | RepeatedModuleCommand | None:
         """Packages and returns a ModuleCommand message to send to the microcontroller, based on the input Unity
-        message topic and payload.
+        command message topic and payload.
 
-        This method is called by the MicroControllerInterface when Unity sends a message to one of the topics monitored
-        by this ModuleInterface instance. This method then resolves, packages, and returns the appropriate ModuleCommand
-        message structure, based on the input message topic and payload.
+        This method is called by the MicroControllerInterface when Unity sends command messages to one of the topics
+        monitored by this ModuleInterface instance. This method resolves, packages, and returns the appropriate
+        ModuleCommand message structure, based on the input message topic and payload.
 
         Notes:
-            This method is called only if 'unity_input_topics' argument was used to set the monitored topics during
-            class initialization.
+            This method is called only if 'unity_command_topics' class argument was used to set the monitored topics
+            during class initialization.
+
+            See the /examples folder included with the library for examples on how to implement this method.
 
         Args:
-            topic: The MQTT topic to which Unity sent the module-addressed message.
+            topic: The MQTT topic to which Unity sent the module-addressed command.
             payload: The payload of the message.
 
         Returns:
             A OneOffModuleCommand or RepeatedModuleCommand instance that stores the message to be sent to the
-            microcontroller. None is a fallback return value used by ModuleInterface instances that are not
-            configured to receive data from Unity.
+            microcontroller. None, if the class instance is not configured to receive commands from Unity.
         """
-        # While abstract method should prompt the user to implement this method, the default error-condition is also
-        # included for additional safety.
         raise NotImplementedError(
-            f"get_from_unity() method for {self._type_name} module interface must be implemented when subclassing the "
-            f"base ModuleInterface class."
+            f"parse_unity_command() method must be implemented when subclassing the base ModuleInterface class."
         )
 
     @abstractmethod
-    def send_data(
+    def process_received_data(
         self,
         message: ModuleData | ModuleState,
         unity_communication: UnityCommunication,
         mp_queue: MPQueue,  # type: ignore
     ) -> None:
-        """Pre-processes the input message data and, if necessary, sends it to Unity and / or other processes.
+        """Processes the input message data and, if necessary, sends it to Unity and / or other processes.
 
         This method is called by the MicroControllerInterface when the ModuleInterface instance receives a message from
-        the microcontroller and is configured to output data to Unity or other processes. This method pre-processes the
-        received message and uses the input UnityCommunication instance or multiprocessing Queue instance to transmit
-        the data.
+        the microcontroller and is configured to process incoming data, in addition, to logging it to disk (this is done
+        by default). This method processes the received message and uses the input UnityCommunication instance or
+        multiprocessing Queue instance to transmit the data to other Ataraxis systems or processes on the same PC.
 
         Notes:
-            To send the data to Unity, call the send_data() method of the UnityCommunication class. Do not call any
-            other methods as part of this method runtime, unless you know what you are doing. To send the data to other
-            processes, call the put() method of the multiprocessing Queue object to pipe the data to other processes.
+            To send the data to Unity, call the send_data() method of the UnityCommunication class. To send the data to
+            other processes, call the put() method of the multiprocessing Queue object to pipe the data to other
+            processes.
 
-            This method is called only if 'output_data' flag was enabled during class initialization.
+            This method is called only if 'process_incoming_data' flag was enabled during class initialization.
+
+            See the /examples folder included with the library for examples on how to implement this method.
 
         Args:
-            message: The ModuleState or ModuleData object that stores the message received from the microcontroller.
-                This message always originates from the module with the same instance ID and type-code as used by the
-                ModuleInterface instance.
+            message: The ModuleState or ModuleData object that stores the message received from the module instance
+                running on the microcontroller.
             unity_communication: A fully configured instance of the UnityCommunication class to use for sending the
                 data to Unity.
             mp_queue: An instance of the multiprocessing Queue class that allows piping data to parallel processes.
         """
-        # While abstract method should prompt the user to implement this method, the default error-condition is also
-        # included for additional safety.
         raise NotImplementedError(
-            f"output_data() method for {self._type_name} module interface must be implemented when subclassing the "
-            f"base ModuleInterface class."
+            f"process_received_data() method must be implemented when subclassing the base ModuleInterface class."
         )
 
     @abstractmethod
-    def log_variables(self) -> NDArray[np.uint8] | None:
+    def serialize_class_constants(self) -> NDArray[np.uint8] | None:
         """Serializes module-specific variable data into a byte numpy array.
 
         This method is called by the MicroControllerInterface during initialization for each ModuleInterface instance
-        it manages. The array returned from this method is bundled with metadata that allows identifying the source of
-        the data, and it is then sent to the DataLogger instance that saves this data to disk.
+        it manages. The array returned by this method is sent to the DataLogger instance that saves this data to disk.
+        The returned data is automatically prepended with the necessary metadata to identify the specific module
+        instance that produced the data.
 
         Notes:
             This method is used to save instance-specific runtime data, such as conversion factors used to translate
@@ -260,17 +264,185 @@ class ModuleInterface:  # pragma: no cover
             If the instance does not need this functionality, implement this method with an empty return statement so
             that it returns Node.
 
+            See the /examples folder included with the library for examples on how to implement this method.
+
         Returns:
-            A shallow NumPy array that uses uint8 (byte) datatype and stores the serialized data to send to the logger.
-            Note, the instance and type IDs of the module and the ID of the microcontroller will be combined and
-            pre-pended to the data before it is sent to the logger. None, if the instance does not need to log any
-            variable data.
+            A one-dimensional NumPy array that uses uint8 (byte) datatype and stores the serialized data to send to the
+            logger. None, if the instance does not need to log any variable data.
         """
         raise NotImplementedError(
-            f"log_variables() method for {self._type_name} module interface must be implemented when "
-            f"subclassing the base ModuleInterface class."
+            f"serialize_class_constants() method must be implemented when subclassing the base ModuleInterface class."
         )
 
+    @abstractmethod
+    def deserialize_class_constants(self, serialized_constants: NDArray[np.uint8]) -> tuple[Any, ...] | None:
+        """Extracts the class runtime constants stored in the input bytes array.
+
+        This method decodes the constants from the array generated by the serialize_class_constants() method. It is
+        called by the extract_logged_data() method to decode the constants logged as serialized bytes array into
+        individual values and return them as a tuple.
+
+        Notes:
+            Unlike other class abstract methods, this method is not used during data acquisition runtime. Instead, it is
+            used during post-runtime data processing. As part of that process, the data logged as .npz archives during
+            runtime is transformed into parquet datasets for further processing. This method decodes the runtime
+            constants, so that they can be used during data pre-processing.
+
+        Args:
+            serialized_constants: A one-dimensional NumPy array that stores the serialized data to be decoded.
+
+        Returns:
+            A tuple containing the deserialized constants. None, if the instance does not need to log any variable data.
+        """
+        raise NotImplementedError(
+            f"deserialize_class_constants() method must be implemented when subclassing the base ModuleInterface class."
+        )
+
+    def extract_logged_data(self, log_path: Path) -> dict[np.uint8, list[Any] | tuple[Any, ...]]:
+        """Extracts the module-specific data, logged by the interface class during runtime.
+
+        This method reads the compressed '.npz' archives generated by the MicroControllerInterface class that works
+        with this ModuleInterface during runtime. This method reads logged data and extracts all event-codes and
+        data objects transmitted by the interfaced module instance from the microcontroller. Additionally, this method
+        extracts, the class runtime constants, saved by the serialize_class_constants() method.
+
+        This method is intended to be used by the DataParser class to transform the .npz log files into Parquet datasets
+        used for further data analysis.
+
+        Args:
+            log_path: The path to the compressed .npz file generated by the MicroControllerInterface that managed this
+                ModuleInterface during runtime.
+
+        Returns:
+            A dictionary that uses numpy uint8 event codes as keys. Event code 0 is used to store the tuple of extracted
+            runtime constants. Event codes from 51 onwards are used to store lists of tuples. Each tuple contains
+            (in this order): A uint64 timestamp, representing the number of microseconds since the Epoch onset,
+            data object (or None, for state-only events) and byte code of the active command when the State/Data message
+            was sent.
+
+        Raises:
+            ValueError: If the input path is not valid or does not point to an existing .npz archive.
+        """
+
+        # Ensures that the input path is valid and points to an existing .npz archive.
+        if (
+            not isinstance(log_path, Path)
+            or not log_path.exists()
+            or not log_path.is_file()
+            or not log_path.suffix == ".npz"
+        ):
+            message = (
+                f"Unable to extract data for module {self._module_id} of type {self._module_type} from the log file. "
+                f"Expected a valid Path object, pointing to the compressed numpy archive file (.npz), as 'log_path' "
+                f"argument, but instead encountered {log_path} of type {type(log_path).__name__}."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Loads the archive into RAM
+        archive: NpzFile = np.load(file=log_path)
+
+        # Precreates the dictionary to store the extracted data.
+        event_data = {}
+
+        # Locates the logging onset timestamp and serialized module constants. The onset is used to convert the
+        # timestamps for logged module data into absolute UTC timestamps. Originally, all timestamps other than onset
+        # are stored as elapsed time in microseconds relative to onset timestamp. Serialized constants are often used
+        # during further data processing, and they are extracted as an array of bytes. It is expected that the user will
+        # deserialize the constants as necessary for their data processing needs.
+        timestamp_offset = 0
+        onset_us = np.uint64(0)
+        timestamp: np.uint64
+        constants_found = False
+        for number, item in enumerate(archive.files):
+            message = archive[item]  # Extracts message payload from the compressed .npy file
+
+            # Recovers the uint64 timestamp value from each message. The timestamp occupies the first 8 bytes of each
+            # logged message. This iteration looks for two specific 'timestamp' values: 0 and maximum uint64 value.
+            timestamp = np.uint64(message[0:8].view(np.uint64)[0].copy())
+
+            # Each module can only serialize and save one package of constants. The constants are serialized before the
+            # onset timestamp. Therefore, it is expected that the constants are found before the onset timestamp and
+            # that it will only be done once.
+            if not constants_found and timestamp == np.iinfo(np.uint64).max:
+                # Extracts the message payload.
+                payload = message[9:]
+
+                # Checks if the payload belongs to the module instance managed by this interface class.
+                # The payload uses first and second values to store type and ID codes of the interface that created the
+                # constants' payload.
+                if payload[0] != self._module_type or payload[1] != self._module_id:
+                    continue
+
+                # Extracts the serialized data and writes it into the dictionary under 'event-code' 0. Since 0 is not a
+                # valid event code, this does not clash with the rest of the processing steps.
+                variable_data = payload[2:].copy()
+                # Unpacks constants into a tuple and, fi the operation succeeds, saves the data into dictionary.
+                unpacked_data = self.deserialize_class_constants(variable_data)
+                if unpacked_data is not None:
+                    event_data[np.uint8(0)] = unpacked_data
+                constants_found = True
+
+            # If timestamp value is 0, the message stores the onset timestamp. Skips looking at the 8-bit source ID
+            # that follows the timestamp, as the input to this method should already belong to the correct source.
+            if timestamp == 0:
+                # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
+                onset_us = np.uint64(message[9:17].view("<i8")[0].copy())
+
+                # Breaks the loop onc the onset is found. Generally, the onset is expected to be found very early into
+                # the loop
+                timestamp_offset = number  # Records the item number at which the onset value was found.
+                break
+
+        # Once the onset has been discovered, processes the rest of the module instance data. Continues searching from
+        # the position where the offset is found.
+        for item in archive.files[timestamp_offset + 1 :]:
+            message = archive[item]
+
+            # Extracts the payload from each logged message.
+            payload = message[9:]
+
+            # Ignores all payloads other than State and Data messages from the specific module instance managed by this
+            # interface.
+            if (
+                (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA)
+                or payload[1] != self._module_type
+                or payload[2] != self._module_id
+            ):
+                continue
+
+            # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
+            # message, in microseconds since epoch onset.
+            elapsed_microseconds = np.uint64(message[0:8].view(np.uint64)[0].copy())
+            timestamp = onset_us + elapsed_microseconds
+
+            # Extracts command, event and, if supported, data object from the message payload.
+            command_code = np.uint8(payload[3])
+            event = np.uint8(payload[4])
+
+            # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
+            # in size. Extracts and formats the data object, included with the logged payload.
+            data: Any = None
+            if len(payload) > 5:
+                # noinspection PyTypeChecker
+                prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
+
+                # Depending on the prototype, reads the data object as an array or scalar
+                if isinstance(prototype, np.ndarray):
+                    data = payload[6:].view(prototype.dtype)[:]
+                else:
+                    data = payload[6:].view(prototype.dtype)[0]
+
+            # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event code,
+            # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
+            # the active command code.
+            if event not in event_data:
+                event_data[event] = []
+
+            event_data[event].append((timestamp, data, command_code))
+
+        return event_data
+
+    @property
     def dequeue_command(self) -> DequeueModuleCommand:
         """Returns the command that instructs the microcontroller to clear all queued commands for the specific module
         instance managed by this ModuleInterface.
@@ -283,36 +455,21 @@ class ModuleInterface:  # pragma: no cover
         return self._module_type
 
     @property
-    def type_name(self) -> str:
-        """Returns the human-readable name for the type (family) of Modules managed by this interface class."""
-        return self._type_name
-
-    @property
     def module_id(self) -> np.uint8:
         """Returns the code that identifies the specific Module instance managed by the Interface class instance."""
         return self._module_id
-
-    @property
-    def instance_name(self) -> str:
-        """Returns the human-readable name for the specific Module instance managed by the Interface class instance."""
-        return self._instance_name
 
     @property
     def output_data(self) -> bool:
         """Returns True if the class is configured to send the data received from the module instance to Unity or
         other processes.
         """
-        return self._output_data
+        return self._data_processing
 
     @property
-    def unity_input(self) -> bool:
-        """Returns True if the class is configured to receive commands from Unity and send them to module instance."""
-        return self._unity_input
-
-    @property
-    def unity_input_topics(self) -> tuple[str, ...]:
+    def unity_command_topics(self) -> tuple[str, ...]:
         """Returns the tuple of MQTT topics this instance monitors for incoming Unity commands."""
-        return self._unity_input_topics
+        return self._unity_command_topics
 
     @property
     def type_id(self) -> np.uint16:
@@ -320,6 +477,11 @@ class ModuleInterface:  # pragma: no cover
         of the instance.
         """
         return self._type_id
+
+    @property
+    def error_codes(self) -> set[np.uint8]:
+        """Returns the set of error event-codes used by the module instance."""
+        return self._error_codes
 
 
 class MicroControllerInterface:  # pragma: no cover
@@ -545,11 +707,6 @@ class MicroControllerInterface:  # pragma: no cover
 
         processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
 
-        # This dictionary is used below to serialize instance_id-name pairs for each ModuleInterface instance and store
-        # them under their type-codes. This preserves the hierarchy of which module instances belong to which
-        # module families (types).
-        processed_type_codes: dict[np.uint8, tuple[str, list[NDArray[np.uint8]]]] = {}
-
         # Loops over all module instances and processes their data
         for module in self._modules:
             # Extracts type and id codes of the module
@@ -570,18 +727,9 @@ class MicroControllerInterface:  # pragma: no cover
             # Adds each processed type+id code to the tracker set
             processed_type_ids.add(module.type_id)
 
-            # For each unique module type, adds a new entry into the tracker dictionary. That entry contains the
-            # human-readable name for the type and a list used to aggregate the code-name serialized data for all
-            # instances of this module type.
-            if module_type not in processed_type_codes:
-                processed_type_codes[module_type] = (module.type_name, [])
-
-            # Adds each module instance id-name serialization to its type's list inside the tracker dictionary
-            processed_type_codes[module_type][1].append(self._serialize_code_name_pair(module_id, module.instance_name))
-
             # For each module instance, calls the method that returns the serialized variable data and logs it by
             # sending the data to the DataLogger
-            variable_data = module.log_variables()
+            variable_data = module.serialize_class_constants()
 
             # Appends type and id codes to the variable data package
             header = np.array([module_type, module_id], dtype=np.uint8)
@@ -601,31 +749,6 @@ class MicroControllerInterface:  # pragma: no cover
 
             # Logs variable data for each module instance by sending it to the logger queue.
             self._logger_queue.put(package)
-
-        # After processing all modules, serializes type data in the order types were added to the storage dictionary
-        # This forms type-blocks where the data for the type is followed by the data for all instances of that type.
-        for type_code, (type_name, instance_blocks) in processed_type_codes.items():
-            # Appends the serialized type_code-name pair to the beginning of each type block
-            code_name_blocks.append(self._serialize_code_name_pair(type_code, type_name))
-            # Then, appends the number of Interface instances that were found under that module_type code. This is
-            # used in conjunction with the type-count recorded after adding controller information to decode the
-            # serialized data.
-            code_name_blocks.append(np.array([len(instance_blocks)], dtype=np.uint8))
-            # Finally, appends all instance_id-name pairs after the instance count
-            code_name_blocks.extend(instance_blocks)
-
-        # Combines all blocks into the final bytes array
-        serialized_code_names = np.concatenate(code_name_blocks)
-
-        # Creates and send the resultant controller layout map (code-name map) to the logger queue. Similar to the
-        # variable log package, uses a very large timestamp, which is exactly 1 value below the maximum number supported
-        # by np.uint64
-        code_name_package = LogPackage(
-            source_id=int(self._controller_id),
-            time_stamp=np.iinfo(np.uint64).max - 1,
-            serialized_data=serialized_code_names,
-        )
-        self._logger_queue.put(code_name_package)
 
     def __repr__(self) -> str:
         """Returns a string representation of the class instance."""
@@ -951,7 +1074,7 @@ class MicroControllerInterface:  # pragma: no cover
             # monitoring the necessary topics and allow passing the data received on that topic to the
             # appropriate module class for processing.
             if module.unity_input:
-                for topic in module.unity_input_topics:
+                for topic in module.unity_command_topics:
                     # Extends the list of module indices that listen for that particular topic. This allows addressing
                     # multiple modules at the same time, as long as they all listen to the same topic.
                     existing_modules = unity_input_map.get(topic, [])
@@ -982,7 +1105,6 @@ class MicroControllerInterface:  # pragma: no cover
             logger_queue=logger_queue,
             baudrate=baudrate,
             microcontroller_serial_buffer_size=microcontroller_buffer_size,
-            verbose=verbose,
         )
 
         # Initializes the unity_communication class and connects to the MQTT broker. If the interface does not
@@ -1030,7 +1152,7 @@ class MicroControllerInterface:  # pragma: no cover
                     # topic is guaranteed to be inside the unity_input_map dictionary and have at least one Module which
                     # can process its data.
                     for i in unity_input_map[topic]:
-                        out_data = modules[i].get_from_unity(topic=topic, payload=payload)
+                        out_data = modules[i].parse_unity_command(topic=topic, payload=payload)
                         if out_data is not None:
                             serial_communication.send_message(out_data)  # Transmits the data to the microcontroller
 
@@ -1056,7 +1178,7 @@ class MicroControllerInterface:  # pragma: no cover
                     # Depending on whether the combined code is inside the output_map, executes the target module's
                     # method to handle data output.
                     if target_type_id in output_map:
-                        modules[output_map[target_type_id]].send_data(
+                        modules[output_map[target_type_id]].process_received_data(
                             message=in_data,
                             unity_communication=unity_communication,
                             mp_queue=output_queue,
@@ -1118,3 +1240,17 @@ class MicroControllerInterface:  # pragma: no cover
             buffer.unlink()
         except FileNotFoundError:
             pass
+
+
+# self._error_map[np.uint8(1)] = (
+#     f"The custom hardware module with type {module_type} and id {module_id} ran into an error when "
+#     f"transmitting State or Data message from the microcontroller to the PC. Full error details, including the "
+#     f"TransportLayer and Communication status codes, have been saved to the data log."
+# )
+#
+# # Code 3: command not recognized error
+# self._error_map[np.uint8(3)] = (
+#     f"The custom hardware module with type {module_type} and id {module_id} did not recognize the command code "
+#     f"received from the PC and was not able to execute the requested command. Full error details, including "
+#     f"the TransportLayer and Communication status codes, have been saved to the data log."
+# )

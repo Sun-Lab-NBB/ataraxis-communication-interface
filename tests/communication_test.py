@@ -663,10 +663,9 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
     assert isinstance(comm._reception_code, ReceptionCode)
     assert comm._source_id == 1
     assert comm._usb_port == "TEST"
-    assert not comm._verbose
 
     # Test string representation
-    expected_repr = "SerialCommunication(usb_port=TEST, source_id=1, verbose=False)."
+    expected_repr = "SerialCommunication(usb_port=TEST, source_id=1)."
     assert repr(comm) == expected_repr
 
 
@@ -676,7 +675,6 @@ def test_serial_communication_send_message(logger_queue) -> None:
         usb_port="TEST",
         logger_queue=logger_queue,
         source_id=np.uint8(1),
-        verbose=True,
         test_mode=True,
         microcontroller_serial_buffer_size=300,
     )
@@ -770,7 +768,6 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
         usb_port="TEST",
         logger_queue=logger_queue,
         source_id=np.uint8(1),
-        verbose=True,
         test_mode=True,
         microcontroller_serial_buffer_size=300,
     )

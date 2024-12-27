@@ -1,15 +1,19 @@
-Welcome to ataraxis-transport-layer API documentation page
-==========================================================
+Welcome to ataraxis-communication-interface API documentation page
+==================================================================
 
-ataraxis-transport-layer is a Python library that provides classes and methods that enable bidirectional communication
-between project Ataraxis systems.
+ataraxis-communication-interface is a Python library that provides classes and methods for interfacing with other
+project Ataraxis systems and platforms.
 
 This library is part of the broader 'Ataraxis' science-automation project, developed in the
-`Sun Lab <https://neuroai.github.io/sunlab/>`_ at Cornell University.
+`Sun Lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It has a companion library written in C++,
+`ataraxis-micro-controller <https://github.com/Sun-Lab-NBB/ataraxis-micro-controller>`_, intended for
+Arduino and Teensy microcontrollers managing user-defined custom hardware modules that need to be interfaced through the
+PC client.
 
 This website only contains the API documentation for the classes and methods offered by this library. See the project
 GitHub repository for installation instructions and library usage examples:
-`ataraxis-transport-layer GitHub repository <https://github.com/Sun-Lab-NBB/ataraxis-transport-layer>`_.
+`ataraxis-communication-interface GitHub repository <https://github.com/Sun-Lab-NBB/ataraxis-communication-interface>`_.
 
-.. _`ataraxis-transport-layer GitHub repository`: https://github.com/Sun-Lab-NBB/ataraxis-transport-layer
+.. _`ataraxis-communication-interface GitHub repository`:https://github.com/Sun-Lab-NBB/ataraxis-communication-interface
+.. _`ataraxis-micro-controller`: https://github.com/Sun-Lab-NBB/ataraxis-micro-controlle
 .. _`Sun Lab`: https://neuroai.github.io/sunlab/
