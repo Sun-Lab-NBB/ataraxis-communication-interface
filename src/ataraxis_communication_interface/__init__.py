@@ -5,9 +5,6 @@ API documentation: https://ataraxis-communication-interface-api-docs.netlify.app
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
-from .microcontroller_interface import MicroControllerInterface, ModuleInterface
+from .microcontroller_interface import ModuleInterface, MicroControllerInterface
 
-__all__ = [
-    "MicroControllerInterface",
-    "ModuleInterface"
-]
+__all__ = ["MicroControllerInterface", "ModuleInterface"]

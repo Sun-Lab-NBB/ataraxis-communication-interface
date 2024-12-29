@@ -10,6 +10,8 @@ controller.
 
 from abc import abstractmethod
 import sys
+from typing import Any
+from pathlib import Path
 from threading import Thread
 from multiprocessing import (
     Queue as MPQueue,
@@ -18,32 +20,31 @@ from multiprocessing import (
 )
 from multiprocessing.managers import SyncManager
 from multiprocessing.shared_memory import SharedMemory
-from typing import Any
 
 import numpy as np
-from numpy.lib.npyio import NpzFile
+from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
+from numpy.lib.npyio import NpzFile
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
-from pathlib import Path
 
 from .communication import (
+    KernelData,
     ModuleData,
+    KernelState,
     ModuleState,
     KernelCommand,
+    SerialProtocols,
     KernelParameters,
-    KernelData,
-    KernelState,
     ModuleParameters,
+    SerialPrototypes,
     UnityCommunication,
     OneOffModuleCommand,
     SerialCommunication,
     DequeueModuleCommand,
+    ModuleIdentification,
     RepeatedModuleCommand,
     ControllerIdentification,
-    ModuleIdentification,
-    SerialProtocols,
-    SerialPrototypes,
 )
 
 
@@ -303,12 +304,12 @@ class ModuleInterface:  # pragma: no cover
             or not log_path.is_file()
             or not log_path.suffix == ".npz"
         ):
-            message = (
+            error_message = (
                 f"Unable to extract data for module {self._module_id} of type {self._module_type} from the log file. "
                 f"Expected a valid Path object, pointing to the compressed numpy archive file (.npz), as 'log_path' "
                 f"argument, but instead encountered {log_path} of type {type(log_path).__name__}."
             )
-            console.error(message=message, error=ValueError)
+            console.error(message=error_message, error=ValueError)
 
         # Loads the archive into RAM
         archive: NpzFile = np.load(file=log_path)
@@ -323,7 +324,7 @@ class ModuleInterface:  # pragma: no cover
         onset_us = np.uint64(0)
         timestamp: np.uint64
         for number, item in enumerate(archive.files):
-            message = archive[item]  # Extracts message payload from the compressed .npy file
+            message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
 
             # Recovers the uint64 timestamp value from each message. The timestamp occupies the first 8 bytes of each
             # logged message. If timestamp value is 0, the message contains the onset timestamp value stored as 8-byte
@@ -373,8 +374,16 @@ class ModuleInterface:  # pragma: no cover
                 # Depending on the prototype, reads the data object as an array or scalar
                 if isinstance(prototype, np.ndarray):
                     data = payload[6:].view(prototype.dtype)[:]
-                else:
+                elif prototype is not None:
                     data = payload[6:].view(prototype.dtype)[0]
+                else:
+                    error_message = (
+                        f"Unable to extract data for module {self._module_id} of type {self._module_type} from the log "
+                        f"file. Failed to obtain the prototype to read the data object for message with "
+                        f"event code {event} and command code {command_code}. No matching prototype was found for "
+                        f"prototype code {payload[5]}."
+                    )
+                    console.error(message=error_message, error=ValueError)
 
             # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event code,
             # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
@@ -779,7 +788,6 @@ class MicroControllerInterface:  # pragma: no cover
         start_timer.reset()
         # Blocks until the microcontroller has finished all initialization steps or encounters an initialization error.
         while self._terminator_array.read_data(1) != 1:
-
             # Generally, there are two ways initialization failure is detected. One is if the managed process
             # terminates, which would be the case if any subclass used in the communication process raises an exception.
             # Another way if the status tracker never reaches success code (1). This latter case would likely indicate
@@ -907,11 +915,10 @@ class MicroControllerInterface:  # pragma: no cover
             # If the module is configured to receive commands from unity, sets up the necessary assets. For this,
             # extracts the monitored topics from each module
             for topic in module.unity_command_topics:
-
                 # Extends the list of module interfaces that listen for that particular topic. This allows addressing
                 # multiple modules at the same time, as long as they all listen to the same topic.
                 existing_modules = unity_command_map.get(topic, [])
-                unity_command_map[topic] = existing_modules + [module]
+                unity_command_map[topic] = existing_modules + [module]  # type: ignore
 
             # If the module is configured to process incoming data or raise runtime errors, maps its type+id combined
             # code to the interface instance. This is used to quickly find the module interface instance addressed by
@@ -940,7 +947,6 @@ class MicroControllerInterface:  # pragma: no cover
         timeout_timer.reset()
         response = None
         while not isinstance(response, ControllerIdentification):
-
             # If no response is received within 2 seconds, repeats the identification request. Older microcontrollers
             # that reset on serial connection may miss the first request if they were resetting their communication
             # hardware, but should receive the second request.
@@ -1047,7 +1053,6 @@ class MicroControllerInterface:  # pragma: no cover
             # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
             # the central process are fully carried out before the communication is terminated.
             while not terminator_array.read_data(index=0, convert_output=True) or not input_queue.empty():
-
                 # Main data sending loop. The method will sequentially retrieve the queued messages and send them to
                 # the microcontroller.
                 while not input_queue.empty():
@@ -1056,11 +1061,10 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Unity data sending loop
                 while unity_communication.has_data:
-
                     # If UnityCommunication has received data, loops over all interfaces that requested the data from
                     # this topic and calls their unity data processing method while passing it the topic and the
                     # received message payload.
-                    topic, payload = unity_communication.get_data()  # type: ignore
+                    topic, payload = unity_communication.get_data()
 
                     # Each incoming message will be processed by each module subscribed to this topic. Since
                     # UnityCommunication is configured to only listen to topics submitted by the interface classes, the
@@ -1074,7 +1078,7 @@ class MicroControllerInterface:  # pragma: no cover
                                 topic=topic,
                                 payload=payload,
                             )
-                        )  # type: ignore
+                        )
 
                 # Attempts to receive the data from microcontroller
                 in_data = serial_communication.receive_message()
@@ -1195,7 +1199,6 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Event codes 51 or above are used by the module developers to communicate states and errors.
                 if isinstance(in_data, (ModuleState, ModuleData)) and in_data.event > 50:
-
                     # Computes the combined type and id code for the incoming data. This is used to find the specific
                     # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
                     # additional processing methods.
