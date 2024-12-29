@@ -21,11 +21,10 @@ from multiprocessing.shared_memory import SharedMemory
 from typing import Any
 
 import numpy as np
-from numpy.typing import NDArray
 from numpy.lib.npyio import NpzFile
 from ataraxis_time import PrecisionTimer
-from ataraxis_base_utilities import LogLevel, console
-from ataraxis_data_structures import DataLogger, LogPackage, SharedMemoryArray
+from ataraxis_base_utilities import console
+from ataraxis_data_structures import DataLogger, SharedMemoryArray
 from pathlib import Path
 
 from .communication import (
@@ -33,6 +32,8 @@ from .communication import (
     ModuleState,
     KernelCommand,
     KernelParameters,
+    KernelData,
+    KernelState,
     ModuleParameters,
     UnityCommunication,
     OneOffModuleCommand,
@@ -40,6 +41,7 @@ from .communication import (
     DequeueModuleCommand,
     RepeatedModuleCommand,
     ControllerIdentification,
+    ModuleIdentification,
     SerialProtocols,
     SerialPrototypes,
 )
@@ -81,15 +83,17 @@ class ModuleInterface:  # pragma: no cover
             errors. This set will be used during runtime to identify and raise error messages in response to
             managed module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
             for internal library use and should NOT be used as part of this set or custom hardware module class design.
-        unity_command_topics: A list of MQTT topics used by Unity to send commands to the module accessible through this
+            If the class does not produce runtime errors, set to None.
+        data_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate states
+            and data that needs additional processing. All incoming messages from the module are automatically logged to
+            disk during communication runtime. Messages with event-codes from this set would also be passed to the
+            process_received_data() method for additional processing. If the class does not require additional
+            processing for any incoming data, set to None.
+        unity_command_topics: A set of MQTT topics used by Unity to send commands to the module accessible through this
             interface instance. If the interface does not receive commands from Unity, set this to None. The
-            MicroControllerInterface list will use this list to initialize the UnityCommunication class instance to
+            MicroControllerInterface set will use the set to initialize the UnityCommunication class instance to
             monitor the requested topics and will use the use parse_unity_command() method to convert Unity messages to
             module-addressed command structures.
-        process_incoming_data: Determines whether the hardware module accessible through this interface instance sends
-            data that needs additional processing, other than logging (saving) it to disk. If this flag is set to True,
-            the MicroControllerInterface will use the process_received_data() method to process incoming module-sent
-            data.
 
     Attributes:
         _module_type: Stores the type (family) of the interfaced module.
@@ -97,8 +101,8 @@ class ModuleInterface:  # pragma: no cover
         _type_id: Stores the type and id combined into a single uint16 value. This value should be unique for all
             possible type-id pairs and is used to ensure that each used module instance has a unique ID-type
             combination.
-        _data_processing: Determines whether the instance contains additional processing steps for incoming data.
-        _unity_command_topics: Stores the list of Unity topics to monitor for incoming commands.
+        _data_codes: Stores all event-codes that require additional processing.
+        _unity_command_topics: Stores Unity topics to monitor for incoming commands.
         _error_codes: Stores all expected error-codes as a set.
 
     Raises:
@@ -109,10 +113,9 @@ class ModuleInterface:  # pragma: no cover
         self,
         module_type: np.uint8,
         module_id: np.uint8,
-        error_codes: set,
-        unity_command_topics: tuple[str, ...] | None = None,
-        *,
-        process_incoming_data: bool = False,
+        error_codes: set[np.uint8] | None = None,
+        data_codes: set[np.uint8] | None = None,
+        unity_command_topics: set[str] | None = None,
     ) -> None:
         # Ensures that input byte-codes use valid value ranges
         if not isinstance(module_type, np.uint8) or not 1 <= module_type <= 255:
@@ -131,24 +134,39 @@ class ModuleInterface:  # pragma: no cover
             console.error(message=message, error=TypeError)
         if (
             unity_command_topics is not None
-            or not isinstance(unity_command_topics, tuple)
+            or not isinstance(unity_command_topics, set)
             or (
-                isinstance(unity_command_topics, tuple)
+                isinstance(unity_command_topics, set)
                 and not all(isinstance(topic, str) for topic in unity_command_topics)
             )
         ):
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
-                f"Expected a tuple of strings or None for 'unity_command_topics' argument, but encountered "
+                f"Expected a set of strings or None for 'unity_command_topics' argument, but encountered "
                 f"{unity_command_topics} of type {type(unity_command_topics).__name__} and / or at least one "
                 f"non-string item."
             )
             console.error(message=message, error=TypeError)
-        if not isinstance(error_codes, set) or not all(isinstance(code, np.uint8) for code in error_codes):
+        if (
+            error_codes is not None
+            or not isinstance(error_codes, set)
+            or (isinstance(error_codes, set) and not all(isinstance(code, np.uint8) for code in error_codes))
+        ):
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
-                f"Expected a set that stores numpy uint8 error event codes for the interfaced module, but encountered "
+                f"Expected a set of numpy uint8 values or None for 'error_codes' argument, but encountered "
                 f"{error_codes} of type {type(error_codes).__name__} and / or at least one non-uint8 item."
+            )
+            console.error(message=message, error=TypeError)
+        if (
+            data_codes is not None
+            or not isinstance(data_codes, set)
+            or (isinstance(data_codes, set) and not all(isinstance(code, np.uint8) for code in data_codes))
+        ):
+            message = (
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Expected a set of numpy uint8 values or None for 'data_codes' argument, but encountered "
+                f"{data_codes} of type {type(data_codes).__name__} and / or at least one non-uint8 item."
             )
             console.error(message=message, error=TypeError)
 
@@ -163,23 +181,20 @@ class ModuleInterface:  # pragma: no cover
             (self._module_type.astype(np.uint16) << 8) | self._module_id.astype(np.uint16)
         )
 
-        # Additional processing flags. Unity input is set based on whether there are input topics, other flags are
-        # boolean and obtained from input arguments.
-        self._unity_command_topics: tuple[str, ...] = (
-            unity_command_topics if unity_command_topics is not None else tuple()
-        )
-        self._data_processing: bool = process_incoming_data if isinstance(process_incoming_data, bool) else False
+        # Resolves code and topics sets for additional data input and output processing
+        self._unity_command_topics: set[str] = unity_command_topics if unity_command_topics is not None else set()
+        self._data_codes: set[np.uint8] = data_codes if data_codes is not None else set()
 
         # Adds error-handling support. This allows raising errors when the module sends a message with an error code
         # from the microcontroller to the PC.
-        self._error_codes: set = error_codes
+        self._error_codes: set[np.uint8] = error_codes if error_codes is not None else set()
 
     def __repr__(self) -> str:
         """Returns the string representation of the ModuleInterface instance."""
         message = (
             f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
-            f"combined_type_id={self._type_id}, process_incoming_data={self._data_processing}, "
-            f"unity_command_topics={self._unity_command_topics}, error_codes={sorted(self._error_codes)})"
+            f"combined_type_id={self._type_id}, unity_command_topics={self._unity_command_topics}, "
+            f"data_codes={sorted(self._data_codes)}, error_codes={sorted(self._error_codes)})"
         )
         return message
 
@@ -196,7 +211,8 @@ class ModuleInterface:  # pragma: no cover
 
         Notes:
             This method is called only if 'unity_command_topics' class argument was used to set the monitored topics
-            during class initialization.
+            during class initialization. This method will never receive a message with a topic that is not inside the
+            'unity_command_topics' set.
 
             See the /examples folder included with the library for examples on how to implement this method.
 
@@ -222,16 +238,18 @@ class ModuleInterface:  # pragma: no cover
         """Processes the input message data and, if necessary, sends it to Unity and / or other processes.
 
         This method is called by the MicroControllerInterface when the ModuleInterface instance receives a message from
-        the microcontroller and is configured to process incoming data, in addition, to logging it to disk (this is done
-        by default). This method processes the received message and uses the input UnityCommunication instance or
-        multiprocessing Queue instance to transmit the data to other Ataraxis systems or processes on the same PC.
+        the microcontroller that uses an event code provided at class initialization as 'data_codes' argument. This
+        method processes the received message and uses the input UnityCommunication instance or multiprocessing Queue
+        instance to transmit the data to other Ataraxis systems or processes.
 
         Notes:
             To send the data to Unity, call the send_data() method of the UnityCommunication class. To send the data to
             other processes, call the put() method of the multiprocessing Queue object to pipe the data to other
             processes.
 
-            This method is called only if 'process_incoming_data' flag was enabled during class initialization.
+            This method is called only if 'data_codes' class argument was used to specify the event codes of messages
+            that require further processing other than logging, which is done by default for all messages. This method
+            will never receive a message with an event code that is not inside the 'data_codes' set.
 
             See the /examples folder included with the library for examples on how to implement this method.
 
@@ -246,79 +264,33 @@ class ModuleInterface:  # pragma: no cover
             f"process_received_data() method must be implemented when subclassing the base ModuleInterface class."
         )
 
-    @abstractmethod
-    def serialize_class_constants(self) -> NDArray[np.uint8] | None:
-        """Serializes module-specific variable data into a byte numpy array.
-
-        This method is called by the MicroControllerInterface during initialization for each ModuleInterface instance
-        it manages. The array returned by this method is sent to the DataLogger instance that saves this data to disk.
-        The returned data is automatically prepended with the necessary metadata to identify the specific module
-        instance that produced the data.
-
-        Notes:
-            This method is used to save instance-specific runtime data, such as conversion factors used to translate
-            microcontroller-received data into a format expected by Unity. Use this method to save any information that
-            may be helpful for post-processing or analyzing the rest of the data logged during runtime. The only
-            requirement is that all data is serialized into a byte numpy array.
-
-            If the instance does not need this functionality, implement this method with an empty return statement so
-            that it returns Node.
-
-            See the /examples folder included with the library for examples on how to implement this method.
-
-        Returns:
-            A one-dimensional NumPy array that uses uint8 (byte) datatype and stores the serialized data to send to the
-            logger. None, if the instance does not need to log any variable data.
-        """
-        raise NotImplementedError(
-            f"serialize_class_constants() method must be implemented when subclassing the base ModuleInterface class."
-        )
-
-    @abstractmethod
-    def deserialize_class_constants(self, serialized_constants: NDArray[np.uint8]) -> tuple[Any, ...] | None:
-        """Extracts the class runtime constants stored in the input bytes array.
-
-        This method decodes the constants from the array generated by the serialize_class_constants() method. It is
-        called by the extract_logged_data() method to decode the constants logged as serialized bytes array into
-        individual values and return them as a tuple.
-
-        Notes:
-            Unlike other class abstract methods, this method is not used during data acquisition runtime. Instead, it is
-            used during post-runtime data processing. As part of that process, the data logged as .npz archives during
-            runtime is transformed into parquet datasets for further processing. This method decodes the runtime
-            constants, so that they can be used during data pre-processing.
-
-        Args:
-            serialized_constants: A one-dimensional NumPy array that stores the serialized data to be decoded.
-
-        Returns:
-            A tuple containing the deserialized constants. None, if the instance does not need to log any variable data.
-        """
-        raise NotImplementedError(
-            f"deserialize_class_constants() method must be implemented when subclassing the base ModuleInterface class."
-        )
-
-    def extract_logged_data(self, log_path: Path) -> dict[np.uint8, list[Any] | tuple[Any, ...]]:
-        """Extracts the module-specific data, logged by the interface class during runtime.
+    def extract_logged_data(self, log_path: Path) -> dict[np.uint8, list[tuple[np.uint64, Any, np.uint8]]]:
+        """Extracts the data received from the hardware module instance running on the microcontroller from the .npz
+        log file generated during ModuleInterface runtime.
 
         This method reads the compressed '.npz' archives generated by the MicroControllerInterface class that works
-        with this ModuleInterface during runtime. This method reads logged data and extracts all event-codes and
-        data objects transmitted by the interfaced module instance from the microcontroller. Additionally, this method
-        extracts, the class runtime constants, saved by the serialize_class_constants() method.
+        with this ModuleInterface during runtime and extracts all custom event-codes and data objects transmitted by
+        the interfaced module instance from the microcontroller.
 
-        This method is intended to be used by the DataParser class to transform the .npz log files into Parquet datasets
-        used for further data analysis.
+        Notes:
+            The extracted data will NOT contain library-reserved events and messages. This includes all Kernel messages
+            and module messages with event codes 0 through 50.
+
+            This method should be used as a convenience abstraction for the inner workings of the DataLogger class.
+            For each ModuleInterface, it will decode and return the logged runtime data sent to the PC by the specific
+            hardware module instance controlled by the interface. You need to manually implement further data
+            processing steps as necessary for your specific use case and module implementation.
 
         Args:
             log_path: The path to the compressed .npz file generated by the MicroControllerInterface that managed this
-                ModuleInterface during runtime.
+                ModuleInterface during runtime. Note, this has to be the compressed .npz archive, generated by
+                DataLogger's compress_logs() method. The intermediate step of non-compressed '.npy 'files will not work.
 
         Returns:
-            A dictionary that uses numpy uint8 event codes as keys. Event code 0 is used to store the tuple of extracted
-            runtime constants. Event codes from 51 onwards are used to store lists of tuples. Each tuple contains
-            (in this order): A uint64 timestamp, representing the number of microseconds since the Epoch onset,
-            data object (or None, for state-only events) and byte code of the active command when the State/Data message
-            was sent.
+            A dictionary that uses numpy uint8 event codes as keys and stores lists of tuples under each key. Each tuple
+            contains 3 elements. First, an uint64 timestamp, representing the number of microseconds since the UTC epoch
+            onset. Second, the data object, transmitted with the message (or None, for state-only events). Third, the
+            uint8 code of the command that the module was executing when it sent the message to the PC.
 
         Raises:
             ValueError: If the input path is not valid or does not point to an existing .npz archive.
@@ -344,49 +316,21 @@ class ModuleInterface:  # pragma: no cover
         # Precreates the dictionary to store the extracted data.
         event_data = {}
 
-        # Locates the logging onset timestamp and serialized module constants. The onset is used to convert the
-        # timestamps for logged module data into absolute UTC timestamps. Originally, all timestamps other than onset
-        # are stored as elapsed time in microseconds relative to onset timestamp. Serialized constants are often used
-        # during further data processing, and they are extracted as an array of bytes. It is expected that the user will
-        # deserialize the constants as necessary for their data processing needs.
+        # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
+        # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
+        # microseconds relative to onset timestamp.
         timestamp_offset = 0
         onset_us = np.uint64(0)
         timestamp: np.uint64
-        constants_found = False
         for number, item in enumerate(archive.files):
             message = archive[item]  # Extracts message payload from the compressed .npy file
 
             # Recovers the uint64 timestamp value from each message. The timestamp occupies the first 8 bytes of each
-            # logged message. This iteration looks for two specific 'timestamp' values: 0 and maximum uint64 value.
-            timestamp = np.uint64(message[0:8].view(np.uint64)[0].copy())
-
-            # Each module can only serialize and save one package of constants. The constants are serialized before the
-            # onset timestamp. Therefore, it is expected that the constants are found before the onset timestamp and
-            # that it will only be done once.
-            if not constants_found and timestamp == np.iinfo(np.uint64).max:
-                # Extracts the message payload.
-                payload = message[9:]
-
-                # Checks if the payload belongs to the module instance managed by this interface class.
-                # The payload uses first and second values to store type and ID codes of the interface that created the
-                # constants' payload.
-                if payload[0] != self._module_type or payload[1] != self._module_id:
-                    continue
-
-                # Extracts the serialized data and writes it into the dictionary under 'event-code' 0. Since 0 is not a
-                # valid event code, this does not clash with the rest of the processing steps.
-                variable_data = payload[2:].copy()
-                # Unpacks constants into a tuple and, fi the operation succeeds, saves the data into dictionary.
-                unpacked_data = self.deserialize_class_constants(variable_data)
-                if unpacked_data is not None:
-                    event_data[np.uint8(0)] = unpacked_data
-                constants_found = True
-
-            # If timestamp value is 0, the message stores the onset timestamp. Skips looking at the 8-bit source ID
-            # that follows the timestamp, as the input to this method should already belong to the correct source.
-            if timestamp == 0:
+            # logged message. If timestamp value is 0, the message contains the onset timestamp value stored as 8-byte
+            # payload.
+            if np.uint64(message[0:8].view(np.uint64)[0]) == 0:
                 # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
-                onset_us = np.uint64(message[9:17].view("<i8")[0].copy())
+                onset_us = np.uint64(message[9:].view("<i8")[0].copy())
 
                 # Breaks the loop onc the onset is found. Generally, the onset is expected to be found very early into
                 # the loop
@@ -436,9 +380,9 @@ class ModuleInterface:  # pragma: no cover
             # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
             # the active command code.
             if event not in event_data:
-                event_data[event] = []
-
-            event_data[event].append((timestamp, data, command_code))
+                event_data[event] = [(timestamp, data, command_code)]
+            else:
+                event_data[event].append((timestamp, data, command_code))
 
         return event_data
 
@@ -460,15 +404,15 @@ class ModuleInterface:  # pragma: no cover
         return self._module_id
 
     @property
-    def output_data(self) -> bool:
-        """Returns True if the class is configured to send the data received from the module instance to Unity or
-        other processes.
+    def data_codes(self) -> set[np.uint8]:
+        """Returns the set of message event-codes that are processed during runtime, in addition to logging them to
+        disk.
         """
-        return self._data_processing
+        return self._data_codes
 
     @property
-    def unity_command_topics(self) -> tuple[str, ...]:
-        """Returns the tuple of MQTT topics this instance monitors for incoming Unity commands."""
+    def unity_command_topics(self) -> set[str]:
+        """Returns the set of MQTT topics this instance monitors for incoming Unity commands."""
         return self._unity_command_topics
 
     @property
@@ -485,8 +429,8 @@ class ModuleInterface:  # pragma: no cover
 
 
 class MicroControllerInterface:  # pragma: no cover
-    """Facilitates bidirectional communication between an Arduino or Teensy microcontroller, Python processes, and Unity
-    game engine.
+    """Allows Python and Unity game engine clients on this PC to interface with an Arduino or Teensy microcontroller
+    running ataraxis-micro-controller library.
 
     This class contains the logic that sets up a remote daemon process with SerialCommunication, UnityCommunication,
     and DataLogger bindings to facilitate bidirectional communication and data logging between Unity, Python, and the
@@ -498,95 +442,75 @@ class MicroControllerInterface:  # pragma: no cover
         communication will not be started until the start() method of the class instance is called.
 
         This class uses SharedMemoryArray to control the runtime of the remote process, which makes it impossible to
-        have more than one instance of this class with the same controller_name at a time. Make sure the class instance
+        have more than one instance of this class with the same controller_id at a time. Make sure the class instance
         is stopped (to free SharedMemory buffer) before attempting to initialize a new class instance.
-
-        During it's initialization, the class generates two unique log entry types. First, it builds and logs the map
-        of all ID codes (controller, module-type, module-instance) to their human-readable names that follows the
-        controller-module_type-module_instance hierarchy. Other Ataraxis libraries use this data to deserialize the
-        logs into a human-readable dataset format. Second, for each managed ModuleInterface instance, the class calls
-        its log_variables() method and logs the returned data if it is not None. These types of logs can be identified
-        based on their unique timestamp values: 18446744073709551615 for variables and 18446744073709551614 for
-        controller maps. These values are not meaningful as timestamps, instead they function as special identifiers.
 
     Args:
         controller_id: The unique identifier code of the managed microcontroller. This information is hardcoded via the
-            AtaraxisMicroController (AXMC) firmware running on the microcontroller, and this class ensures that the code
-            used by the connected microcontroller matches this argument when the connection is established. Critically,
-            this code is also used as the source_id for the data sent from this class to the DataLogger. Therefore, it
-            is important for this code to be unique across ALL concurrently active Ataraxis data producers, such as:
-            microcontrollers, video systems, and Unity game engine instances. Valid codes are values between 1 and 255.
-        controller_name: The human-readable name of the connected microcontroller. This information is used to better
-            identify the microcontroller to human operators in error messages and log files.
-        controller_usb_port: The serial USB port to which the microcontroller is connected. This information is used to
-            set up the bidirectional serial communication with the controller. You can use list_available_ports()
-            function from this library to discover addressable USB ports to pass to this argument.
-        data_logger: An initialized DataLogger instance that will be used to log the data produced by this Interface
+            ataraxis-micro-controller (AXMC) library running on the microcontroller, and this class ensures that the
+            code used by the connected microcontroller matches this argument when the connection is established.
+            Critically, this code is also used as the source_id for the data sent from this class to the DataLogger.
+            Therefore, it is important for this code to be unique across ALL concurrently active Ataraxis data
+            producers, such as: microcontrollers, video systems, and Unity game engine instances. Valid codes are
+            values between 1 and 255.
+        microcontroller_serial_buffer_size: The size, in bytes, of the microcontroller's serial interface (UART or USB)
+            buffer. This size is used to calculate the maximum size of transmitted and received message payloads. This
+            information is usually available from the microcontroller's vendor.
+        microcontroller_usb_port: The serial USB port to which the microcontroller is connected. This information is
+            used to set up the bidirectional serial communication with the controller. You can use
+            list_available_ports() function from ataraxis-transport-layer-pc library to discover addressable USB ports
+            to pass to this argument. The function is also accessible through the CLI command: 'axtl-ports'.
+        data_logger: An initialized DataLogger instance used to log the data produced by this Interface
             instance. The DataLogger itself is NOT managed by this instance and will need to be activated separately.
-            This instance only extracts the necessary information to buffer the data to the logger.
-        modules: A tuple of classes that inherit from the (base) ModuleInterface class. These classes will be used by
-            the main runtime cycle to handle the incoming data from the modules running on the microcontroller.
+            This instance only extracts the necessary information to pipe the data to the logger.
+        modules: A tuple of classes that inherit from the ModuleInterface class that interface with specific hardware
+            module instances managed by the connected microcontroller.
         baudrate: The baudrate at which the serial communication should be established. This argument is ignored
             for microcontrollers that use the USB communication protocol, such as most Teensy boards. The correct
             baudrate for microcontrollers using the UART communication protocol depends on the clock speed of the
             microcontroller's CPU and the supported UART revision. Setting this to an unsupported value for
             microcontrollers that use UART will result in communication errors.
-        maximum_transmitted_payload_size: The maximum size of the message payload that can be sent to the
-            microcontroller as one message. This should match the microcontroller's serial reception buffer size, even
-            if the actual transmitted payloads do not reach that size. If the size is not set right, you may run into
-            communication errors.
         unity_broker_ip: The ip address of the MQTT broker used for Unity communication. Typically, this would be a
             'virtual' ip-address of the locally running MQTT broker, but the class can carry out cross-machine
             communication if necessary. Unity communication will only be initialized if any of the input modules
             requires this functionality.
         unity_broker_port: The TCP port of the MQTT broker used for Unity communication. This is used in conjunction
             with the unity_broker_ip argument to connect to the MQTT broker.
-        verbose: Determines whether the communication cycle reports runtime progress, including the contents of all
-            incoming and outgoing messages, by printing messages to the console. This option is used during debugging
-            and should be disabled during production runtimes.
 
     Raises:
         TypeError: If any of the input arguments are not of the expected type.
 
     Attributes:
-            _controller_id: Stores the id byte-code of the managed microcontroller.
-            _controller_name: Stores the human-readable name of the managed microcontroller.
-            _usb_port: Stores the USB port to which the controller is connected.
-            _baudrate: Stores the baudrate to use for serial communication with the controller.
-            _max_tx_payload_size: Stores the maximum size the transmitted (outgoing) message payload can reach to fit
-                inside the reception buffer of the microcontroller's Serial interface.
-            _unity_ip: Stores the IP address of the MQTT broker used for Unity communication.
-            _unity_port: Stores the port number of the MQTT broker used for Unity communication.
-            _mp_manager: Stores the multiprocessing Manager used to initialize and manage input and output Queue
-                objects.
-            _input_queue: Stores the multiprocessing Queue used to input the data to be sent to the microcontroller into
-                the communication process.
-            _output_queue: Stores the multiprocessing Queue used to output the data received from the microcontroller to
-                other processes.
-            _terminator_array: Stores the SharedMemoryArray instance used to control the runtime of the remote
-                communication process.
-            _communication_process: Stores the (remote) Process instance that runs the communication cycle.
-            _watchdog_thread: A thread used to monitor the runtime status of the remote communication process.
-            _reset_command: Stores the pre-packaged Kernel-addressed command that resets the microcontroller's hardware
-                and software.
-            _identify_command: Stores the pre-packaged Kernel-addressed command that requests the microcontroller to
-                send back its id-code.
-            _disable_locks: Stores the pre-packaged Kernel parameters configuration that disables all pin locks. This
-                allows writing to all microcontroller pins.
-            _enable_locks: Stores the pre-packaged Kernel parameters configuration that enables all pin locks. This
-                prevents every Module managed by the Kernel from writing to any of the microcontroller pins.
-            _started: Tracks whether the communication process has been started. This is used to prevent calling
-                the start() and stop() methods multiple times.
+        _controller_id: Stores the id byte-code of the managed microcontroller.
+        _usb_port: Stores the USB port to which the controller is connected.
+        _baudrate: Stores the baudrate to use for serial communication with the controller.
+        _microcontroller_serial_buffer_size: Stores the microcontroller's serial buffer size, in bytes.
+        _unity_ip: Stores the IP address of the MQTT broker used for Unity communication.
+        _unity_port: Stores the port number of the MQTT broker used for Unity communication.
+        _mp_manager: Stores the multiprocessing Manager used to initialize and manage input and output Queue
+            objects.
+        _input_queue: Stores the multiprocessing Queue used to input the data to be sent to the microcontroller into
+            the communication process.
+        _output_queue: Stores the multiprocessing Queue used to output the data received from the microcontroller to
+            other processes.
+        _terminator_array: Stores the SharedMemoryArray instance used to control the runtime of the remote
+            communication process.
+        _communication_process: Stores the (remote) Process instance that runs the communication cycle.
+        _watchdog_thread: A thread used to monitor the runtime status of the remote communication process.
+        _reset_command: Stores the pre-packaged Kernel-addressed command that resets the microcontroller's hardware
+            and software.
+        _disable_locks: Stores the pre-packaged Kernel parameters configuration that disables all pin locks. This
+            allows writing to all microcontroller pins.
+        _enable_locks: Stores the pre-packaged Kernel parameters configuration that enables all pin locks. This
+            prevents every Module managed by the Kernel from writing to any of the microcontroller pins.
+        _started: Tracks whether the communication process has been started. This is used to prevent calling
+            the start() and stop() methods multiple times.
     """
 
     # Pre-packages Kernel commands into attributes. Since Kernel commands are known and fixed at compilation,
     # they only need to be defined once.
     _reset_command = KernelCommand(
         command=np.uint8(2),
-        return_code=np.uint8(0),
-    )
-    _identify_command = KernelCommand(
-        command=np.uint8(3),
         return_code=np.uint8(0),
     )
 
@@ -607,16 +531,18 @@ class MicroControllerInterface:  # pragma: no cover
     def __init__(
         self,
         controller_id: np.uint8,
-        controller_name: str,
-        controller_usb_port: str,
+        microcontroller_serial_buffer_size: int,
+        microcontroller_usb_port: str,
         data_logger: DataLogger,
         modules: tuple[ModuleInterface, ...],
         baudrate: int = 115200,
-        maximum_transmitted_payload_size: int = 254,
         unity_broker_ip: str = "127.0.0.1",
         unity_broker_port: int = 1883,
-        verbose: bool = False,
     ):
+        # Initializes the started tracker. This is needed to avoid errors if initialization fails, and __del__ is called
+        # for a partially initialized class.
+        self._started: bool = False
+
         # Ensures that input arguments have valid types. Only checks the arguments that are not passed to other classes,
         # such as TransportLayer, which has its own argument validation.
         if not isinstance(controller_id, np.uint8) or not 1 <= controller_id <= 255:
@@ -626,28 +552,22 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{type(controller_id).__name__}."
             )
             console.error(message=message, error=TypeError)
-        if not isinstance(controller_name, str):
-            message = (
-                f"Unable to initialize the MicroControllerInterface instance. Expected a string for 'controller_name' "
-                f"argument, but encountered {controller_name} of type {type(controller_name).__name__}."
-            )
-            console.error(message=message, error=TypeError)
         if not isinstance(modules, tuple) or not modules:
             message = (
-                f"Unable to initialize the MicroControllerInterface instance for {controller_name} controller with id "
+                f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
                 f"{controller_id}. Expected a non-empty tuple of ModuleInterface instances for 'modules' argument, but "
                 f"encountered {modules} of type {type(modules).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not all(isinstance(module, ModuleInterface) for module in modules):
             message = (
-                f"Unable to initialize the MicroControllerInterface instance for {controller_name} controller with id "
+                f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
                 f"{controller_id}. All items in 'modules' tuple must be ModuleInterface instances."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(data_logger, DataLogger):
             message = (
-                f"Unable to initialize the MicroControllerInterface instance for {controller_name} controller with id "
+                f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
                 f"{controller_id}. Expected an initialized DataLogger instance for 'data_logger' argument, but "
                 f"encountered {data_logger} of type {type(data_logger).__name__}."
             )
@@ -656,21 +576,16 @@ class MicroControllerInterface:  # pragma: no cover
         # Controller (kernel) ID information. Follows the same code-name-description format as module type and instance
         # values do.
         self._controller_id: np.uint8 = controller_id
-        self._controller_name: str = controller_name
 
         # SerialCommunication parameters. This is used to initialize the communication in the remote process.
-        self._usb_port: str = controller_usb_port
+        self._usb_port: str = microcontroller_usb_port
         self._baudrate: int = baudrate
-        self._max_tx_payload_size: int = maximum_transmitted_payload_size
+        self._microcontroller_serial_buffer_size: int = microcontroller_serial_buffer_size
 
         # UnityCommunication parameters. This is used to initialize the unity communication from the remote process
         # if the managed modules need this functionality.
         self._unity_ip: str = unity_broker_ip
         self._unity_port: int = unity_broker_port
-
-        # Verbose flag and started trackers
-        self._verbose: bool = verbose if isinstance(verbose, bool) else False
-        self._started: bool = False
 
         # Managed modules and data logger queue. Modules will be pre-processes as part of this initialization runtime.
         # Logger queue is fed directly into the SerialCommunication, which automatically logs all incoming and outgoing
@@ -690,114 +605,37 @@ class MicroControllerInterface:  # pragma: no cover
         self._communication_process: None | Process = None
         self._watchdog_thread: None | Thread = None
 
-        # Verifies that all input ModuleInterface instances have a unique type+id combination and pre-processes their
-        # data. Specifically, logs their variable data (for module instances that support this process). Also, logs the
-        # layout of the controller that maps controller, module type, module instance ID codes to meaningful names and
-        # records their hierarchy. These log entries are then used when parsing the data logged by the controller
-        # into a human-readable dataset.
-
-        # Serializes the controller_id-name pair and uses it to pre-create a temporary list that stores serialized
-        # code-name pairs. This is used to construct the controller layout log (see below).
-        code_name_blocks = [self._serialize_code_name_pair(self._controller_id, self._controller_name)]
-
-        # Stores the number of types as first byte after controller id-name data. This is essential to know how
-        # many types to decode from the generated log entry.
-        n_types = len(set(module.module_type for module in self._modules))
-        code_name_blocks.append(np.array([n_types], dtype=np.uint8))
-
+        # Verifies that all input ModuleInterface instances have a unique type+id combination and logs their runtime
+        # constants (for module instances that support this process).
         processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
 
         # Loops over all module instances and processes their data
         for module in self._modules:
-            # Extracts type and id codes of the module
-            module_id = module.module_id
-            module_type = module.module_type
-
             # If the module's combined type + id code is already inside the processed_types_id set, this means another
             # module with the same exact type and ID combination has already been processed.
             if module.type_id in processed_type_ids:
                 message = (
-                    f"Unable to initialize the MicroControllerInterface instance for {controller_name} controller with "
+                    f"Unable to initialize the MicroControllerInterface instance for microcontroller with "
                     f"id {controller_id}. Encountered two ModuleInterface instances with the same type-code "
-                    f"({module_type}) and id-code ({module_id}), which is not allowed. Make sure each type and id "
-                    f"combination is only used by a single ModuleInterface class instance."
+                    f"({module.module_type}) and id-code ({module.module_id}), which is not allowed. Make sure each "
+                    f"type and id combination is only used by a single ModuleInterface class instance."
                 )
                 console.error(message=message, error=ValueError)
 
             # Adds each processed type+id code to the tracker set
             processed_type_ids.add(module.type_id)
 
-            # For each module instance, calls the method that returns the serialized variable data and logs it by
-            # sending the data to the DataLogger
-            variable_data = module.serialize_class_constants()
-
-            # Appends type and id codes to the variable data package
-            header = np.array([module_type, module_id], dtype=np.uint8)
-            data_package = np.concatenate((header, variable_data), dtype=np.uint8)  # type: ignore
-
-            # Uses controller_id as source ID, which is also done for all other log packages. The critical part here
-            # is the timestamp set to the maximum possible value that still fits into numpy uint64 value.
-            # Since during normal runtimes the timestamp is given as the time, in microseconds, relative to the
-            # onset stamp log, this number would translate to ~584 years, which is not a reasonable number. Instead,
-            # this timestamp value is co-opted to indicate that the log entry contains module instance variable
-            # data.
-            package = LogPackage(
-                source_id=int(controller_id),
-                time_stamp=np.iinfo(np.uint64).max,
-                serialized_data=data_package,
-            )
-
-            # Logs variable data for each module instance by sending it to the logger queue.
-            self._logger_queue.put(package)
-
     def __repr__(self) -> str:
         """Returns a string representation of the class instance."""
         return (
-            f"MicroControllerInterface(controller_id={self._controller_id}, controller_name={self._controller_name}, "
-            f"usb_port={self._usb_port}, baudrate={self._baudrate}, unity_ip={self._unity_ip}, "
-            f"unity_port={self._unity_port}, started={self._started})"
+            f"MicroControllerInterface(controller_id={self._controller_id}, usb_port={self._usb_port}, "
+            f"baudrate={self._baudrate}, unity_ip={self._unity_ip}, unity_port={self._unity_port}, "
+            f"started={self._started})"
         )
 
     def __del__(self) -> None:
         """Ensures that all class resources are properly released when the class instance is garbage-collected."""
         self.stop()
-
-    def _serialize_code_name_pair(self, code: np.uint8, name: str) -> NDArray[np.uint8]:
-        """Serializes a single id_code-name pair into [code][name_length][name_bytes] byte block.
-
-        The class uses this method to build the controller_layout log entry, which maps all ID codes (controller,
-        module type, module instance ID) to human-readable data. This data is later used when reading the logs to
-        form human-readable datasets.
-        """
-        # Converts string to bytes
-        name_bytes = name.encode("utf-8")
-        name_length = len(name_bytes)
-        if name_length > 65535:  # uint16 max
-            message = (
-                f"Unable to serialize the input name {name} when constructing controller layout log entry for "
-                f"{self._controller_name} MicroControllerInterface with id {self._controller_id}. Encoded name is "
-                f"too long: {name_length} bytes. The maximum supported (encoded) name length is 65535 bytes."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Allocates the storage array: 1 byte code + 2 bytes length + n bytes name
-        result = np.zeros(1 + 2 + name_length, dtype=np.uint8)
-
-        # Stores byte-code
-        result[0] = code
-
-        # Stores name length as uint16
-        result[1:3] = np.array([name_length & 0xFF, name_length >> 8], dtype=np.uint8)
-
-        # Stores name bytes
-        result[3:] = np.frombuffer(name_bytes, dtype=np.uint8)
-
-        # Returns the serialized code-name pair
-        return result
-
-    def identify_controller(self) -> None:
-        """Prompts the connected MicroController to identify itself by returning its id code."""
-        self._input_queue.put(self._identify_command)
 
     def reset_controller(self) -> None:
         """Resets the connected MicroController to use default hardware and software parameters."""
@@ -843,10 +681,10 @@ class MicroControllerInterface:  # pragma: no cover
             ),
         ):
             message = (
-                f"Unable to send the message via the {self._controller_name} MicroControllerInterface with id "
-                f"{self._controller_id}. Expected one of the valid outgoing message structures, but instead "
-                f"encountered {message} of type {type(message).__name__}. Use one of the supported structures "
-                f"available from the communication module."
+                f"Unable to send the message via the MicroControllerInterface with id {self._controller_id}. Expected "
+                f"one of the valid outgoing message structures, but instead encountered {message} of type "
+                f"{type(message).__name__}. Use one of the supported structures available from the communication "
+                f"module."
             )
             console.error(message=message, error=TypeError)
         self._input_queue.put(message)
@@ -877,7 +715,7 @@ class MicroControllerInterface:  # pragma: no cover
 
             if self._communication_process is not None and not self._communication_process.is_alive():
                 message = (
-                    f"The communication process of the MicroControllerInterface {self._controller_name} with id "
+                    f"The communication process of the MicroControllerInterface with id "
                     f"{self._controller_id} has been prematurely shut down. This likely indicates that the process has "
                     f"encountered a runtime error that terminated the process."
                 )
@@ -894,9 +732,8 @@ class MicroControllerInterface:  # pragma: no cover
             If send_message() was called before calling start(), all queued messages will be transmitted in one step.
             Multiple commands addressed to the same module sent in this fashion will likely interfere with each-other.
 
-            As part of this method runtime, the interface emits an identification request and ensures that the
-            connected microcontroller responds with the id_code that exactly matches the id code used during class
-            initialization.
+            As part of this method runtime, the interface will verify the target microcontroller's configuration to
+            ensure compatibility.
 
         Raises:
             RuntimeError: If the instance fails to initialize the communication runtime.
@@ -907,7 +744,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         # Instantiates the shared memory array used to control the runtime of the communication Process.
         self._terminator_array = SharedMemoryArray.create_array(
-            name=f"{self._controller_name}_terminator_array",
+            name=f"{self._controller_id}_terminator_array",
             # Uses class name to ensure the array buffer name is unique
             prototype=np.zeros(shape=2, dtype=np.uint8),  # Index 0 = terminator, index 1 = initialization status
         )  # Instantiation automatically connects the main process to the array.
@@ -925,10 +762,9 @@ class MicroControllerInterface:  # pragma: no cover
                 self._terminator_array,
                 self._usb_port,
                 self._baudrate,
-                self._max_tx_payload_size,
+                self._microcontroller_serial_buffer_size,
                 self._unity_ip,
                 self._unity_port,
-                self._verbose,
             ),
             daemon=True,
         )
@@ -939,25 +775,23 @@ class MicroControllerInterface:  # pragma: no cover
         # Initializes the communication process.
         self._communication_process.start()
 
-        # Sends controller identification command and ensures the (connected) controller id matches expectation.
-        self.identify_controller()
-
         start_timer = PrecisionTimer("s")
         start_timer.reset()
         # Blocks until the microcontroller has finished all initialization steps or encounters an initialization error.
         while self._terminator_array.read_data(1) != 1:
+
             # Generally, there are two ways initialization failure is detected. One is if the managed process
             # terminates, which would be the case if any subclass used in the communication process raises an exception.
             # Another way if the status tracker never reaches success code (1). This latter case would likely indicate
             # that there is a communication issue where the data does not reach the controller or the PC. The
-            # initialization process should be VERY fast, likely on the order of hundreds of microseconds. Waiting for
-            # 5 seconds is likely excessive.
-            if not self._communication_process.is_alive() or start_timer.elapsed > 5:
+            # initialization process should be very fast, likely on the order of hundreds of microseconds. Waiting for
+            # 15 seconds is likely excessive.
+            if not self._communication_process.is_alive() or start_timer.elapsed > 15:
                 message = (
-                    f"{self._controller_name} MicroControllerInterface with id {self._controller_id} has failed to "
-                    f"initialize the communication with the microcontroller. If the class was initialized with "
-                    f"the 'verbose' flag disabled, enable the flag and repeat the initialization to debug the "
-                    f"initialization process error."
+                    f"MicroControllerInterface with id {self._controller_id} has failed to initialize the "
+                    f"communication with the microcontroller. If the class did not display error messages in the "
+                    f"terminal, activate the 'console' variable from ataraxis-base-utilities library to enable "
+                    f"displaying error messages raised during daemon process runtimes."
                 )
                 console.error(error=RuntimeError, message=message)
 
@@ -1019,9 +853,8 @@ class MicroControllerInterface:  # pragma: no cover
         microcontroller_buffer_size: int,
         unity_ip: str,
         unity_port: int,
-        verbose: bool = False,
     ) -> None:
-        """This function aggregates the communication runtime logic and is used as the target for the communication
+        """This method aggregates the communication runtime logic and is used as the target for the communication
         process.
 
         This method is designed to run in a remote Process. It encapsulates the steps for sending and receiving the
@@ -1032,7 +865,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         Args:
             controller_id: The byte-code identifier of the target microcontroller. This is used to ensure that the
-                instance interfaces with the correct controller.
+                instance interfaces with the correct controller and to source-stamp logged data.
             modules: A tuple that stores ModuleInterface classes managed by this MicroControllerInterface instance.
             input_queue: The multiprocessing queue used to issue commands to the microcontroller.
             output_queue: The multiprocessing queue used to pipe received data to other processes.
@@ -1042,61 +875,53 @@ class MicroControllerInterface:  # pragma: no cover
             usb_port: The serial port to which the target microcontroller is connected.
             baudrate: The communication baudrate to use. This option is ignored for controllers that use USB interface,
                  but is essential for controllers that use the UART interface.
-            microcontroller_buffer_size: The maximum size of the payload the managed microcontroller can receive. This is used to
-                ensure all outgoing messages fit inside the Serial reception buffer of the microcontroller.
+            microcontroller_buffer_size: The size of the microcontroller's serial buffer. This is used to determine
+                the maximum size of the incoming and outgoing message payloads.
             unity_ip: The IP-address of the MQTT broker to use for communication with Unity game engine.
             unity_port: The port number of the MQTT broker to use for communication with Unity game engine.
-            verbose: A flag that determines whether the contents of the incoming and outgoing messages should be
-                printed to console. This is only used during debugging and should be disabled during most runtimes.
         """
+
+        # Constructs Kernel-addressed commands used to verify that the Interface and the microcontroller are
+        # configured appropriately
+        identify_controller_command = KernelCommand(
+            command=np.uint8(3),
+            return_code=np.uint8(0),
+        )
+        identify_modules_command = KernelCommand(
+            command=np.uint8(4),
+            return_code=np.uint8(0),
+        )
+
+        # Initializes the timer used during initialization to abort stale initialization attempts.
+        timeout_timer = PrecisionTimer("ms")
+
         # Connects to the terminator array. This is done early, as the terminator_array is used to track the
         # initialization and runtime status of the process.
         terminator_array.connect()
 
-        # If the runtime is called in the verbose mode, ensures the console is enabled.
-        was_enabled = console.enabled
-        if verbose and not was_enabled:
-            console.enable()
-
-            # Also sends a message to notify that the initialization has started.
-            console.echo(
-                message=f"Starting MicroControllerInterface for controller with ID {controller_id}...",
-                level=LogLevel.INFO,
-            )
-
         # Precreates the assets used to optimize the communication runtime cycling. These assets are filled below to
-        # support efficient interaction between the Communication classes and the ModuleInterface classes.
-        unity_input_map: dict[str, list[int]] = {}
-        output_map: dict[np.uint16, int] = {}
+        # support efficient interaction between the Communication class and the ModuleInterface classes.
+        unity_command_map: dict[str, tuple[ModuleInterface, ...] | list[ModuleInterface]] = {}
+        processing_map: dict[np.uint16, ModuleInterface] = {}
+        for module in modules:
+            # If the module is configured to receive commands from unity, sets up the necessary assets. For this,
+            # extracts the monitored topics from each module
+            for topic in module.unity_command_topics:
 
-        for num, module in enumerate(modules):
-            # If the module is configured to receive data from unity, configures the necessary data structures to enable
-            # monitoring the necessary topics and allow passing the data received on that topic to the
-            # appropriate module class for processing.
-            if module.unity_input:
-                for topic in module.unity_command_topics:
-                    # Extends the list of module indices that listen for that particular topic. This allows addressing
-                    # multiple modules at the same time, as long as they all listen to the same topic.
-                    existing_modules = unity_input_map.get(topic, [])
-                    unity_input_map[topic] = existing_modules + [num]
+                # Extends the list of module interfaces that listen for that particular topic. This allows addressing
+                # multiple modules at the same time, as long as they all listen to the same topic.
+                existing_modules = unity_command_map.get(topic, [])
+                unity_command_map[topic] = existing_modules + [module]
 
-            # If the module is configured to output data to Unity or other processes, maps its type+id combined code
-            # to its index number. This is used to quickly find the module interface instance addressed by incoming
-            # data, so that they can then send the data to the appropriate output stream.
-            if module.output_data:
-                output_map[module.type_id] = num
+            # If the module is configured to process incoming data or raise runtime errors, maps its type+id combined
+            # code to the interface instance. This is used to quickly find the module interface instance addressed by
+            # incoming data, so that it can handle teh data or error message.
+            if len(module.data_codes) != 0 or len(module.error_codes) != 0:
+                processing_map[module.type_id] = module
 
-        # Disables unused processing steps. For example, if none of the managed modules send data to Unity or other
-        # processes, that processing step is disabled outright via a boolean 'if' check to speed up the runtime.
-        unity_input = False
-        data_output = False
-
-        # Note, keys() essentially returns a set of keys, since the same hash-map optimizations are involved with
-        # dictionary keys as with set values.
-        if len(unity_input_map.keys()) != 0:
-            unity_input = True
-        if len(output_map.keys()) != 0:
-            data_output = True
+        # Converts the list of interface instance into a tuple for slightly higher runtime efficiency.
+        for key in unity_command_map.keys():
+            unity_command_map[key] = tuple(unity_command_map[key])
 
         # Initializes the serial communication class and connects to the target microcontroller.
         serial_communication = SerialCommunication(
@@ -1107,24 +932,114 @@ class MicroControllerInterface:  # pragma: no cover
             microcontroller_serial_buffer_size=microcontroller_buffer_size,
         )
 
-        # Initializes the unity_communication class and connects to the MQTT broker. If the interface does not
-        # need Unity communication, this initialization will only statically reserve some RAM with no other
-        # adverse effects. If the unity_input_map is empty, the class initialization method will correctly
-        # interpret this as a case where no topics need to be monitored.
+        # Sends microcontroller identification command. This command requests the microcontroller to return its
+        # id code.
+        serial_communication.send_message(message=identify_controller_command)
+
+        # Blocks until the microcontroller sends its identification code.
+        timeout_timer.reset()
+        response = None
+        while not isinstance(response, ControllerIdentification):
+
+            # If no response is received within 2 seconds, repeats the identification request. Older microcontrollers
+            # that reset on serial connection may miss the first request if they were resetting their communication
+            # hardware, but should receive the second request.
+            if timeout_timer.elapsed > 2000:
+                serial_communication.send_message(message=identify_controller_command)
+
+            # If there is no response after 4 seconds and 2 requests, aborts initialization with an error
+            elif timeout_timer.elapsed > 4000:
+                message = (
+                    f"Unable to initialize the communication with the microcontroller {controller_id}. The "
+                    f"microcontroller did not respond to the identification request in time (4 seconds) after two "
+                    f"requests were sent."
+                )
+                console.error(message=message, error=RuntimeError)
+
+            # The response will be None if there is no data to receive and a valid message otherwise.
+            response = serial_communication.receive_message()
+
+        # If response is received, but the ID contained in the received message does not match the expected ID,
+        # raises an error
+        if response.controller_id != controller_id:
+            # Raises the error.
+            message = (
+                f"Unable to initialize the communication with the microcontroller {controller_id}. Expected "
+                f"{controller_id} in response to the controller identification request, but "
+                f"received a non-matching id {response.controller_id}."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Next, verifies that the microcontroller has a module instance expected by each managed interface class
+        serial_communication.send_message(message=identify_modules_command)
+
+        # Sequentially receives the ID data for each module
+        timeout_timer.reset()
+        module_type_ids = []
+        while timeout_timer.elapsed < 2000:
+            # Receives the message. If the message is a module type+id code, adds it to the storage list
+            response = serial_communication.receive_message()
+            if isinstance(response, ModuleIdentification):
+                module_type_ids.append(response.module_type_id)
+
+                # Keeps the loop running as long as messages keep coming in within 2-second intervals.
+                timeout_timer.reset()
+
+        # If no message was received from the microcontroller, raises an error
+        if len(module_type_ids) == 0:
+            message = (
+                f"Unable to initialize the communication with the microcontroller {controller_id}. The "
+                f"microcontroller did not respond to module identification request in time (3 seconds)."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        # The microcontroller may have more modules than the number of managed interfaces, but it can never have fewer
+        # modules than interfaces.
+        if len(module_type_ids) < len(modules):
+            message = (
+                f"Unable to initialize the communication with the microcontroller {controller_id}. The number of "
+                f"ModuleInterface instances ({len(modules)}) is greater than the number of physical hardware module "
+                f"instances managed by the microcontroller ({len(module_type_ids)})."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Ensures that all type_id codes are unique on the microcontroller. This is done for ModuleInterfaces at class
+        # instantiation. After this step, it is safe to assume that all module instances and interfaces are uniquely
+        # identifiable.
+        if len(module_type_ids) != len(set(module_type_ids)):
+            message = (
+                f"Unable to initialize the communication with the microcontroller {controller_id}. The microcontroller "
+                f"contains multiple module instances with the same type + id combination. Make sure each module "
+                f"instance has a unique type + id combination."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Ensures that each module interface has a matching hardware module on the microcontroller
+        for module in modules:
+            if module.type_id not in module_type_ids:
+                message = (
+                    f"Unable to initialize the communication with the microcontroller {controller_id}. "
+                    f"The ModuleInterface class for module with type {module.module_type} and id {module.module_id}"
+                    f"codes does not have a matching hardware module instance on the microcontroller."
+                )
+                console.error(message=message, error=ValueError)
+
+        # Initializes the unity_communication class. If the interface does not need Unity communication, this
+        # initialization will only statically reserve a minor portion of RAM with no other adverse effects. If the
+        # unity_input_map is empty, the class initialization method will correctly interpret this as a case where no
+        # topics need to be monitored.
         unity_communication = UnityCommunication(
-            ip=unity_ip, port=unity_port, monitored_topics=tuple(tuple(unity_input_map.keys()))
+            ip=unity_ip, port=unity_port, monitored_topics=tuple(unity_command_map.keys())
         )
 
-        # Only connects to MQTT broker if managed modules need to send data to unity or receive data from Unity.
-        if unity_input or data_output:
-            unity_communication.connect()
+        # Connects to the MQTT broker
+        unity_communication.connect()
 
-        # This notifies the user that subclass initialization is complete. The interface still needs to verify that the
-        # connected controller has the correct ID (see below).
-        if verbose:
-            console.echo(
-                message=f"MicroControllerInterface {controller_id} initialization complete.", level=LogLevel.SUCCESS
-            )
+        # Reports that communication class has been successfully initialized. Seeing this code means
+        # that the communication appears to be functioning correctly and that the interface and the microcontroller
+        # appear to be configured well. While this does not guarantee the runtime will continue running
+        # without errors, it is very likely to be so.
+        terminator_array.write_data(index=1, data=np.uint8(1))
 
         try:
             # Initializes the main communication loop. This loop will run until the exit conditions are encountered.
@@ -1132,16 +1047,16 @@ class MicroControllerInterface:  # pragma: no cover
             # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
             # the central process are fully carried out before the communication is terminated.
             while not terminator_array.read_data(index=0, convert_output=True) or not input_queue.empty():
-                # Main data sending loop. The method will sequentially retrieve the queued command and parameter data
-                # and transmit them to the microcontroller.
-                while not input_queue.empty():
-                    out_data = input_queue.get()
-                    serial_communication.send_message(out_data)  # Transmits the data to the microcontroller
 
-                # Unity data sending loop. This loop will be O(1) if unity never has data. In turn, this will always be
-                # the case if no module supports unity inputs. Therefore, there is no need to both have an 'if' and a
-                # 'while' check here for optimal runtime speed.
+                # Main data sending loop. The method will sequentially retrieve the queued messages and send them to
+                # the microcontroller.
+                while not input_queue.empty():
+                    # Transmits the data to the microcontroller. Expects that the queue ONLY yields valid messages.
+                    serial_communication.send_message(input_queue.get())
+
+                # Unity data sending loop
                 while unity_communication.has_data:
+
                     # If UnityCommunication has received data, loops over all interfaces that requested the data from
                     # this topic and calls their unity data processing method while passing it the topic and the
                     # received message payload.
@@ -1151,10 +1066,15 @@ class MicroControllerInterface:  # pragma: no cover
                     # UnityCommunication is configured to only listen to topics submitted by the interface classes, the
                     # topic is guaranteed to be inside the unity_input_map dictionary and have at least one Module which
                     # can process its data.
-                    for i in unity_input_map[topic]:
-                        out_data = modules[i].parse_unity_command(topic=topic, payload=payload)
-                        if out_data is not None:
-                            serial_communication.send_message(out_data)  # Transmits the data to the microcontroller
+                    for module in unity_command_map[topic]:
+                        # Transmits the data to the microcontroller. Since parse_unity_command() is ONLY called for
+                        # topics specified by the user, expects that the method ALWAYS returns a valid message.
+                        serial_communication.send_message(
+                            module.parse_unity_command(
+                                topic=topic,
+                                payload=payload,
+                            )
+                        )  # type: ignore
 
                 # Attempts to receive the data from microcontroller
                 in_data = serial_communication.receive_message()
@@ -1163,45 +1083,160 @@ class MicroControllerInterface:  # pragma: no cover
                 if in_data is None:
                     continue
 
-                # Otherwise, resolves additional processing steps associated with incoming data. Currently, only Module
-                # interfaces have additional data processing steps that are executed more than once during runtime. The
-                # Kernel Identification message also has a unique processing step, but it should only be executed once,
-                # during runtime initialization.
-                if isinstance(in_data, (ModuleState, ModuleData)) and data_output:
+                # Converts valid KernelData and State messages into errors. This is used to raise runtime errors when
+                # an appropriate error message is transmitted from the microcontroller. This clause does not evaluate
+                # non-error codes.
+                if isinstance(in_data, (KernelData, KernelState)):
+                    # Note, event codes are taken directly from the microcontroller's Kernel class.
+
+                    # kModuleSetupError
+                    if in_data.event == 2:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 2. The hardware module with type {in_data.data_object[0]} "
+                            f"and id {in_data.data_object[1]} has failed its setup sequence. Firmware re-upload is "
+                            f"required to restart the controller."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kReceptionError
+                    if in_data.event == 3:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 3. "
+                            f"The microcontroller was not able to receive (parse) the PC-sent data and had to "
+                            f"abort the reception. Last Communication status code was {in_data.data_object[0]} and "
+                            f"last TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates "
+                            f"broader issues with microcontroller-PC communication."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kTransmissionError
+                    if in_data.event == 4:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 4. "
+                            f"The microcontroller's Kernel class was not able to send data to the PC and had to abort "
+                            f"the transmission. Last Communication status code was {in_data.data_object[0]} and "
+                            f"last TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates "
+                            f"broader issues with microcontroller-PC communication."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kInvalidMessageProtocol
+                    if in_data.event == 5:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 5. "
+                            f"The microcontroller received a message with an invalid (unsupported) message protocol "
+                            f"code {in_data.data_object[0]}."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kModuleParametersError
+                    if in_data.event == 8:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 8. "
+                            f"The microcontroller was not able to apply new runtime parameters received from the PC to "
+                            f"the target hardware module with type {in_data.data_object[0]} and id "
+                            f"{in_data.data_object[1]}."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kCommandNotRecognized
+                    if in_data.event == 9:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 9. "
+                            f"The microcontroller has received an invalid (unrecognized) command code "
+                            f"{in_data.command}."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kTargetModuleNotFound
+                    if in_data.event == 10:
+                        message = (
+                            f"The microcontroller {controller_id} encountered an error when executing command "
+                            f"{in_data.command}. Error code: 10. "
+                            f"The microcontroller was not able to find the module addressed by the incoming command or "
+                            f"parameters message. The target hardware module with type {in_data.data_object[0]} and id "
+                            f"{in_data.data_object[1]} does not exist for that microcontroller."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                # Event codes from 0 through 50 are reserved for system use. These codes are handled by this clause,
+                # which translates error messages sent by the base Module class into error codes, similar as to
+                # how it is done by the Kernel.
+                if isinstance(in_data, (ModuleState, ModuleData)) and in_data.event < 51:
+                    # Note, event codes are taken directly from the microcontroller's (base) Module class.
+
+                    # kTransmissionError
+                    if in_data.event == 1:
+                        message = (
+                            f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
+                            f"{controller_id} encountered an error when executing command {in_data.command}. "
+                            f"Error code: 1. The module was not able to send data to the PC and had to abort the "
+                            f"transmission. Last Communication status code was {in_data.data_object[0]} and last "
+                            f"TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates broader "
+                            f"issues with microcontroller-PC communication."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                    # kCommandNotRecognized
+                    if in_data.event == 3:
+                        message = (
+                            f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
+                            f"{controller_id} encountered an error when executing command {in_data.command}. "
+                            f"Error code: 3. The module has received an invalid (unrecognized) command code "
+                            f"{in_data.command}."
+                        )
+                        raise console.error(message=message, error=RuntimeError)
+
+                # Event codes 51 or above are used by the module developers to communicate states and errors.
+                if isinstance(in_data, (ModuleState, ModuleData)) and in_data.event > 50:
+
                     # Computes the combined type and id code for the incoming data. This is used to find the specific
                     # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
-                    # additional processing method.
+                    # additional processing methods.
                     target_type_id: np.uint16 = np.uint16(
                         (in_data.module_type.astype(np.uint16) << 8) | in_data.module_id.astype(np.uint16)
                     )
 
-                    # Depending on whether the combined code is inside the output_map, executes the target module's
-                    # method to handle data output.
-                    if target_type_id in output_map:
-                        modules[output_map[target_type_id]].process_received_data(
+                    # If the interface addressed by the message is not configured to raise errors or process the data,
+                    # ends processing
+                    if target_type_id not in processing_map:
+                        continue
+
+                    # Otherwise, gets the reference to the targeted interface.
+                    module = processing_map[target_type_id]
+
+                    # If the incoming message contains an event code matching one of the interface's error-codes,
+                    # raises an error message.
+                    if in_data.event in module.error_codes:
+                        if isinstance(in_data, ModuleData):
+                            message = (
+                                f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
+                                f"{controller_id} encountered an error when executing command {in_data.command}. "
+                                f"Error code: {in_data.event}. The error message also contained the following data"
+                                f"object: {in_data.data_object}."
+                            )
+                        else:
+                            message = (
+                                f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
+                                f"{controller_id} encountered an error when executing command {in_data.command}. "
+                                f"Error code: {in_data.event}."
+                            )
+                        console.error(message=message, error=RuntimeError)
+
+                    # Otherwise, if the incoming message is not an error and contains an event-code matching one of the
+                    # interface's data-codes, calls the data processing method.
+                    if in_data.event in module.data_codes:
+                        module.process_received_data(
                             message=in_data,
                             unity_communication=unity_communication,
                             mp_queue=output_queue,
                         )
-
-                # Whenever the incoming message is the Identification message, ensures that the received controller_id
-                # matches the ID expected by the class.
-                elif isinstance(in_data, ControllerIdentification):
-                    if in_data.controller_id != controller_id:
-                        # Raises the error.
-                        message = (
-                            f"Unexpected controller_id code received from the microcontroller managed by the "
-                            f"MicroControllerInterface instance. Expected {controller_id}, but received "
-                            f"{in_data.controller_id}."
-                        )
-                        console.error(message=message, error=ValueError)
-
-                    else:
-                        # Reports that communication class has been successfully initialized. Seeing this code means
-                        # that the communication appears to be functioning correctly, at least in terms of the data
-                        # reaching the Kernel and back. While this does not guarantee the runtime will continue running
-                        # without errors, it is very likely to be so.
-                        terminator_array.write_data(index=1, data=np.uint8(1))
 
         # If an unknown and unhandled exception occurs, prints and flushes the exception message to the terminal
         # before re-raising the exception to terminate the process.
@@ -1215,16 +1250,6 @@ class MicroControllerInterface:  # pragma: no cover
         terminator_array.disconnect()
         unity_communication.disconnect()
 
-        # If this runtime had to enable the console to comply with 'verbose' flag, disables it before ending the
-        # runtime.
-        if verbose and not was_enabled:
-            # Notifies the user that the runtime Process has been successfully terminated
-            console.echo(
-                message=f"MicroControllerInterface {controller_id} communication runtime terminated.",
-                level=LogLevel.SUCCESS,
-            )
-            console.disable()
-
     def vacate_shared_memory_buffer(self) -> None:
         """Clears the SharedMemory buffer with the same name as the one used by the class.
 
@@ -1235,22 +1260,8 @@ class MicroControllerInterface:  # pragma: no cover
         exist.
         """
         try:
-            buffer = SharedMemory(name=f"{self._controller_name}_terminator_array", create=False)
+            buffer = SharedMemory(name=f"{self._controller_id}_terminator_array", create=False)
             buffer.close()
             buffer.unlink()
         except FileNotFoundError:
             pass
-
-
-# self._error_map[np.uint8(1)] = (
-#     f"The custom hardware module with type {module_type} and id {module_id} ran into an error when "
-#     f"transmitting State or Data message from the microcontroller to the PC. Full error details, including the "
-#     f"TransportLayer and Communication status codes, have been saved to the data log."
-# )
-#
-# # Code 3: command not recognized error
-# self._error_map[np.uint8(3)] = (
-#     f"The custom hardware module with type {module_type} and id {module_id} did not recognize the command code "
-#     f"received from the PC and was not able to execute the requested command. Full error details, including "
-#     f"the TransportLayer and Communication status codes, have been saved to the data log."
-# )
