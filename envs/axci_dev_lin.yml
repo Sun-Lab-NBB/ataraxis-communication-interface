@@ -22,7 +22,7 @@ dependencies:
   - cmarkgfm=2024.11.20=py312h66e93f0_0
   - colorama=0.4.6=pyhd8ed1ab_1
   - conda-souschef=2.2.3=pyhd8ed1ab_0
-  - coverage=7.6.9=py312h178313f_0
+  - coverage=7.6.10=py312h178313f_0
   - cryptography=44.0.0=py312hda17c39_0
   - dbus=1.13.6=h5008d03_3
   - distlib=0.3.9=pyhd8ed1ab_1
@@ -33,7 +33,7 @@ dependencies:
   - expat=2.6.4=h5888daf_0
   - filelock=3.16.1=pyhd8ed1ab_1
   - future=1.0.0=pyhd8ed1ab_1
-  - grayskull=2.7.4=pyhd8ed1ab_0
+  - grayskull=2.7.5=pyhd8ed1ab_0
   - h2=4.1.0=pyhd8ed1ab_1
   - hatchling=1.27.0=pypyhd8ed1ab_0
   - hpack=4.0.0=pyhd8ed1ab_1
@@ -50,7 +50,7 @@ dependencies:
   - jeepney=0.8.0=pyhd8ed1ab_0
   - jinja2=3.1.5=pyhd8ed1ab_0
   - junitparser=3.2.0=pyhd8ed1ab_0
-  - keyring=25.5.0=pyha804496_1
+  - keyring=25.6.0=pyha804496_0
   - ld_impl_linux-64=2.43=h712a8e2_2
   - libblas=3.9.0=26_linux64_openblas
   - libcblas=3.9.0=26_linux64_openblas
@@ -64,7 +64,6 @@ dependencies:
   - libgomp=14.2.0=h77fa898_1
   - libiconv=1.17=hd590300_2
   - liblapack=3.9.0=26_linux64_openblas
-  - libllvm14=14.0.6=hcd5def8_4
   - liblzma=5.6.3=hb9d3cd8_1
   - libnsl=2.0.1=hd590300_0
   - libopenblas=0.3.28=pthreads_h94d23a6_1
@@ -82,8 +81,6 @@ dependencies:
   - mypy_extensions=1.0.0=pyha770c72_1
   - ncurses=6.5=he02047a_1
   - nh3=0.2.20=py312h12e396e_0
-  - numba=0.60.0=py312h83e6fd3_0
-  - numpy=2.0.2=py312h58c1407_1
   - openssl=3.4.0=hb9d3cd8_0
   - packaging=24.2=pyhd8ed1ab_2
   - pathspec=0.12.1=pyhd8ed1ab_1
@@ -93,7 +90,7 @@ dependencies:
   - platformdirs=4.3.6=pyhd8ed1ab_1
   - pluggy=1.5.0=pyhd8ed1ab_1
   - progressbar2=4.5.0=pyhd8ed1ab_1
-  - psutil=6.1.0=py312h66e93f0_0
+  - psutil=6.1.1=py312h66e93f0_0
   - pycparser=2.22=pyh29332c3_1
   - pygments=2.18.0=pyhd8ed1ab_1
   - pyproject-api=1.8.0=pyhd8ed1ab_1
@@ -117,7 +114,6 @@ dependencies:
   - ruamel.yaml.jinja2=0.2.7=pyhd8ed1ab_1
   - ruff=0.8.4=py312h2156523_0
   - secretstorage=3.3.3=py312h7900ff3_3
-  - semver=3.0.2=pyhd8ed1ab_1
   - setuptools=75.6.0=pyhff2d567_1
   - snowballstemmer=2.2.0=pyhd8ed1ab_0
   - soupsieve=2.5=pyhd8ed1ab_1
@@ -161,6 +157,8 @@ dependencies:
       - dacite==1.8.1
       - llvmlite==0.43.0
       - loguru==0.7.3
+      - numba==0.60.0
+      - numpy==2.0.2
       - paho-mqtt==2.1.0
       - pyproject-hooks==1.2.0
       - pyserial==3.5
