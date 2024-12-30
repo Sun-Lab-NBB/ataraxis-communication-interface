@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ataraxis-communication-interface"
 version = "1.0.0"
-description = "Provides classes and methods for interfacing with other project Ataraxis systems and platforms."
+description = "Enables Python clients and Unity game engine to interface with custom hardware modules running on Arduino or Teensy microcontrollers."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11, <3.13"  # Limited to 3.11 and 3.12 until 3.13 support is added for numba

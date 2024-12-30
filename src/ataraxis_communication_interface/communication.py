@@ -1772,7 +1772,7 @@ class UnityCommunication:
     """Wraps an MQTT client and exposes methods for communicating with Unity game engine running one of the
     Ataraxis-compatible tasks.
 
-    This class leverages MQTT protocol on Python side and the Gimbl library (that also wraps an MQTT client) on the
+    This class leverages MQTT protocol on Python side and the Gimbl library (https://github.com/winnubstj/Gimbl) on the
     Unity side to establish bidirectional communication between Python and Virtual Reality (VR) game world. Primarily,
     the class is intended to be used together with SerialCommunication class to transfer data between microcontrollers
     and Unity. Usually, both communication classes will be managed by the same process (core) that handles the necessary
@@ -1781,11 +1781,6 @@ class UnityCommunication:
     this library!
 
     Notes:
-        In the future, this class may be phased out in favor of a unified communication protocol that would use
-        Zero-MQ binding instead of MQTT to transmit byte-serialized payloads. For now, it instead reuses Gimbl
-        architecture with slight optimizations as a temporary, proof-of-concept solution. Regardless of underlying
-        protocol, the class functionality and API are likely to remain stable.
-
         MQTT protocol requires a broker that facilitates communication, which this class does NOT provide. Make sure
         your infrastructure includes a working MQTT broker before using this class. See https://mqtt.org/ for more
         details.

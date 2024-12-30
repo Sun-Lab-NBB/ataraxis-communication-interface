@@ -1,6 +1,7 @@
-# ataraxis-transport-layer
+# ataraxis-communication-interface
 
-Provides classes and methods that enable bidirectional communication between project Ataraxis systems.
+A Python library that enables Python clients and Unity game engine to interface with custom hardware modules running on 
+Arduino or Teensy microcontrollers.
 
 ![PyPI - Version](https://img.shields.io/pypi/v/ataraxis-transport-layer)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ataraxis-transport-layer)

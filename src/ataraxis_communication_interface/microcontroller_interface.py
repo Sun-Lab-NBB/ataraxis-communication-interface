@@ -133,13 +133,8 @@ class ModuleInterface:  # pragma: no cover
                 f"{module_id} of type {type(module_id).__name__}."
             )
             console.error(message=message, error=TypeError)
-        if (
-            unity_command_topics is not None
-            or not isinstance(unity_command_topics, set)
-            or (
-                isinstance(unity_command_topics, set)
-                and not all(isinstance(topic, str) for topic in unity_command_topics)
-            )
+        if (unity_command_topics is not None and not isinstance(unity_command_topics, set)) or (
+            isinstance(unity_command_topics, set) and not all(isinstance(topic, str) for topic in unity_command_topics)
         ):
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
@@ -148,10 +143,8 @@ class ModuleInterface:  # pragma: no cover
                 f"non-string item."
             )
             console.error(message=message, error=TypeError)
-        if (
-            error_codes is not None
-            or not isinstance(error_codes, set)
-            or (isinstance(error_codes, set) and not all(isinstance(code, np.uint8) for code in error_codes))
+        if (error_codes is not None and not isinstance(error_codes, set)) or (
+            isinstance(error_codes, set) and not all(isinstance(code, np.uint8) for code in error_codes)
         ):
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
@@ -159,10 +152,8 @@ class ModuleInterface:  # pragma: no cover
                 f"{error_codes} of type {type(error_codes).__name__} and / or at least one non-uint8 item."
             )
             console.error(message=message, error=TypeError)
-        if (
-            data_codes is not None
-            or not isinstance(data_codes, set)
-            or (isinstance(data_codes, set) and not all(isinstance(code, np.uint8) for code in data_codes))
+        if (data_codes is not None and not isinstance(data_codes, set)) or (
+            isinstance(data_codes, set) and not all(isinstance(code, np.uint8) for code in data_codes)
         ):
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
@@ -265,7 +256,7 @@ class ModuleInterface:  # pragma: no cover
             f"process_received_data() method must be implemented when subclassing the base ModuleInterface class."
         )
 
-    def extract_logged_data(self, log_path: Path) -> dict[np.uint8, list[tuple[np.uint64, Any, np.uint8]]]:
+    def extract_logged_data(self, log_path: Path) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
         """Extracts the data received from the hardware module instance running on the microcontroller from the .npz
         log file generated during ModuleInterface runtime.
 
@@ -288,10 +279,11 @@ class ModuleInterface:  # pragma: no cover
                 DataLogger's compress_logs() method. The intermediate step of non-compressed '.npy 'files will not work.
 
         Returns:
-            A dictionary that uses numpy uint8 event codes as keys and stores lists of tuples under each key. Each tuple
-            contains 3 elements. First, an uint64 timestamp, representing the number of microseconds since the UTC epoch
-            onset. Second, the data object, transmitted with the message (or None, for state-only events). Third, the
-            uint8 code of the command that the module was executing when it sent the message to the PC.
+            A dictionary that uses numpy uint8 event codes as keys and stores lists of dictionaries under each key.
+            Each inner dictionary contains 3 elements. First, an uint64 timestamp, representing the number of
+            microseconds since the UTC epoch onset. Second, the data object, transmitted with the message
+            (or None, for state-only events). Third, the uint8 code of the command that the module was executing when
+            it sent the message to the PC.
 
         Raises:
             ValueError: If the input path is not valid or does not point to an existing .npz archive.
@@ -326,10 +318,10 @@ class ModuleInterface:  # pragma: no cover
         for number, item in enumerate(archive.files):
             message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
 
-            # Recovers the uint64 timestamp value from each message. The timestamp occupies the first 8 bytes of each
-            # logged message. If timestamp value is 0, the message contains the onset timestamp value stored as 8-byte
-            # payload.
-            if np.uint64(message[0:8].view(np.uint64)[0]) == 0:
+            # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
+            # message starting at index 1. If timestamp value is 0, the message contains the onset timestamp value
+            # stored as 8-byte payload. Index 0 stores the source ID (uint8 value)
+            if np.uint64(message[1:9].view(np.uint64)[0]) == 0:
                 # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
                 onset_us = np.uint64(message[9:].view("<i8")[0].copy())
 
@@ -347,17 +339,18 @@ class ModuleInterface:  # pragma: no cover
             payload = message[9:]
 
             # Ignores all payloads other than State and Data messages from the specific module instance managed by this
-            # interface.
+            # interface. Also ignores payloads with event codes below 51
             if (
                 (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA)
                 or payload[1] != self._module_type
                 or payload[2] != self._module_id
+                or payload[4] < 51
             ):
                 continue
 
             # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
             # message, in microseconds since epoch onset.
-            elapsed_microseconds = np.uint64(message[0:8].view(np.uint64)[0].copy())
+            elapsed_microseconds = np.uint64(message[1:9].view(np.uint64)[0].copy())
             timestamp = onset_us + elapsed_microseconds
 
             # Extracts command, event and, if supported, data object from the message payload.
@@ -389,9 +382,9 @@ class ModuleInterface:  # pragma: no cover
             # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
             # the active command code.
             if event not in event_data:
-                event_data[event] = [(timestamp, data, command_code)]
+                event_data[event] = [{"timestamp": timestamp, "data": data, "command": command_code}]
             else:
-                event_data[event].append((timestamp, data, command_code))
+                event_data[event].append({"timestamp": timestamp, "data": data, "command": command_code})
 
         return event_data
 
@@ -472,8 +465,8 @@ class MicroControllerInterface:  # pragma: no cover
         data_logger: An initialized DataLogger instance used to log the data produced by this Interface
             instance. The DataLogger itself is NOT managed by this instance and will need to be activated separately.
             This instance only extracts the necessary information to pipe the data to the logger.
-        modules: A tuple of classes that inherit from the ModuleInterface class that interface with specific hardware
-            module instances managed by the connected microcontroller.
+        module_interfaces: A tuple of classes that inherit from the ModuleInterface class that interface with specific
+            hardware module instances managed by the connected microcontroller.
         baudrate: The baudrate at which the serial communication should be established. This argument is ignored
             for microcontrollers that use the USB communication protocol, such as most Teensy boards. The correct
             baudrate for microcontrollers using the UART communication protocol depends on the clock speed of the
@@ -543,7 +536,7 @@ class MicroControllerInterface:  # pragma: no cover
         microcontroller_serial_buffer_size: int,
         microcontroller_usb_port: str,
         data_logger: DataLogger,
-        modules: tuple[ModuleInterface, ...],
+        module_interfaces: tuple[ModuleInterface, ...],
         baudrate: int = 115200,
         unity_broker_ip: str = "127.0.0.1",
         unity_broker_port: int = 1883,
@@ -561,14 +554,14 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{type(controller_id).__name__}."
             )
             console.error(message=message, error=TypeError)
-        if not isinstance(modules, tuple) or not modules:
+        if not isinstance(module_interfaces, tuple) or not module_interfaces:
             message = (
                 f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
                 f"{controller_id}. Expected a non-empty tuple of ModuleInterface instances for 'modules' argument, but "
-                f"encountered {modules} of type {type(modules).__name__}."
+                f"encountered {module_interfaces} of type {type(module_interfaces).__name__}."
             )
             console.error(message=message, error=TypeError)
-        if not all(isinstance(module, ModuleInterface) for module in modules):
+        if not all(isinstance(module, ModuleInterface) for module in module_interfaces):
             message = (
                 f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
                 f"{controller_id}. All items in 'modules' tuple must be ModuleInterface instances."
@@ -599,11 +592,11 @@ class MicroControllerInterface:  # pragma: no cover
         # Managed modules and data logger queue. Modules will be pre-processes as part of this initialization runtime.
         # Logger queue is fed directly into the SerialCommunication, which automatically logs all incoming and outgoing
         # data to disk.
-        self._modules: tuple[ModuleInterface, ...] = modules
+        self._modules: tuple[ModuleInterface, ...] = module_interfaces
 
         # Extracts the queue from the logger instance. Other than for this step, this class does not use the instance
         # for anything else.
-        self._logger_queue: MPQueue = DataLogger.input_queue  # type: ignore
+        self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore
 
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
         # data between the communication process and the main process managing the overall runtime.
@@ -851,7 +844,7 @@ class MicroControllerInterface:  # pragma: no cover
     @staticmethod
     def _runtime_cycle(
         controller_id: np.uint8,
-        modules: tuple[ModuleInterface, ...],
+        module_interfaces: tuple[ModuleInterface, ...],
         input_queue: MPQueue,  # type: ignore
         output_queue: MPQueue,  # type: ignore
         logger_queue: MPQueue,  # type: ignore
@@ -874,7 +867,8 @@ class MicroControllerInterface:  # pragma: no cover
         Args:
             controller_id: The byte-code identifier of the target microcontroller. This is used to ensure that the
                 instance interfaces with the correct controller and to source-stamp logged data.
-            modules: A tuple that stores ModuleInterface classes managed by this MicroControllerInterface instance.
+            module_interfaces: A tuple that stores ModuleInterface classes managed by this MicroControllerInterface
+                instance.
             input_queue: The multiprocessing queue used to issue commands to the microcontroller.
             output_queue: The multiprocessing queue used to pipe received data to other processes.
             logger_queue: The queue exposed by the DataLogger class that is used to buffer and pipe received and
@@ -911,7 +905,7 @@ class MicroControllerInterface:  # pragma: no cover
         # support efficient interaction between the Communication class and the ModuleInterface classes.
         unity_command_map: dict[str, tuple[ModuleInterface, ...] | list[ModuleInterface]] = {}
         processing_map: dict[np.uint16, ModuleInterface] = {}
-        for module in modules:
+        for module in module_interfaces:
             # If the module is configured to receive commands from unity, sets up the necessary assets. For this,
             # extracts the monitored topics from each module
             for topic in module.unity_command_topics:
@@ -1001,11 +995,11 @@ class MicroControllerInterface:  # pragma: no cover
 
         # The microcontroller may have more modules than the number of managed interfaces, but it can never have fewer
         # modules than interfaces.
-        if len(module_type_ids) < len(modules):
+        if len(module_type_ids) < len(module_interfaces):
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The number of "
-                f"ModuleInterface instances ({len(modules)}) is greater than the number of physical hardware module "
-                f"instances managed by the microcontroller ({len(module_type_ids)})."
+                f"ModuleInterface instances ({len(module_interfaces)}) is greater than the number of physical hardware "
+                f"module instances managed by the microcontroller ({len(module_type_ids)})."
             )
             console.error(message=message, error=ValueError)
 
@@ -1021,7 +1015,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=ValueError)
 
         # Ensures that each module interface has a matching hardware module on the microcontroller
-        for module in modules:
+        for module in module_interfaces:
             if module.type_id not in module_type_ids:
                 message = (
                     f"Unable to initialize the communication with the microcontroller {controller_id}. "

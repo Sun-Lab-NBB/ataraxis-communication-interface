@@ -159,7 +159,7 @@ class ModuleInterface:
                 data to Unity.
             mp_queue: An instance of the multiprocessing Queue class that allows piping data to parallel processes.
         """
-    def extract_logged_data(self, log_path: Path) -> dict[np.uint8, list[tuple[np.uint64, Any, np.uint8]]]:
+    def extract_logged_data(self, log_path: Path) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
         """Extracts the data received from the hardware module instance running on the microcontroller from the .npz
         log file generated during ModuleInterface runtime.
 
@@ -182,10 +182,11 @@ class ModuleInterface:
                 DataLogger's compress_logs() method. The intermediate step of non-compressed '.npy 'files will not work.
 
         Returns:
-            A dictionary that uses numpy uint8 event codes as keys and stores lists of tuples under each key. Each tuple
-            contains 3 elements. First, an uint64 timestamp, representing the number of microseconds since the UTC epoch
-            onset. Second, the data object, transmitted with the message (or None, for state-only events). Third, the
-            uint8 code of the command that the module was executing when it sent the message to the PC.
+            A dictionary that uses numpy uint8 event codes as keys and stores lists of dictionaries under each key.
+            Each inner dictionary contains 3 elements. First, an uint64 timestamp, representing the number of
+            microseconds since the UTC epoch onset. Second, the data object, transmitted with the message
+            (or None, for state-only events). Third, the uint8 code of the command that the module was executing when
+            it sent the message to the PC.
 
         Raises:
             ValueError: If the input path is not valid or does not point to an existing .npz archive.
@@ -253,8 +254,8 @@ class MicroControllerInterface:
         data_logger: An initialized DataLogger instance used to log the data produced by this Interface
             instance. The DataLogger itself is NOT managed by this instance and will need to be activated separately.
             This instance only extracts the necessary information to pipe the data to the logger.
-        modules: A tuple of classes that inherit from the ModuleInterface class that interface with specific hardware
-            module instances managed by the connected microcontroller.
+        module_interfaces: A tuple of classes that inherit from the ModuleInterface class that interface with specific
+            hardware module instances managed by the connected microcontroller.
         baudrate: The baudrate at which the serial communication should be established. This argument is ignored
             for microcontrollers that use the USB communication protocol, such as most Teensy boards. The correct
             baudrate for microcontrollers using the UART communication protocol depends on the clock speed of the
@@ -321,7 +322,7 @@ class MicroControllerInterface:
         microcontroller_serial_buffer_size: int,
         microcontroller_usb_port: str,
         data_logger: DataLogger,
-        modules: tuple[ModuleInterface, ...],
+        module_interfaces: tuple[ModuleInterface, ...],
         baudrate: int = 115200,
         unity_broker_ip: str = "127.0.0.1",
         unity_broker_port: int = 1883,
@@ -388,7 +389,7 @@ class MicroControllerInterface:
     @staticmethod
     def _runtime_cycle(
         controller_id: np.uint8,
-        modules: tuple[ModuleInterface, ...],
+        module_interfaces: tuple[ModuleInterface, ...],
         input_queue: MPQueue,
         output_queue: MPQueue,
         logger_queue: MPQueue,
@@ -411,7 +412,8 @@ class MicroControllerInterface:
         Args:
             controller_id: The byte-code identifier of the target microcontroller. This is used to ensure that the
                 instance interfaces with the correct controller and to source-stamp logged data.
-            modules: A tuple that stores ModuleInterface classes managed by this MicroControllerInterface instance.
+            module_interfaces: A tuple that stores ModuleInterface classes managed by this MicroControllerInterface
+                instance.
             input_queue: The multiprocessing queue used to issue commands to the microcontroller.
             output_queue: The multiprocessing queue used to pipe received data to other processes.
             logger_queue: The queue exposed by the DataLogger class that is used to buffer and pipe received and
