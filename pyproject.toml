@@ -44,6 +44,7 @@ classifiers = [
 # Runtime project dependencies. This overlaps with 'condarun' optional list.
 dependencies = [
     "numpy>=2,<3",
+    "numba>=0,<1",
     "ataraxis-time>=3,<4",
     "ataraxis-base-utilities>=3,<4",
     "ataraxis-data-structures>=2,<3",
