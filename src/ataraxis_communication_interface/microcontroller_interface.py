@@ -193,7 +193,7 @@ class ModuleInterface:  # pragma: no cover
     @abstractmethod
     def parse_unity_command(
         self, topic: str, payload: bytes | bytearray
-    ) -> OneOffModuleCommand | RepeatedModuleCommand | None:
+    ) -> OneOffModuleCommand | RepeatedModuleCommand | DequeueModuleCommand | None:
         """Packages and returns a ModuleCommand message to send to the microcontroller, based on the input Unity
         command message topic and payload.
 

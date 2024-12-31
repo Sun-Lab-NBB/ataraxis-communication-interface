@@ -9,7 +9,7 @@
 # steps connecting the module with its interface during runtime.
 #
 # See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface#quickstart for more details.
-# API documentation: https://ataraxis-communication-interface-api-docs.netlify.app/.
+# API documentation: https://ataraxis-communication-interface-api.netlify.app/.
 # Authors: Ivan Kondratyev (Inkaros), Jacob Groner.
 
 # Imports the required assets

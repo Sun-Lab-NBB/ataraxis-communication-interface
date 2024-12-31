@@ -53,7 +53,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/ataraxis-communication-interface"
-Documentation = "https://ataraxis-communication-interface-api-docs.netlify.app/"
+Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
 
 # Specifies additional dependencies that can be installed alongside the main library. Also, this is the section that
 # stores conda, condarun, and noconda lists that facilitate setting up dependencies via conda where possible.

@@ -1,7 +1,8 @@
-"""This library provides classes and methods for interfacing with other project Ataraxis systems and platforms.
+"""This library enables Python clients and Unity game engine to interface with custom hardware modules running on
+Arduino or Teensy microcontrollers.
 
 See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface for more details.
-API documentation: https://ataraxis-communication-interface-api-docs.netlify.app/
+API documentation: https://ataraxis-communication-interface-api.netlify.app/
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 

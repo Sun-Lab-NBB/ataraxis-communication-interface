@@ -33,7 +33,7 @@ dependencies:
   - expat=2.6.4=h5888daf_0
   - filelock=3.16.1=pyhd8ed1ab_1
   - future=1.0.0=pyhd8ed1ab_1
-  - grayskull=2.7.5=pyhd8ed1ab_0
+  - grayskull=2.7.6=pyhd8ed1ab_0
   - h2=4.1.0=pyhd8ed1ab_1
   - hatchling=1.27.0=pypyhd8ed1ab_0
   - hpack=4.0.0=pyhd8ed1ab_1
@@ -77,7 +77,7 @@ dependencies:
   - markupsafe=3.0.2=py312h178313f_1
   - mdurl=0.1.2=pyhd8ed1ab_1
   - more-itertools=10.5.0=pyhd8ed1ab_1
-  - mypy=1.14.0=py312h66e93f0_0
+  - mypy=1.14.1=py312h66e93f0_0
   - mypy_extensions=1.0.0=pyha770c72_1
   - ncurses=6.5=he02047a_1
   - nh3=0.2.20=py312h12e396e_0

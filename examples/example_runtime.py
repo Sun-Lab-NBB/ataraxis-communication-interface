@@ -9,7 +9,7 @@
 # This example is intended to be used together with a microcontroller running the module_integration.cpp from the
 # companion ataraxis-micro-controller library: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
 # See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface#quickstart for more details.
-# API documentation: https://ataraxis-communication-interface-api-docs.netlify.app/.
+# API documentation: https://ataraxis-communication-interface-api.netlify.app/.
 # Authors: Ivan Kondratyev (Inkaros), Jacob Groner.
 
 # Imports the necessary assets, including the TestModuleInterface class
