@@ -51,8 +51,13 @@ ___
 
 ## Dependencies
 
-For users, all library dependencies are installed automatically by all supported installation methods 
-(see [Installation](#installation) section). 
+- MQTT broker, if your interface needs to send or receive data from Unity or other source via MQTT. This library was 
+  tested and is intended to be used with a locally running [mosquitto MQTT broker](https://mosquitto.org/). If you have
+  access to an external broker or want to use a different local broker implementation, this would also satisfy the 
+  dependency.
+
+For users, all other library dependencies are installed automatically by all supported installation methods 
+(see [Installation](#installation) section).
 
 For developers, see the [Developers](#developers) section for information on installing additional development 
 dependencies.
@@ -321,15 +326,15 @@ elapsed since the onset timestamp. The onset log entries follow the following or
 #### Starting and stopping logging
 Until the DataLogger is started through its `start()` method, the log entries will be buffered in the multiprocessing 
 queue, which uses the host-computer’s RAM. To avoid running out of buffer space, **make sure** the DataLogger's 
-`start()` method ois called before calling the `start()` method of any MicroControllerInterface class. Once all sources
-using the same DataLogger have finished their runtime, call the `stop` method to end log saving and then call the
+`start()` method is called before calling the `start()` method of any MicroControllerInterface class. Once all sources
+using the same DataLogger have finished their runtime, call the `stop()` method to end log saving and then call the
 `compress_logs()` method to compress all individual `.npy` entries into an `.npz` archive. Compressing the logs is 
-essential for being able to parse logged module data for further analysis.
+required to later parse logged module data for further analysis.
 
 #### Reading custom module data from logs
-ModuleInterface exposes the `extract_logged_data()` that allows parsing received ModuleState and ModuleData
-messages from the compressed '.npz' archives. Currently, the method only works with messages that use 'event' byte-codes
-greater than 51 and only with messages sent by custom hardware module implementations.
+ModuleInterface exposes the `extract_logged_data()` method that allows parsing received ModuleState and ModuleData
+messages from compressed '.npz' archives. Currently, the method only works with messages that use 'event' byte-codes
+greater than 51 and only with messages sent by custom hardware module classes (children of base Module class).
 
 ### Custom Module Interfaces
 For this library an interface is a class that contains the logic for sending the command and parameter data to the 

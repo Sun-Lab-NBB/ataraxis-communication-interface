@@ -59,6 +59,7 @@ class TestModuleInterface(ModuleInterface):
         super().__init__(
             module_type=module_type,
             module_id=module_id,
+            mqtt_communication=False,  # Since this example does not work with Unity, it does not need MQTT.
             unity_command_topics=unity_command_topics,
             data_codes=data_codes,
             error_codes=error_codes,

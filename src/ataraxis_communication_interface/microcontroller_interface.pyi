@@ -58,6 +58,10 @@ class ModuleInterface:
         module_id: The code that identifies the specific custom hardware module instance managed by the interface class
             instance. This is used to identify unique modules in a broader module family, such as different rotary
             encoders if more than one is used at the same time. Valid byte-codes range from 1 to 255.
+        mqtt_communication: Determines whether this interface needs to communicate with MQTT. If your implementation of
+            the process_received_data() method requires sending data to Unity via UnityCommunication, set this flag to
+            True when implementing the class. Similarly, if your interface is configured to receive commands from
+            Unity, set this flag to True.
         error_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate runtime
             errors. This set will be used during runtime to identify and raise error messages in response to
             managed module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
@@ -83,6 +87,7 @@ class ModuleInterface:
         _data_codes: Stores all event-codes that require additional processing.
         _unity_command_topics: Stores Unity topics to monitor for incoming commands.
         _error_codes: Stores all expected error-codes as a set.
+        _mqtt_communication: Determines whether this interface needs to communicate with MQTT.
 
     Raises:
         TypeError: If input arguments are not of the expected type.
@@ -94,10 +99,12 @@ class ModuleInterface:
     _unity_command_topics: Incomplete
     _data_codes: Incomplete
     _error_codes: Incomplete
+    _mqtt_communication: Incomplete
     def __init__(
         self,
         module_type: np.uint8,
         module_id: np.uint8,
+        mqtt_communication: bool,
         error_codes: set[np.uint8] | None = None,
         data_codes: set[np.uint8] | None = None,
         unity_command_topics: set[str] | None = None,
@@ -218,6 +225,9 @@ class ModuleInterface:
     @property
     def error_codes(self) -> set[np.uint8]:
         """Returns the set of error event-codes used by the module instance."""
+    @property
+    def mqtt_communication(self) -> bool:
+        """Returns True if the class instance is configured to communicate with MQTT during runtime."""
 
 class MicroControllerInterface:
     """Allows Python and Unity game engine clients on this PC to interface with an Arduino or Teensy microcontroller
@@ -296,6 +306,7 @@ class MicroControllerInterface:
             prevents every Module managed by the Kernel from writing to any of the microcontroller pins.
         _started: Tracks whether the communication process has been started. This is used to prevent calling
             the start() and stop() methods multiple times.
+        _start_mqtt_client: Determines whether to to connect to MQTT broker during main runtime cycle.
     """
 
     _reset_command: Incomplete
@@ -316,6 +327,7 @@ class MicroControllerInterface:
     _terminator_array: Incomplete
     _communication_process: Incomplete
     _watchdog_thread: Incomplete
+    _start_mqtt_client: bool
     def __init__(
         self,
         controller_id: np.uint8,
@@ -399,6 +411,7 @@ class MicroControllerInterface:
         microcontroller_buffer_size: int,
         unity_ip: str,
         unity_port: int,
+        start_mqtt_client: bool,
     ) -> None:
         """This method aggregates the communication runtime logic and is used as the target for the communication
         process.
@@ -426,6 +439,7 @@ class MicroControllerInterface:
                 the maximum size of the incoming and outgoing message payloads.
             unity_ip: The IP-address of the MQTT broker to use for communication with Unity game engine.
             unity_port: The port number of the MQTT broker to use for communication with Unity game engine.
+            start_mqtt_client: Determines whether to start the MQTT client used by UnityCommunication instance.
         """
     def vacate_shared_memory_buffer(self) -> None:
         """Clears the SharedMemory buffer with the same name as the one used by the class.
