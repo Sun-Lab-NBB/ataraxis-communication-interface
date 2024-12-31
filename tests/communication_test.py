@@ -933,6 +933,10 @@ def test_unity_communication_send_receive() -> None:
 def test_unity_communication_send_receive_errors() -> None:
     """Verifies the error handling behavior of UnityCommunication send_data() and get_data() methods."""
 
+    # Skips the test if the test MQTT broker is not available
+    if not broker_available():
+        pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
+
     # Both methods raise RuntimeErrors if they are called when the class is not connected to the MQTT broker.
     unity_comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     message = (
