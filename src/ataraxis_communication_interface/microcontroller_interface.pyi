@@ -17,7 +17,7 @@ from .communication import (
     KernelParameters as KernelParameters,
     ModuleParameters as ModuleParameters,
     SerialPrototypes as SerialPrototypes,
-    UnityCommunication as UnityCommunication,
+    MQTTCommunication as MQTTCommunication,
     OneOffModuleCommand as OneOffModuleCommand,
     SerialCommunication as SerialCommunication,
     DequeueModuleCommand as DequeueModuleCommand,
@@ -46,7 +46,7 @@ class ModuleInterface:
         properly interact with your custom interface class!
 
         All data received from or sent to the microcontroller is automatically logged as byte-serialized numpy arrays.
-        If you do not need any additional processing steps, such as sending or receiving data from Unity, do not enable
+        If you do not need any additional processing steps, such as sending or receiving data over MQTT, do not enable
         any custom processing flags when initializing this superclass!
 
         In addition to interfacing with the module, the class also contains methods used to parse logged module data.
@@ -59,9 +59,9 @@ class ModuleInterface:
             instance. This is used to identify unique modules in a broader module family, such as different rotary
             encoders if more than one is used at the same time. Valid byte-codes range from 1 to 255.
         mqtt_communication: Determines whether this interface needs to communicate with MQTT. If your implementation of
-            the process_received_data() method requires sending data to Unity via UnityCommunication, set this flag to
+            the process_received_data() method requires sending data to MQTT via MQTTCommunication, set this flag to
             True when implementing the class. Similarly, if your interface is configured to receive commands from
-            Unity, set this flag to True.
+            MQTT, set this flag to True.
         error_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate runtime
             errors. This set will be used during runtime to identify and raise error messages in response to
             managed module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
@@ -72,10 +72,10 @@ class ModuleInterface:
             disk during communication runtime. Messages with event-codes from this set would also be passed to the
             process_received_data() method for additional processing. If the class does not require additional
             processing for any incoming data, set to None.
-        unity_command_topics: A set of MQTT topics used by Unity to send commands to the module accessible through this
-            interface instance. If the interface does not receive commands from Unity, set this to None. The
-            MicroControllerInterface set will use the set to initialize the UnityCommunication class instance to
-            monitor the requested topics and will use the use parse_unity_command() method to convert Unity messages to
+        mqtt_command_topics: A set of MQTT topics used by other MQTT clients to send commands to the module accessible
+            through this interface instance. If the interface does not receive commands from mqtt, set this to None. The
+            MicroControllerInterface set will use the set to initialize the MQTTCommunication class instance to
+            monitor the requested topics and will use the use parse_mqtt_command() method to convert MQTT messages to
             module-addressed command structures.
 
     Attributes:
@@ -85,7 +85,7 @@ class ModuleInterface:
             possible type-id pairs and is used to ensure that each used module instance has a unique ID-type
             combination.
         _data_codes: Stores all event-codes that require additional processing.
-        _unity_command_topics: Stores Unity topics to monitor for incoming commands.
+        _mqtt_command_topics: Stores MQTT topics to monitor for incoming commands.
         _error_codes: Stores all expected error-codes as a set.
         _mqtt_communication: Determines whether this interface needs to communicate with MQTT.
 
@@ -96,7 +96,7 @@ class ModuleInterface:
     _module_type: Incomplete
     _module_id: Incomplete
     _type_id: Incomplete
-    _unity_command_topics: Incomplete
+    _mqtt_command_topics: Incomplete
     _data_codes: Incomplete
     _error_codes: Incomplete
     _mqtt_communication: Incomplete
@@ -107,49 +107,50 @@ class ModuleInterface:
         mqtt_communication: bool,
         error_codes: set[np.uint8] | None = None,
         data_codes: set[np.uint8] | None = None,
-        unity_command_topics: set[str] | None = None,
+        mqtt_command_topics: set[str] | None = None,
     ) -> None: ...
     def __repr__(self) -> str:
         """Returns the string representation of the ModuleInterface instance."""
     @abstractmethod
-    def parse_unity_command(
+    def parse_mqtt_command(
         self, topic: str, payload: bytes | bytearray
     ) -> OneOffModuleCommand | RepeatedModuleCommand | DequeueModuleCommand | None:
-        """Packages and returns a ModuleCommand message to send to the microcontroller, based on the input Unity
+        """Packages and returns a ModuleCommand message to send to the microcontroller, based on the input MQTT
         command message topic and payload.
 
-        This method is called by the MicroControllerInterface when Unity sends command messages to one of the topics
-        monitored by this ModuleInterface instance. This method resolves, packages, and returns the appropriate
-        ModuleCommand message structure, based on the input message topic and payload.
+        This method is called by the MicroControllerInterface when other MQTT clients send command messages to one of
+        the topics monitored by this ModuleInterface instance. This method resolves, packages, and returns the
+        appropriate ModuleCommand message structure, based on the input message topic and payload.
 
         Notes:
-            This method is called only if 'unity_command_topics' class argument was used to set the monitored topics
+            This method is called only if 'mqtt_command_topics' class argument was used to set the monitored topics
             during class initialization. This method will never receive a message with a topic that is not inside the
-            'unity_command_topics' set.
+            'mqtt_command_topics' set.
 
             See the /examples folder included with the library for examples on how to implement this method.
 
         Args:
-            topic: The MQTT topic to which Unity sent the module-addressed command.
+            topic: The MQTT topic to which the other MQTT client sent the module-addressed command.
             payload: The payload of the message.
 
         Returns:
             A OneOffModuleCommand or RepeatedModuleCommand instance that stores the message to be sent to the
-            microcontroller. None, if the class instance is not configured to receive commands from Unity.
+            microcontroller. None, if the class instance is not configured to receive commands from MQTT.
         """
     @abstractmethod
     def process_received_data(
-        self, message: ModuleData | ModuleState, unity_communication: UnityCommunication, mp_queue: MPQueue
+        self, message: ModuleData | ModuleState, mqtt_communication: MQTTCommunication, mp_queue: MPQueue
     ) -> None:
-        """Processes the input message data and, if necessary, sends it to Unity and / or other processes.
+        """Processes the input message data and, if necessary, sends it to other MQTT clients and / or other Python
+        processes.
 
         This method is called by the MicroControllerInterface when the ModuleInterface instance receives a message from
         the microcontroller that uses an event code provided at class initialization as 'data_codes' argument. This
-        method processes the received message and uses the input UnityCommunication instance or multiprocessing Queue
+        method processes the received message and uses the input MQTTCommunication instance or multiprocessing Queue
         instance to transmit the data to other Ataraxis systems or processes.
 
         Notes:
-            To send the data to Unity, call the send_data() method of the UnityCommunication class. To send the data to
+            To send the data to MQTT, call the send_data() method of the MQTTCommunication class. To send the data to
             other processes, call the put() method of the multiprocessing Queue object to pipe the data to other
             processes.
 
@@ -162,8 +163,8 @@ class ModuleInterface:
         Args:
             message: The ModuleState or ModuleData object that stores the message received from the module instance
                 running on the microcontroller.
-            unity_communication: A fully configured instance of the UnityCommunication class to use for sending the
-                data to Unity.
+            mqtt_communication: A fully configured instance of the MQTTCommunication class to use for sending the
+                data to MQTT.
             mp_queue: An instance of the multiprocessing Queue class that allows piping data to parallel processes.
         """
     def extract_logged_data(self, log_path: Path) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
@@ -215,8 +216,8 @@ class ModuleInterface:
         disk.
         """
     @property
-    def unity_command_topics(self) -> set[str]:
-        """Returns the set of MQTT topics this instance monitors for incoming Unity commands."""
+    def mqtt_command_topics(self) -> set[str]:
+        """Returns the set of MQTT topics this instance monitors for incoming MQTT commands."""
     @property
     def type_id(self) -> np.uint16:
         """Returns the unique 16-bit unsigned integer value that results from combining the type-code and the id-code
@@ -230,13 +231,12 @@ class ModuleInterface:
         """Returns True if the class instance is configured to communicate with MQTT during runtime."""
 
 class MicroControllerInterface:
-    """Allows Python and Unity game engine clients on this PC to interface with an Arduino or Teensy microcontroller
-    running ataraxis-micro-controller library.
+    """Interfaces with an Arduino or Teensy microcontroller running ataraxis-micro-controller library.
 
-    This class contains the logic that sets up a remote daemon process with SerialCommunication, UnityCommunication,
-    and DataLogger bindings to facilitate bidirectional communication and data logging between Unity, Python, and the
-    microcontroller. Additionally, it exposes methods that send runtime parameters and commands to the Kernel and
-    Module classes running on the connected microcontroller.
+    This class contains the logic that sets up a remote daemon process with SerialCommunication, MQTTCommunication,
+    and DataLogger bindings to facilitate bidirectional communication and data logging between the microcontroller and
+    concurrently active local (same PC) and remote (network) processes. Additionally, it exposes methods that send
+    runtime parameters and commands to the Kernel and Module classes running on the connected microcontroller.
 
     Notes:
         An instance of this class has to be instantiated for each microcontroller active at the same time. The
@@ -252,8 +252,7 @@ class MicroControllerInterface:
             code used by the connected microcontroller matches this argument when the connection is established.
             Critically, this code is also used as the source_id for the data sent from this class to the DataLogger.
             Therefore, it is important for this code to be unique across ALL concurrently active Ataraxis data
-            producers, such as: microcontrollers, video systems, and Unity game engine instances. Valid codes are
-            values between 1 and 255.
+            producers, such as: microcontrollers and video systems. Valid codes are values between 1 and 255.
         microcontroller_serial_buffer_size: The size, in bytes, of the microcontroller's serial interface (UART or USB)
             buffer. This size is used to calculate the maximum size of transmitted and received message payloads. This
             information is usually available from the microcontroller's vendor.
@@ -271,12 +270,12 @@ class MicroControllerInterface:
             baudrate for microcontrollers using the UART communication protocol depends on the clock speed of the
             microcontroller's CPU and the supported UART revision. Setting this to an unsupported value for
             microcontrollers that use UART will result in communication errors.
-        unity_broker_ip: The ip address of the MQTT broker used for Unity communication. Typically, this would be a
+        mqtt_broker_ip: The ip address of the MQTT broker used for MQTT communication. Typically, this would be a
             'virtual' ip-address of the locally running MQTT broker, but the class can carry out cross-machine
-            communication if necessary. Unity communication will only be initialized if any of the input modules
+            communication if necessary. MQTT communication will only be initialized if any of the input modules
             requires this functionality.
-        unity_broker_port: The TCP port of the MQTT broker used for Unity communication. This is used in conjunction
-            with the unity_broker_ip argument to connect to the MQTT broker.
+        mqtt_broker_port: The TCP port of the MQTT broker used for MQTT communication. This is used in conjunction
+            with the mqtt_broker_ip argument to connect to the MQTT broker.
 
     Raises:
         TypeError: If any of the input arguments are not of the expected type.
@@ -286,8 +285,8 @@ class MicroControllerInterface:
         _usb_port: Stores the USB port to which the controller is connected.
         _baudrate: Stores the baudrate to use for serial communication with the controller.
         _microcontroller_serial_buffer_size: Stores the microcontroller's serial buffer size, in bytes.
-        _unity_ip: Stores the IP address of the MQTT broker used for Unity communication.
-        _unity_port: Stores the port number of the MQTT broker used for Unity communication.
+        _mqtt_ip: Stores the IP address of the MQTT broker used for MQTT communication.
+        _mqtt_port: Stores the port number of the MQTT broker used for MQTT communication.
         _mp_manager: Stores the multiprocessing Manager used to initialize and manage input and output Queue
             objects.
         _input_queue: Stores the multiprocessing Queue used to input the data to be sent to the microcontroller into
@@ -306,7 +305,7 @@ class MicroControllerInterface:
             prevents every Module managed by the Kernel from writing to any of the microcontroller pins.
         _started: Tracks whether the communication process has been started. This is used to prevent calling
             the start() and stop() methods multiple times.
-        _start_mqtt_client: Determines whether to to connect to MQTT broker during main runtime cycle.
+        _start_mqtt_client: Determines whether to connect to MQTT broker during the main runtime cycle.
     """
 
     _reset_command: Incomplete
@@ -317,8 +316,8 @@ class MicroControllerInterface:
     _usb_port: Incomplete
     _baudrate: Incomplete
     _microcontroller_serial_buffer_size: Incomplete
-    _unity_ip: Incomplete
-    _unity_port: Incomplete
+    _mqtt_ip: Incomplete
+    _mqtt_port: Incomplete
     _modules: Incomplete
     _logger_queue: Incomplete
     _mp_manager: Incomplete
@@ -336,8 +335,8 @@ class MicroControllerInterface:
         data_logger: DataLogger,
         module_interfaces: tuple[ModuleInterface, ...],
         baudrate: int = 115200,
-        unity_broker_ip: str = "127.0.0.1",
-        unity_broker_port: int = 1883,
+        mqtt_broker_ip: str = "127.0.0.1",
+        mqtt_broker_port: int = 1883,
     ) -> None: ...
     def __repr__(self) -> str:
         """Returns a string representation of the class instance."""
@@ -378,7 +377,7 @@ class MicroControllerInterface:
         process states every ~20 ms and will release the GIL between checking the states.
         """
     def start(self) -> None:
-        """Initializes the communication with the target microcontroller, Unity game engine, and other processes.
+        """Initializes the communication with the target microcontroller and the MQTT broker.
 
         The MicroControllerInterface class will not be able to carry out any communications until this method is called.
         After this method finishes its runtime, a watchdog thread is used to monitor the status of the process until
@@ -409,18 +408,17 @@ class MicroControllerInterface:
         usb_port: str,
         baudrate: int,
         microcontroller_buffer_size: int,
-        unity_ip: str,
-        unity_port: int,
+        mqtt_ip: str,
+        mqtt_port: int,
         start_mqtt_client: bool,
     ) -> None:
         """This method aggregates the communication runtime logic and is used as the target for the communication
         process.
 
         This method is designed to run in a remote Process. It encapsulates the steps for sending and receiving the
-        data from the connected microcontroller. Primarily, the method routes the data between the microcontroller and
-        the multiprocessing queues (inpout and output) managed by the Interface instance and Unity game engine
-        (via the binding of an MQTT client). Additionally, it manages data logging by interfacing with the DataLogger
-        class via the logger_queue.
+        data from the connected microcontroller. Primarily, the method routes the data between the microcontroller,
+        the multiprocessing queues (inpout and output) managed by the Interface instance, and the MQTT
+        broker. Additionally, it manages data logging by interfacing with the DataLogger class via the logger_queue.
 
         Args:
             controller_id: The byte-code identifier of the target microcontroller. This is used to ensure that the
@@ -437,9 +435,9 @@ class MicroControllerInterface:
                  but is essential for controllers that use the UART interface.
             microcontroller_buffer_size: The size of the microcontroller's serial buffer. This is used to determine
                 the maximum size of the incoming and outgoing message payloads.
-            unity_ip: The IP-address of the MQTT broker to use for communication with Unity game engine.
-            unity_port: The port number of the MQTT broker to use for communication with Unity game engine.
-            start_mqtt_client: Determines whether to start the MQTT client used by UnityCommunication instance.
+            mqtt_ip: The IP-address of the MQTT broker to use for communication with other MQTT processes.
+            mqtt_port: The port number of the MQTT broker to use for communication with other MQTT processes.
+            start_mqtt_client: Determines whether to start the MQTT client used by MQTTCommunication instance.
         """
     def vacate_shared_memory_buffer(self) -> None:
         """Clears the SharedMemory buffer with the same name as the one used by the class.

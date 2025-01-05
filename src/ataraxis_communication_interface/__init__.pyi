@@ -2,7 +2,7 @@ from .communication import (
     ModuleData as ModuleData,
     ModuleState as ModuleState,
     ModuleParameters as ModuleParameters,
-    UnityCommunication as UnityCommunication,
+    MQTTCommunication as MQTTCommunication,
     OneOffModuleCommand as OneOffModuleCommand,
     DequeueModuleCommand as DequeueModuleCommand,
     RepeatedModuleCommand as RepeatedModuleCommand,
@@ -20,6 +20,6 @@ __all__ = [
     "ModuleParameters",
     "RepeatedModuleCommand",
     "OneOffModuleCommand",
-    "UnityCommunication",
+    "MQTTCommunication",
     "DequeueModuleCommand",
 ]

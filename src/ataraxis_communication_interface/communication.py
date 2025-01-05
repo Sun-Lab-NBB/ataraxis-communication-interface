@@ -1,8 +1,9 @@
-"""This module provides the SerialCommunication and UnityCommunication classes that enable communication between
-the PC, Unity game engine, and Arduino / Teensy microcontrollers running Ataraxis software.
+"""This module provides the SerialCommunication and MQTTCommunication classes that enable communication between
+the PC, Arduino / Teensy microcontrollers running Ataraxis software and the other infrastructure with MQTT bindings.
 
-SerialCommunication supports the PC-MicroController communication over USB / UART interface, while UnityCommunication
-supports the Python-Unity communication over the MQTT protocol (virtual / real TCP sockets).
+SerialCommunication supports the PC-MicroController communication over USB / UART interface, while MQTTCommunication
+supports the communication over the MQTT protocol (virtual / real TCP sockets). MQTTCommunication can be used to
+transmit data locally (within the same PC) or remotely via a network connection.
 
 Additionally, this module exposes message and helper structures used to serialize and deserialize the transmitted data.
 """
@@ -1768,14 +1769,14 @@ class SerialCommunication:
         self._logger_queue.put(package)
 
 
-class UnityCommunication:
-    """Wraps an MQTT client and exposes methods for communicating with Unity game engine running one of the
-    Ataraxis-compatible tasks.
+class MQTTCommunication:
+    """Wraps an MQTT client and exposes methods for bidirectionally communicating with other clients connected to the
+    same MQTT broker.
 
-    This class leverages MQTT protocol on Python side and the Gimbl library (https://github.com/winnubstj/Gimbl) on the
-    Unity side to establish bidirectional communication between Python and Virtual Reality (VR) game world. Primarily,
-    the class is intended to be used together with SerialCommunication class to transfer data between microcontrollers
-    and Unity. Usually, both communication classes will be managed by the same process (core) that handles the necessary
+    This class leverages MQTT protocol on Python side and to establish bidirectional communication between the Python
+    process running this class and other MQTT clients. Primarily, the class is intended to be used together with
+    SerialCommunication class to transfer data between microcontrollers and the rest of the infrastructure used during
+    runtime. Usually, both communication classes will be managed by the same process (core) that handles the necessary
     transformations to bridge MQTT and Serial communication protocols used by this library. This class is not designed
     to be instantiated directly and should instead be used through the MicroControllerInterface class available through
     this library!
@@ -1795,9 +1796,9 @@ class UnityCommunication:
         _ip: Stores the IP address of the MQTT broker.
         _port: Stores the port used by the broker's TCP socket.
         _connected: Tracks whether the class instance is currently connected to the MQTT broker.
-        _monitored_topics: Stores the topics the class should monitor for incoming messages sent from Unity.
-        _output_queue: A multithreading queue used to buffer incoming messages received from Unity before their data is
-            requested via class methods.
+        _monitored_topics: Stores the topics the class should monitor for incoming messages sent by other MQTT clients.
+        _output_queue: A multithreading queue used to buffer incoming messages received from other MQTT clients before
+            their data is requested via class methods.
         _client: Stores the initialized mqtt client instance that carries out the communication.
 
     Raises:
@@ -1838,16 +1839,16 @@ class UnityCommunication:
         # The exception can also be raised by connect() method raising an exception internally.
         except Exception:
             message = (
-                f"Unable to initialize UnityCommunication class instance. Failed to connect to MQTT broker at "
+                f"Unable to initialize MQTTCommunication class instance. Failed to connect to MQTT broker at "
                 f"{self._ip}:{self._port}. This likely indicates that the broker is not running or that there is an "
                 f"issue with the provided IP and socket port."
             )
             console.error(message, error=RuntimeError)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the UnityCommunication object."""
+        """Returns a string representation of the MQTTCommunication object."""
         return (
-            f"UnityCommunication(broker_ip={self._ip}, socket_port={self._port}, connected={self._connected}, "
+            f"MQTTCommunication(broker_ip={self._ip}, socket_port={self._port}, connected={self._connected}, "
             f"subscribed_topics={self._monitored_topics}"
         )
 
@@ -1874,7 +1875,7 @@ class UnityCommunication:
         """Connects to the MQTT broker and subscribes to the requested input topics.
 
         This method has to be called to initialize communication, both for incoming and outgoing messages. Any message
-        sent to the MQTT broker from unity before this method is called may not reach this class.
+        sent to the MQTT broker from other clients before this method is called may not reach this class.
 
         Notes:
             If this class instance subscribes (listens) to any topics, it will start a perpetually active thread
@@ -1905,9 +1906,8 @@ class UnityCommunication:
     def send_data(self, topic: str, payload: str | bytes | bytearray | float | None = None) -> None:
         """Publishes the input payload to the specified MQTT topic.
 
-        This method should be used for sending data to Unity via one of the Gimbl-defined input topics. This method
-        does not verify the validity of the input topic or payload data. Ensure both are correct given the specific
-        configuration of Unity scripts and the version of the Gimbl library used to bind MQTT on Unity's side.
+        This method should be used for sending data to MQTT via one of the input topics. This method does not verify
+        the validity of the input topic or payload data.
 
         Args:
             topic: The MQTT topic to publish the data to.
@@ -1919,8 +1919,8 @@ class UnityCommunication:
         """
         if not self._connected:
             message = (
-                f"Cannot send data to the MQTT broker at {self._ip}:{self._port} via the UnityCommunication instance. "
-                f"The UnityCommunication instance is not connected to the MQTT broker, call connect() method before "
+                f"Cannot send data to the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication instance. "
+                f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
                 f"sending data."
             )
             console.error(message=message, error=RuntimeError)
@@ -1928,8 +1928,8 @@ class UnityCommunication:
 
     @property
     def has_data(self) -> bool:
-        """Returns True if the instance received messages from Unity and can output received data via the get_dataq()
-        method.
+        """Returns True if the instance received messages from other MQTT clients and can output received data via the
+        get_dataq() method.
         """
         if not self._output_queue.empty():
             return True
@@ -1948,8 +1948,8 @@ class UnityCommunication:
         """
         if not self._connected:
             message = (
-                f"Cannot get data from the MQTT broker at {self._ip}:{self._port} via the UnityCommunication instance. "
-                f"The UnityCommunication instance is not connected to the MQTT broker, call connect() method before "
+                f"Cannot get data from the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication instance. "
+                f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
                 f"sending data."
             )
             console.error(message=message, error=RuntimeError)
