@@ -1,5 +1,5 @@
-"""This library enables Python clients and Unity game engine to interface with custom hardware modules running on
-Arduino or Teensy microcontrollers.
+"""This library enables interfacing with custom hardware modules running on Arduino or Teensy microcontrollers through
+Python interface clients.
 
 See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface for more details.
 API documentation: https://ataraxis-communication-interface-api.netlify.app/
@@ -10,7 +10,7 @@ from .communication import (
     ModuleData,
     ModuleState,
     ModuleParameters,
-    UnityCommunication,
+    MQTTCommunication,
     OneOffModuleCommand,
     DequeueModuleCommand,
     RepeatedModuleCommand,
@@ -28,6 +28,6 @@ __all__ = [
     "ModuleParameters",
     "RepeatedModuleCommand",
     "OneOffModuleCommand",
-    "UnityCommunication",
+    "MQTTCommunication",
     "DequeueModuleCommand",
 ]

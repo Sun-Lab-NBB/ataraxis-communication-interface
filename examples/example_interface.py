@@ -22,7 +22,7 @@ from ataraxis_communication_interface import (
     ModuleState,
     ModuleInterface,
     ModuleParameters,
-    UnityCommunication,
+    MQTTCommunication,
     OneOffModuleCommand,
     RepeatedModuleCommand,
 )
@@ -44,23 +44,23 @@ class TestModuleInterface(ModuleInterface):
         # Defines the set of event-codes that the interface will interpret as data events that require additional
         # processing. When the interface receives a message containing one of these event-codes, it will call the
         # process_received_data() method on that message. The method can then process the data as necessary and send it
-        # to other processes (as done here) or to Unity game engine (as done in other SunLab libraries).
+        # to other processes via a local queue (as done here) or via the MQTT protocol. MQTT protocol interaction is
+        # not demonstrated here, but is used by other Sun lab repositories.
         data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}  # kHigh, kLow and kEcho.
 
         # Messages with event-codes above 50 that are not in either of the sets above will be saved (logged) to disk,
         # but will not be processed further during runtime.
 
-        # The base interface class also allows direct communication between the module and the Unity game engine running
-        # the Gimbl protocol (https://github.com/winnubstj/Gimbl) over MQTT. This example does not demonstrate this
-        # functionality, so sets to None to disable.
-        unity_command_topics = None
+        # The base interface class also allows direct communication between the module and other clients over the MQTT
+        # protocol. This example does not demonstrate this functionality, so sets to None to disable.
+        mqtt_command_topics = None
 
         # Initializes the parent class, using the sets defined above
         super().__init__(
             module_type=module_type,
             module_id=module_id,
-            mqtt_communication=False,  # Since this example does not work with Unity, it does not need MQTT.
-            unity_command_topics=unity_command_topics,
+            mqtt_communication=False,  # Since this example does not work with other MQTT clients, sets to False.
+            mqtt_command_topics=mqtt_command_topics,
             data_codes=data_codes,
             error_codes=error_codes,
         )
@@ -71,7 +71,7 @@ class TestModuleInterface(ModuleInterface):
     def process_received_data(
         self,
         message: ModuleData | ModuleState,
-        unity_communication: UnityCommunication,  # Not used by this example, but still has to be defined
+        mqtt_communication: MQTTCommunication,  # Not used by this example, but still has to be defined
         mp_queue: MPQueue,  # type: ignore
     ) -> None:
         # This method will only receive messages with event-codes that match the content of the 'data_codes' set.
@@ -95,8 +95,8 @@ class TestModuleInterface(ModuleInterface):
             value = message.data_object
             mp_queue.put((self.module_id, message_type, value))
 
-    # Since this example does not receive commands from Unity, this method is defined with a plain None return
-    def parse_unity_command(self, topic: str, payload: bytes | bytearray) -> None:
+    # Since this example does not receive commands from MQTT, this method is defined with a plain None return
+    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
         """Not used."""
         return
 

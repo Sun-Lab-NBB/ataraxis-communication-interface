@@ -23,7 +23,7 @@ from ataraxis_communication_interface.communication import (
     KernelParameters,
     ModuleParameters,
     SerialPrototypes,
-    UnityCommunication,
+    MQTTCommunication,
     OneOffModuleCommand,
     SerialCommunication,
     DequeueModuleCommand,
@@ -834,48 +834,48 @@ def broker_available() -> bool:
     This fixture should be used with pytest.mark.skipif to skip tests when broker is not available.
     """
     try:
-        UnityCommunication(ip=BROKER_IP, port=BROKER_PORT)
+        MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT)
         return True
     except Exception:
         return False
 
 
 def test_unity_communication_init_and_repr() -> None:
-    """Verifies the successful initialization of UnityCommunication __init__() method and the __repr__() method."""
+    """Verifies the successful initialization of MQTTCommunication __init__() method and the __repr__() method."""
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
 
     # Verifies class representation string
     expected_repr = (
-        f"UnityCommunication(broker_ip={BROKER_IP}, socket_port={BROKER_PORT}, connected={False}, "
+        f"MQTTCommunication(broker_ip={BROKER_IP}, socket_port={BROKER_PORT}, connected={False}, "
         f"subscribed_topics={TEST_TOPICS}"
     )
     assert repr(comm) == expected_repr
 
 
 def test_unity_communication_init_error() -> None:
-    """Verifies the error handling behavior of UnityCommunication __init__() method."""
+    """Verifies the error handling behavior of MQTTCommunication __init__() method."""
     message = (
-        f"Unable to initialize UnityCommunication class instance. Failed to connect to MQTT broker at "
+        f"Unable to initialize MQTTCommunication class instance. Failed to connect to MQTT broker at "
         f"{BROKER_IP}:{1880}. This likely indicates that the broker is not running or that there is an "
         f"issue with the provided IP and socket port."
     )
     with pytest.raises(RuntimeError, match=error_format(message)):
         # Invalid port
-        UnityCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
+        MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
 
 
 @pytest.mark.xdist_group(name="group1")
 def test_unity_communication_send_receive() -> None:
-    """Verifies bidirectional communication between UnityCommunication and simulated Unity client."""
+    """Verifies bidirectional communication between MQTTCommunication and simulated Unity client."""
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     unity_comm.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
     unity_client.connect(BROKER_IP, BROKER_PORT)
@@ -895,7 +895,7 @@ def test_unity_communication_send_receive() -> None:
     unity_client.subscribe(test_topic)
     time.sleep(0.1)  # Allow subscription to establish
 
-    # Tests sending data from UnityCommunication to Unity
+    # Tests sending data from MQTTCommunication to Unity
     test_data = [
         ("test message", str),
         (b"binary data", bytes),
@@ -915,13 +915,13 @@ def test_unity_communication_send_receive() -> None:
         else:
             assert payload == data
 
-    # Tests sending data from Unity to UnityCommunication
+    # Tests sending data from Unity to MQTTCommunication
     for topic in TEST_TOPICS:
         test_message = f"Unity message for {topic}"
         unity_client.publish(topic, test_message)
         time.sleep(0.1)  # Allows the message to be received
 
-        # Verifies UnityCommunication received the message
+        # Verifies MQTTCommunication received the message
         assert unity_comm.has_data
         received = unity_comm.get_data()
         assert received is not None
@@ -931,24 +931,24 @@ def test_unity_communication_send_receive() -> None:
 
 
 def test_unity_communication_send_receive_errors() -> None:
-    """Verifies the error handling behavior of UnityCommunication send_data() and get_data() methods."""
+    """Verifies the error handling behavior of MQTTCommunication send_data() and get_data() methods."""
 
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
     # Both methods raise RuntimeErrors if they are called when the class is not connected to the MQTT broker.
-    unity_comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     message = (
-        f"Cannot send data to the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the UnityCommunication instance. "
-        f"The UnityCommunication instance is not connected to the MQTT broker, call connect() method before "
+        f"Cannot send data to the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
+        f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
         f"sending data."
     )
     with pytest.raises(RuntimeError, match=error_format(message)):
         unity_comm.send_data("test/ topic1")
     message = (
-        f"Cannot get data from the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the UnityCommunication instance. "
-        f"The UnityCommunication instance is not connected to the MQTT broker, call connect() method before "
+        f"Cannot get data from the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
+        f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
         f"sending data."
     )
     with pytest.raises(RuntimeError, match=error_format(message)):
@@ -957,12 +957,12 @@ def test_unity_communication_send_receive_errors() -> None:
 
 @pytest.mark.xdist_group(name="group1")
 def test_unity_communication_queue_management() -> None:
-    """Verifies that UnityCommunication message queue properly handles multiple messages."""
+    """Verifies that MQTTCommunication message queue properly handles multiple messages."""
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     unity_comm.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
     unity_client.connect(BROKER_IP, BROKER_PORT)
@@ -991,12 +991,12 @@ def test_unity_communication_queue_management() -> None:
 
 @pytest.mark.xdist_group(name="group1")
 def test_unity_communication_reconnection() -> None:
-    """Verifies UnityCommunication disconnecting and reconnecting while maintaining subscriptions."""
+    """Verifies MQTTCommunication disconnecting and reconnecting while maintaining subscriptions."""
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     unity_comm.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
     unity_client.connect(BROKER_IP, BROKER_PORT)
@@ -1037,12 +1037,12 @@ def test_unity_communication_reconnection() -> None:
 
 @pytest.mark.xdist_group(name="group1")
 def test_unity_communication_large_message() -> None:
-    """Verifies UnityCommunication handling of larger messages."""
+    """Verifies MQTTCommunication handling of larger messages."""
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = UnityCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     unity_comm.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
     unity_client.connect(BROKER_IP, BROKER_PORT)
@@ -1051,7 +1051,7 @@ def test_unity_communication_large_message() -> None:
     # Creates a large test message (100KB)
     large_message = b"x" * 100000
 
-    # Sends from UnityCommunication to Unity
+    # Sends from MQTTCommunication to Unity
     test_topic = "test/large"
     unity_client.subscribe(test_topic)
     time.sleep(0.1)
@@ -1069,7 +1069,7 @@ def test_unity_communication_large_message() -> None:
 
     assert received_large_message == large_message
 
-    # Sends from Unity to UnityCommunication
+    # Sends from Unity to MQTTCommunication
     unity_client.publish(TEST_TOPICS[0], large_message)
     time.sleep(0.2)
 

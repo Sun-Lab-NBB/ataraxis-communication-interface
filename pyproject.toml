@@ -8,8 +8,8 @@ build-backend = "hatchling.build"
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "1.0.0"
-description = "Enables Python clients and Unity game engine to interface with custom hardware modules running on Arduino or Teensy microcontrollers."
+version = "2.0.0"
+description = "Enables interfacing with custom hardware modules running on Arduino or Teensy microcontrollers through Python interface clients."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11, <3.13"  # Limited to 3.11 and 3.12 until 3.13 support is added for numba
@@ -65,6 +65,7 @@ Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
 # project dependencies with conda over pip as possible.
 condarun = [
     "numpy>=2,<3",
+    "numba>=0,<1",
 ]
 
 # Dependencies known to be installable with conda for all development platforms (OSX ARM64, WIN AMD64, LIN AMD64).
