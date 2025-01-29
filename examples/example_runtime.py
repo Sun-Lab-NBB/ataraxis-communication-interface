@@ -27,8 +27,8 @@ from ataraxis_communication_interface import MicroControllerInterface
 if __name__ == "__main__":
     # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
     # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
-    temp_dir = Path(tempfile.mkdtemp())
-    data_logger = DataLogger(output_directory=temp_dir, instance_name="test_logger")
+    temp_dir = Path("/Users/InfamousOne/Desktop/Demo/MicroControllerInterface")
+    data_logger = DataLogger(output_directory=temp_dir, instance_name="AMC")
 
     # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
     # different module_id codes, but the same type (family) id code. These codes match the values used on the
@@ -38,12 +38,12 @@ if __name__ == "__main__":
     interfaces = (interface_1, interface_2)
 
     # Defines microcontroller parameters necessary to establish serial communication. Critically, this example uses a
-    # Teensy 4.1 microcontroller and the parameters defined below may not work for your microcontroller!
+    # Teensy 4.1 microcontroller, and the parameters defined below may not work for your microcontroller!
     # See MicroControllerInterface docstrings / API documentation for more details about each of these parameters.
     controller_id = np.uint8(222)  # Matches the microcontroller ID defined in the microcontroller's main.cpp file
     microcontroller_serial_buffer_size = 8192
     baudrate = 115200
-    port = "/dev/ttyACM1"
+    port = "/dev/cu.usbmodem142013801"
 
     # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
     # ataraxis-micro-controller library and abstracts most inner-workings of the library. This interface also allows
@@ -170,4 +170,5 @@ if __name__ == "__main__":
 
     # Log compression generates an '.npz' archive for each unique source. For MicroControllerInterface class, its
     # controlled_id is used as the source_id. In our case, the log is saved under '222_data_log.npz'.
-    print(interface_1.extract_logged_data(log_path=temp_dir / "test_logger_data_log" / "222_data_log.npz"))
+    log_data = interface_1.extract_logged_data()
+    print(f"Extracted event data: {log_data}")

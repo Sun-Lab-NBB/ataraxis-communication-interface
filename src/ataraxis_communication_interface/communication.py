@@ -1611,7 +1611,7 @@ class SerialCommunication:
 
         # Initializes the trackers used to id-stamp data sent to the logger via the logger_queue.
         self._timestamp_timer: PrecisionTimer = PrecisionTimer("us")
-        self._source_id = int(source_id)  # uint8 type is used to enforce byte-range, but logger expects the int type.
+        self._source_id: np.uint8 = source_id  # uint8 type is used to enforce byte-range
         self._logger_queue = logger_queue
 
         # Constructs a timezone-aware stamp using UTC time. This creates a reference point for all later delta time
@@ -1621,7 +1621,7 @@ class SerialCommunication:
 
         # Logs the onset timestamp. All further timestamps will be treated as integer time deltas (in microseconds)
         # relative to the onset timestamp.
-        package = LogPackage(self._source_id, 0, onset)  # Packages the id, timestamp, and data.
+        package = LogPackage(self._source_id, np.uint64(0), onset)  # Packages the id, timestamp, and data.
         self._logger_queue.put(package)
         self._usb_port = usb_port
 
@@ -1763,7 +1763,7 @@ class SerialCommunication:
             data: The byte-serialized message payload that was sent or received.
         """
         # Packages the data to be logged into the appropriate tuple format (with ID variables)
-        package = LogPackage(self._source_id, timestamp, data)
+        package = LogPackage(self._source_id, np.uint64(timestamp), data)
 
         # Sends the data to the logger
         self._logger_queue.put(package)
@@ -1800,9 +1800,6 @@ class MQTTCommunication:
         _output_queue: A multithreading queue used to buffer incoming messages received from other MQTT clients before
             their data is requested via class methods.
         _client: Stores the initialized mqtt client instance that carries out the communication.
-
-    Raises:
-        RuntimeError: If the MQTT broker cannot be connected to using the provided IP and Port.
     """
 
     def __init__(
@@ -1827,23 +1824,6 @@ class MQTTCommunication:
             transport="tcp",
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,  # type: ignore
         )
-
-        # Verifies that the broker can be connected to
-        try:
-            result = self._client.connect(self._ip, self._port)
-            if result != mqtt.MQTT_ERR_SUCCESS:
-                # If the result is not the expected code, raises an exception
-                raise Exception  # pragma: no cover
-            # If the broker was successfully connected, disconnects the client until start() method is called
-            self._client.disconnect()
-        # The exception can also be raised by connect() method raising an exception internally.
-        except Exception:
-            message = (
-                f"Unable to initialize MQTTCommunication class instance. Failed to connect to MQTT broker at "
-                f"{self._ip}:{self._port}. This likely indicates that the broker is not running or that there is an "
-                f"issue with the provided IP and socket port."
-            )
-            console.error(message, error=RuntimeError)
 
     def __repr__(self) -> str:
         """Returns a string representation of the MQTTCommunication object."""
@@ -1880,13 +1860,28 @@ class MQTTCommunication:
         Notes:
             If this class instance subscribes (listens) to any topics, it will start a perpetually active thread
             with a listener callback to monitor incoming traffic.
+
+        Raises:
+            RuntimeError: If the MQTT broker cannot be connected to using the provided IP and Port.
         """
         # Guards against re-connecting an already connected client.
         if self._connected:
             return
 
-        # Initializes the client
-        self._client.connect(self._ip, self._port)
+        # Connects to the broker
+        try:
+            result = self._client.connect(self._ip, self._port)
+            if result != mqtt.MQTT_ERR_SUCCESS:
+                # If the result is not the expected code, raises an exception
+                raise Exception  # pragma: no cover
+        # The exception can also be raised by connect() method raising an exception internally.
+        except Exception:
+            message = (
+                f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
+                f"broker at {self._ip}:{self._port}. This likely indicates that the broker is not running or that "
+                f"there is an issue with the provided IP and socket port."
+            )
+            console.error(message, error=RuntimeError)
 
         # If the class is configured to connect to any topics, enables the connection callback and starts the monitoring
         # thread.

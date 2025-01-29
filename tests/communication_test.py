@@ -859,13 +859,15 @@ def test_unity_communication_init_and_repr() -> None:
 def test_unity_communication_init_error() -> None:
     """Verifies the error handling behavior of MQTTCommunication __init__() method."""
     message = (
-        f"Unable to initialize MQTTCommunication class instance. Failed to connect to MQTT broker at "
-        f"{BROKER_IP}:{1880}. This likely indicates that the broker is not running or that there is an "
-        f"issue with the provided IP and socket port."
+        f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
+        f"broker at {BROKER_IP}:{1880}. This likely indicates that the broker is not running or that "
+        f"there is an issue with the provided IP and socket port."
     )
     with pytest.raises(RuntimeError, match=error_format(message)):
         # Invalid port
-        MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
+        comm = MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
+        comm.connect()
+
 
 
 @pytest.mark.xdist_group(name="group1")
