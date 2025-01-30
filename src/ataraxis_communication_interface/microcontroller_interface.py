@@ -293,6 +293,11 @@ class ModuleInterface:  # pragma: no cover
             a multithreading or multiprocessing queue, or use it to set a SharedMemory object. Use this method as a
             gateway to inject custom data handling into the communication runtime.
 
+            Keep the logic inside this method as minimal as possible. All data from the microcontroller goes through the
+            same communication process, so it helps to minimize real time processing of the data, as it allows for
+            better communication throughput. Treat this method like you would treat a microcontroller hardware interrupt
+            function.
+
             If your communication / processing assets cannot be pickled (to be transferred into the remote process
             used for communication), implement their initialization via the initialize_remote_assets() method.
 
@@ -399,10 +404,7 @@ class ModuleInterface:  # pragma: no cover
             # '2'. In the future, if enough interest is shown, we may extend this list to also include outgoing
             # messages. For now, these messages need to be parsed manually by users that need this data.
             if (
-                (
-                    payload[0] != SerialProtocols.MODULE_STATE
-                    and payload[0] != SerialProtocols.MODULE_DATA
-                )
+                (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA)
                 or payload[1] != self._module_type
                 or payload[2] != self._module_id
                 or (payload[4] != 2 and payload[4] < 51)
@@ -414,7 +416,7 @@ class ModuleInterface:  # pragma: no cover
             elapsed_microseconds = np.uint64(message[1:9].view(np.uint64)[0].copy())
             timestamp = onset_us + elapsed_microseconds
 
-            # Extracts command, event and, if supported, data object from the message payload.
+            # Extracts command, event, and, if supported, data object from the message payload.
             command_code = np.uint8(payload[3])
             event = np.uint8(payload[4])
 
@@ -449,7 +451,7 @@ class ModuleInterface:  # pragma: no cover
 
         return event_data
 
-    def dequeue_command(self) -> None:
+    def reset_command_queue(self) -> None:
         """Instructs the microcontroller to clear all queued commands for the specific module instance managed by this
         ModuleInterface.
 
@@ -518,8 +520,11 @@ class MicroControllerInterface:  # pragma: no cover
         communication will not be started until the start() method of the class instance is called.
 
         This class uses SharedMemoryArray to control the runtime of the remote process, which makes it impossible to
-        have more than one instance of this class with the same controller_id at a time. Make sure the class instance
-        is stopped (to free SharedMemory buffer) before attempting to initialize a new class instance.
+        have more than one instance of this class with the same controller_id at a time.
+
+        Initializing MicroControllerInterface also completes the configuration of all ModuleInterface instances passed
+        to the class constructor. It is essential to initialize both the interfaces and the MicroControllerInterface
+        to have access to the full range of functionality provided by each ModuleInterface class.
 
     Args:
         controller_id: The unique identifier code of the managed microcontroller. This information is hardcoded via the
@@ -564,10 +569,8 @@ class MicroControllerInterface:  # pragma: no cover
         _mqtt_port: Stores the port number of the MQTT broker used for MQTT communication.
         _mp_manager: Stores the multiprocessing Manager used to initialize and manage input and output Queue
             objects.
-        _input_queue: Stores the multiprocessing Queue used to input the data to be sent to the microcontroller into
-            the communication process.
-        _output_queue: Stores the multiprocessing Queue used to output the data received from the microcontroller to
-            other processes.
+        _input_queue: Stores the multiprocessing Queue used to pipe the data to be sent to the microcontroller to
+            the remote communication process.
         _terminator_array: Stores the SharedMemoryArray instance used to control the runtime of the remote
             communication process.
         _communication_process: Stores the (remote) Process instance that runs the communication cycle.
@@ -618,6 +621,10 @@ class MicroControllerInterface:  # pragma: no cover
         # Initializes the started tracker. This is needed to avoid errors if initialization fails, and __del__ is called
         # for a partially initialized class.
         self._started: bool = False
+
+        # Since the manager is now terminated via __del__ method, it makes sense to have it high in the initialization
+        # order:
+        self._mp_manager: SyncManager = Manager()
 
         # Ensures that input arguments have valid types. Only checks the arguments that are not passed to other classes,
         # such as TransportLayer, which has its own argument validation.
@@ -674,9 +681,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
         # data between the communication process and the main process managing the overall runtime.
-        self._mp_manager: SyncManager = Manager()
         self._input_queue: MPQueue = self._mp_manager.Queue()  # type: ignore
-        self._output_queue: MPQueue = self._mp_manager.Queue()  # type: ignore
         self._terminator_array: None | SharedMemoryArray = None
         self._communication_process: None | Process = None
         self._watchdog_thread: None | Thread = None
@@ -722,6 +727,7 @@ class MicroControllerInterface:  # pragma: no cover
     def __del__(self) -> None:
         """Ensures that all class resources are properly released when the class instance is garbage-collected."""
         self.stop()
+        self._mp_manager.shutdown()
 
     def reset_controller(self) -> None:
         """Resets the connected MicroController to use default hardware and software parameters."""
@@ -784,18 +790,15 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=TypeError)
         self._input_queue.put(message)
 
-    @property
-    def output_queue(self) -> MPQueue:  # type: ignore
-        """Returns the multiprocessing queue used by the communication process to output received data to all other
-        processes that may need this data.
-        """
-        return self._output_queue
-
     def _watchdog(self) -> None:
-        """This function is used by the watchdog thread to ensure the communication process is alive during runtime.
+        """This method is used by the watchdog thread to ensure the communication process is alive during runtime.
 
-        This function will raise a RuntimeError if it detects that a process has prematurely shut down. It will verify
+        This method will raise a RuntimeError if it detects that a process has prematurely shut down. It will verify
         process states every ~20 ms and will release the GIL between checking the states.
+
+        Notes:
+            If the method detects that the communication process is not alive, it will carry out the necessary
+            resource cleanup before raising the error and terminating the class runtime.
         """
         timer = PrecisionTimer(precision="ms")
 
@@ -809,6 +812,22 @@ class MicroControllerInterface:  # pragma: no cover
                 continue
 
             if self._communication_process is not None and not self._communication_process.is_alive():
+                # Prevents the __del__ method from running stop(), as the code below terminates all assets
+                self._started = False
+
+                # Activates the shutdown flag
+                if self._terminator_array is not None:
+                    self._terminator_array.write_data(0, np.uint8(1))
+
+                # The process should already be terminated, but there are no downsides to making sure it is dead.
+                self._communication_process.join()
+
+                # Disconnects from the shared memory array and destroys its shared buffer.
+                if self._terminator_array is not None:
+                    self._terminator_array.disconnect()
+                    self._terminator_array.destroy()
+
+                # Raises the error
                 message = (
                     f"The communication process of the MicroControllerInterface with id "
                     f"{self._controller_id} has been prematurely shut down. This likely indicates that the process has "
@@ -838,11 +857,12 @@ class MicroControllerInterface:  # pragma: no cover
             return
 
         # Instantiates the shared memory array used to control the runtime of the communication Process.
+        # Index 0 = terminator, index 1 = initialization status
         self._terminator_array = SharedMemoryArray.create_array(
             name=f"{self._controller_id}_terminator_array",
-            # Uses class name to ensure the array buffer name is unique
-            prototype=np.zeros(shape=2, dtype=np.uint8),  # Index 0 = terminator, index 1 = initialization status
-        )  # Instantiation automatically connects the main process to the array.
+            prototype=np.zeros(shape=2, dtype=np.uint8),
+            exist_ok=True,  # Automatically deals with already existing shared memory buffers
+        )
 
         # Sets up the communication process. This process continuously cycles through the communication loop until
         # terminated, enabling bidirectional communication with the controller.
@@ -852,7 +872,6 @@ class MicroControllerInterface:  # pragma: no cover
                 self._controller_id,
                 self._modules,
                 self._input_queue,
-                self._output_queue,
                 self._logger_queue,
                 self._terminator_array,
                 self._usb_port,
@@ -882,6 +901,17 @@ class MicroControllerInterface:  # pragma: no cover
             # initialization process should be very fast, likely on the order of hundreds of microseconds. Waiting for
             # 15 seconds is likely excessive.
             if not self._communication_process.is_alive() or start_timer.elapsed > 15:
+                # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
+                self._terminator_array.write_data(0, np.uint8(1))
+
+                # Waits for at most 15 seconds before forcibly terminating the communication process to prevent
+                # deadlocks
+                self._communication_process.join(15)
+
+                # Disconnects from the shared memory array and destroys its shared buffer.
+                self._terminator_array.disconnect()
+                self._terminator_array.destroy()
+
                 message = (
                     f"MicroControllerInterface with id {self._controller_id} has failed to initialize the "
                     f"communication with the microcontroller. If the class did not display error messages in the "
@@ -900,9 +930,7 @@ class MicroControllerInterface:  # pragma: no cover
         self._started = True
 
     def stop(self) -> None:
-        """Shuts down the communication process, frees all reserved resources, and discards any unprocessed data stored
-        inside input and output queues.
-        """
+        """Shuts down the communication process and frees all reserved resources."""
         # If the process has not been started, returns without doing anything.
         if not self._started:
             return
@@ -926,9 +954,6 @@ class MicroControllerInterface:  # pragma: no cover
         if self._communication_process is not None:
             self._communication_process.join()
 
-        # Shuts down the multiprocessing manager. This collects all active queues and discards all unprocessed data.
-        self._mp_manager.shutdown()
-
         # Waits for the watchdog thread to terminate.
         if self._watchdog_thread is not None:
             self._watchdog_thread.join()
@@ -943,7 +968,6 @@ class MicroControllerInterface:  # pragma: no cover
         controller_id: np.uint8,
         module_interfaces: tuple[ModuleInterface, ...],
         input_queue: MPQueue,  # type: ignore
-        output_queue: MPQueue,  # type: ignore
         logger_queue: MPQueue,  # type: ignore
         terminator_array: SharedMemoryArray,
         usb_port: str,
@@ -961,13 +985,16 @@ class MicroControllerInterface:  # pragma: no cover
         the multiprocessing queues (inpout and output) managed by the Interface instance, and the MQTT
         broker. Additionally, it manages data logging by interfacing with the DataLogger class via the logger_queue.
 
+        Notes:
+            Each managed ModuleInterface may contain custom logic for processing and routing the data. This method
+            calls the custom logic bindings for each interface on a need-based method.
+
         Args:
             controller_id: The byte-code identifier of the target microcontroller. This is used to ensure that the
                 instance interfaces with the correct controller and to source-stamp logged data.
             module_interfaces: A tuple that stores ModuleInterface classes managed by this MicroControllerInterface
                 instance.
             input_queue: The multiprocessing queue used to issue commands to the microcontroller.
-            output_queue: The multiprocessing queue used to pipe received data to other processes.
             logger_queue: The queue exposed by the DataLogger class that is used to buffer and pipe received and
                 outgoing messages to be logged (saved) to disk.
             terminator_array: The shared memory array used to control the communication process runtime.
@@ -1004,6 +1031,9 @@ class MicroControllerInterface:  # pragma: no cover
         mqtt_command_map: dict[str, tuple[ModuleInterface, ...] | list[ModuleInterface]] = {}
         processing_map: dict[np.uint16, ModuleInterface] = {}
         for module in module_interfaces:
+            # For each module, initializes the assets that need to be configured / created inside the remote Process:
+            module.initialize_remote_assets()
+
             # If the module is configured to receive commands from MQTT, sets up the necessary assets. For this,
             # extracts the monitored topics from each module
             for topic in module.mqtt_command_topics:
@@ -1033,6 +1063,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         # Sends microcontroller identification command. This command requests the microcontroller to return its
         # id code.
+        # noinspection PyTypeChecker
         serial_communication.send_message(message=identify_controller_command)
 
         # Blocks until the microcontroller sends its identification code.
@@ -1043,6 +1074,7 @@ class MicroControllerInterface:  # pragma: no cover
             # that reset on serial connection may miss the first request if they were resetting their communication
             # hardware, but should receive the second request.
             if timeout_timer.elapsed > 2000:
+                # noinspection PyTypeChecker
                 serial_communication.send_message(message=identify_controller_command)
 
             # If there is no response after 4 seconds and 2 requests, aborts initialization with an error
@@ -1069,6 +1101,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=ValueError)
 
         # Next, verifies that the microcontroller has a module instance expected by each managed interface class
+        # noinspection PyTypeChecker
         serial_communication.send_message(message=identify_modules_command)
 
         # Sequentially receives the ID data for each module
@@ -1328,11 +1361,7 @@ class MicroControllerInterface:  # pragma: no cover
                     # Otherwise, if the incoming message is not an error and contains an event-code matching one of the
                     # interface's data-codes, calls the data processing method.
                     if in_data.event in module.data_codes:
-                        module.process_received_data(
-                            message=in_data,
-                            mqtt_communication=mqtt_communication,
-                            mp_queue=output_queue,
-                        )
+                        module.process_received_data(message=in_data)
 
         # If an unknown and unhandled exception occurs, prints and flushes the exception message to the terminal
         # before re-raising the exception to terminate the process.
@@ -1341,7 +1370,10 @@ class MicroControllerInterface:  # pragma: no cover
             sys.stderr.flush()
             raise e
 
-        # If this point is reached, the loop has received the shutdown command and successfully escaped the
-        # communication cycle. Disconnects from the terminator array and shuts down MQTT communication.
-        terminator_array.disconnect()
-        mqtt_communication.disconnect()
+        # Ensures that local assets are always properly terminated
+        finally:
+            terminator_array.disconnect()
+            mqtt_communication.disconnect()
+
+            if start_mqtt_client:
+                mqtt_communication.disconnect()

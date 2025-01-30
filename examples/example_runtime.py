@@ -14,7 +14,6 @@
 
 # Imports the necessary assets, including the TestModuleInterface class
 from pathlib import Path
-import tempfile
 
 import numpy as np
 from ataraxis_time import PrecisionTimer
@@ -27,8 +26,8 @@ from ataraxis_communication_interface import MicroControllerInterface
 if __name__ == "__main__":
     # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
     # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
-    temp_dir = Path("/Users/InfamousOne/Desktop/Demo/MicroControllerInterface")
-    data_logger = DataLogger(output_directory=temp_dir, instance_name="AMC")
+    output_directory = Path("/home/cyberaxolotl/Desktop/Demos/AXCI")  # Change this to your desired output directory
+    data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
 
     # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
     # different module_id codes, but the same type (family) id code. These codes match the values used on the
@@ -43,7 +42,7 @@ if __name__ == "__main__":
     controller_id = np.uint8(222)  # Matches the microcontroller ID defined in the microcontroller's main.cpp file
     microcontroller_serial_buffer_size = 8192
     baudrate = 115200
-    port = "/dev/cu.usbmodem142013801"
+    port = "/dev/ttyACM0"
 
     # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
     # ataraxis-micro-controller library and abstracts most inner-workings of the library. This interface also allows
@@ -56,6 +55,9 @@ if __name__ == "__main__":
         microcontroller_usb_port=port,
         baudrate=baudrate,
     )
+
+    # Initialization can take some time. Notifies the user that the process is initializing.
+    print("Initializing the communication process...")
 
     # Starts the logging process. By default, the process uses a separate core (process) and 5 concurrently active
     # threads to log all incoming data. The same data logger instance can be used by multiple MiroControllerInterface
@@ -80,29 +82,25 @@ if __name__ == "__main__":
 
     # Generates and sends new runtime parameters to both hardware module instances running on the microcontroller.
     # On and Off durations are in microseconds. 1 second = 1_000_000 microseconds.
-    mc_interface.send_message(
-        interface_1.set_parameters(
-            on_duration=np.uint32(1000000), off_duration=np.uint32(1000000), echo_value=np.uint16(121)
-        )
+    interface_1.set_parameters(
+        on_duration=np.uint32(1000000), off_duration=np.uint32(1000000), echo_value=np.uint16(121)
     )
-    mc_interface.send_message(
-        interface_2.set_parameters(
-            on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
-        )
+    interface_2.set_parameters(
+        on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
     )
 
     # Requests instance 1 to return its echo value. By default, the echo command only runs once.
-    mc_interface.send_message(interface_1.echo())
+    interface_1.echo()
 
     # Since TestModuleInterface class used in this demonstration is configured to output all received data via
     # MicroControllerInterface's multiprocessing queue, we can access the queue to verify the returned echo value.
 
     # Waits until the microcontroller responds to the echo command.
-    while mc_interface.output_queue.empty():
+    while interface_1.output_queue.empty():
         continue
 
     # Retrieves and prints the microcontroller's response. The returned value should match the parameter set above: 121.
-    print(f"TestModule instance 1 returned {mc_interface.output_queue.get()[2]}")
+    print(f"TestModule instance 1 returned {interface_1.output_queue.get()[2]}")
 
     # We can also set both instances to execute two different commands at the same time if both commands are noblock
     # compatible. The TestModules are written in a way that these commands are noblock compatible.
@@ -111,11 +109,11 @@ if __name__ == "__main__":
     # we sent earlier, it will keep the pin ON for 1 second and then keep it off for ~ 2 seconds (1 from off_duration,
     # 1 from waiting before repeating the command). The microcontroller will repeat this command at regular intervals
     # until it is given a new command or receives a 'dequeue' command (see below).
-    mc_interface.send_message(interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=True))
+    interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=True)
 
     # Also instructs the second TestModule instance to start sending its echo value to the PC once every 500
     # milliseconds.
-    mc_interface.send_message(interface_2.echo(repetition_delay=np.uint32(500000)))
+    interface_2.echo(repetition_delay=np.uint32(500000))
 
     # Delays for 10 seconds, accumulating echo values from TestModule 2 and pin On / Off notifications from TestModule
     # 1. Uses the PrecisionTimer class to delay the main process thread for 10 seconds, without blocking other
@@ -125,20 +123,23 @@ if __name__ == "__main__":
 
     # Cancels both recurrent commands by issuing a dequeue command. Note, the dequeue command does not interrupt already
     # running commands, it only prevents further command repetitions.
-    mc_interface.send_message(interface_1.dequeue_command)
-    mc_interface.send_message(interface_2.dequeue_command)
+    interface_1.reset_command_queue()
+    interface_2.reset_command_queue()
 
     # Counts the number of pin pulses and received echo values accumulated during the delay.
     pulse_count = 0
     echo_count = 0
-    while not mc_interface.output_queue.empty():
-        message = mc_interface.output_queue.get()
+    while not interface_1.output_queue.empty():
+        message = interface_1.output_queue.get()
         # Pin pulses are counted when the microcontroller sends a notification that the pin was set to HIGH state.
         # The microcontroller also sends a notification when Pin state is LOW, but we do not consider it here.
         if message[0] == interface_1.module_id and message[1] == "pin state" and message[2]:
             pulse_count += 1
+
+    while not interface_2.output_queue.empty():
+        message = interface_2.output_queue.get()
         # Echo values are only counted if the echo value matches the value we set via the parameter message.
-        elif message[0] == interface_2.module_id and message[1] == "echo value" and message[2] == 333:
+        if message[0] == interface_2.module_id and message[1] == "echo value" and message[2] == 333:
             echo_count += 1
 
     # The result seen here depends on the communication speed between the PC and the microcontroller and the precision
