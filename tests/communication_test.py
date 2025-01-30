@@ -245,7 +245,7 @@ def test_dequeue_module_command() -> None:
 
     # Test repr
     expected_repr = (
-        f"kDequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, " f"module_id=2, return_code=3)."
+        f"kDequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)."
     )
     assert repr(cmd) == expected_repr
 
@@ -266,7 +266,7 @@ def test_kernel_command() -> None:
     assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 2, 1])
 
     # Test repr
-    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, " f"return_code=2)."
+    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, return_code=2)."
     assert repr(cmd) == expected_repr
 
 
@@ -867,7 +867,6 @@ def test_unity_communication_init_error() -> None:
         # Invalid port
         comm = MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
         comm.connect()
-
 
 
 @pytest.mark.xdist_group(name="group1")

@@ -95,9 +95,6 @@ conda = [
     # Distribution
     "twine>=6,<7",
     "grayskull>=2,<3",
-
-    # Miscellaneous helpers
-    "black>=24,<25",
 ]
 
 # Dependencies known to not be installable with conda for at least one supported development platform

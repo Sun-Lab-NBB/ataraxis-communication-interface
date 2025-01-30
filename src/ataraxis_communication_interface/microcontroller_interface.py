@@ -20,7 +20,6 @@ from multiprocessing import (
     Process,
 )
 from multiprocessing.managers import SyncManager
-from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 from numpy.typing import NDArray
@@ -72,7 +71,13 @@ class ModuleInterface:  # pragma: no cover
         If you do not need any additional processing steps, such as sending or receiving data over MQTT, do not enable
         any custom processing flags when initializing this superclass!
 
-        In addition to interfacing with the module, the class also contains methods used to parse logged module data.
+        In addition to interfacing with the module, the class also contains methods to parse logged module data. It is
+        expected that these modules will be used immediately after runtime to parse raw logged data and transform it
+        into the desired format for further processing and analysis.
+
+        Some attributes of this class are assigned by the managing MicroControllerInterface class at its
+        initialization. Therefore, to be fully functional, each ModuleInterface class has to be bound to an initialized
+        MicroControllerInterface instance.
 
     Args:
         module_type: The id-code that describes the broad type (family) of custom hardware modules managed by this
@@ -111,6 +116,17 @@ class ModuleInterface:  # pragma: no cover
         _mqtt_command_topics: Stores MQTT topics to monitor for incoming commands.
         _error_codes: Stores all expected error-codes as a set.
         _mqtt_communication: Determines whether this interface needs to communicate with MQTT.
+        _log_directory: Stores the path to the directory where the MicroControllerInterface that manages this class logs
+            all received and transmitted messages related to this interface. The value for this attribute is assigned
+            automatically by the managing MicroControllerInterface class during its initialization.
+        _microcontroller_id: Stores the unique ID byte-code of the microcontroller that controls the hardware module
+            interfaced by this class instance. The value for this attribute is assigned automatically by the managing
+            MicroControllerInterface class during its initialization.
+        _input_queue: Stores the multiprocessing queue that enables sending the data to the microcontroller
+            via the managing MicroControllerInterface class. Putting messages into this queue is equivalent to
+            submitting them to the send_data() method exposed by the managing MicroControllerInterface class. The value
+            for this attribute is assigned automatically by the managing MicroControllerInterface class during its
+            initialization.
 
     Raises:
         TypeError: If input arguments are not of the expected type.
@@ -180,7 +196,7 @@ class ModuleInterface:  # pragma: no cover
             (self._module_type.astype(np.uint16) << 8) | self._module_id.astype(np.uint16)
         )
 
-        # Resolves code and topics sets for additional data input and output processing
+        # Resolves code and topic sets for additional data input and output processing
         self._mqtt_command_topics: set[str] = mqtt_command_topics if mqtt_command_topics is not None else set()
         self._data_codes: set[np.uint8] = data_codes if data_codes is not None else set()
 
@@ -193,11 +209,13 @@ class ModuleInterface:  # pragma: no cover
             mqtt_communication = True
         self._mqtt_communication: bool = mqtt_communication
 
-        # These placeholders are filled during communication runtime by the managing MicroControllerInterface class,
-        # and they are used to parse log data.
+        # These attributes are initialized to placeholder values. The actual values are assigned by the
+        # MicroControllerInterface class that manages this ModuleInterface. During MicroControllerInterface
+        # initialization, it updates these attributes for all managed interfaces via referencing. Therefore, after
+        # initializing the main interface, all module interfaces will have these attributes configured properly.
         self._log_directory: Path | None = None
-        self._micro_controller_id: np.uint8 | None = None
-        # TODO Remove
+        self._microcontroller_id: np.uint8 | None = None
+        self._input_queue: MPQueue | None = None
 
     def __repr__(self) -> str:
         """Returns the string representation of the ModuleInterface instance."""
@@ -224,6 +242,10 @@ class ModuleInterface:  # pragma: no cover
             during class initialization. This method will never receive a message with a topic that is not inside the
             'mqtt_command_topics' set.
 
+            Use this method to translate incoming MQTT messages into the appropriate command messages for the hardware
+            module. While we currently do not explicitly support translating MQTT messages into parameter messages, this
+            can be added in the future if enough interest is shown.
+
             See the /examples folder included with the library for examples on how to implement this method.
 
         Args:
@@ -231,52 +253,61 @@ class ModuleInterface:  # pragma: no cover
             payload: The payload of the message.
 
         Returns:
-            A OneOffModuleCommand or RepeatedModuleCommand instance that stores the message to be sent to the
-            microcontroller. None, if the class instance is not configured to receive commands from MQTT.
+            A OneOffModuleCommand, RepeatedModuleCommand, or DequeueModuleCommand instance that stores the message to
+            be sent to the microcontroller. None, if the class instance is not configured to receive commands from MQTT.
         """
         raise NotImplementedError(
             f"parse_mqtt_command() method must be implemented when subclassing the base ModuleInterface class."
         )
 
     @abstractmethod
-    def process_received_data(
-        self,
-        message: ModuleData | ModuleState,
-        mqtt_communication: MQTTCommunication,
-        mp_queue: MPQueue,  # type: ignore
-    ) -> None:
-        """Processes the input message data and, if necessary, sends it to other MQTT clients and / or other Python
-        processes.
+    def initialize_remote_assets(self) -> None:
+        """Initializes custom interface assets to be used in the remote process.
+
+        This method is called at the beginning of the communication runtime by the managing MicroControllerInterface.
+        Use this method to create and initialize any assets that cannot be pickled (to be transferred into the remote
+        process).
+
+        Notes:
+            This method is called early in the preparation phase of the communication runtime, before any communication
+            is actually carried out. Use this method to initialize unpickable assets, such as PrecisionTimer instances
+            or connect to shared resources, such as SharedMemory buffers.
+
+            All assets managed or created by this method should be stored in the ModuleInterface instance's attributes.
+        """
+        raise NotImplementedError(
+            f"initialize_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
+        )
+
+    @abstractmethod
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+        """Processes the incoming message and executes user-defined logic.
 
         This method is called by the MicroControllerInterface when the ModuleInterface instance receives a message from
         the microcontroller that uses an event code provided at class initialization as 'data_codes' argument. This
-        method processes the received message and uses the input MQTTCommunication instance or multiprocessing Queue
-        instance to transmit the data to other Ataraxis systems or processes.
+        method should be used to implement custom processing logic for the incoming data.
 
         Notes:
-            To send the data to MQTT, call the send_data() method of the MQTTCommunication class. To send the data to
-            other processes, call the put() method of the multiprocessing Queue object to pipe the data to other
-            processes.
+            Primarily, this method is intended to execute custom data transmission logic. For example, it can be used
+            to send a message over MQTT (via a custom implementation or our MQTTCommunication class), put the data into
+            a multithreading or multiprocessing queue, or use it to set a SharedMemory object. Use this method as a
+            gateway to inject custom data handling into the communication runtime.
 
-            This method is called only if 'data_codes' class argument was used to specify the event codes of messages
-            that require further processing other than logging, which is done by default for all messages. This method
-            will never receive a message with an event code that is not inside the 'data_codes' set.
+            If your communication / processing assets cannot be pickled (to be transferred into the remote process
+            used for communication), implement their initialization via the initialize_remote_assets() method.
 
             See the /examples folder included with the library for examples on how to implement this method.
 
         Args:
             message: The ModuleState or ModuleData object that stores the message received from the module instance
                 running on the microcontroller.
-            mqtt_communication: A fully configured instance of the MQTTCommunication class to use for sending the
-                data to MQTT.
-            mp_queue: An instance of the multiprocessing Queue class that allows piping data to parallel processes.
         """
         raise NotImplementedError(
             f"process_received_data() method must be implemented when subclassing the base ModuleInterface class."
         )
 
     def extract_logged_data(self) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
-        """Extracts the data received from the hardware module instance running on the microcontroller from the .npz
+        """Extracts the data sent by the hardware module instance running on the microcontroller from the .npz
         log file generated during ModuleInterface runtime.
 
         This method reads the compressed '.npz' archives generated by the MicroControllerInterface class that works
@@ -285,7 +316,9 @@ class ModuleInterface:  # pragma: no cover
 
         Notes:
             The extracted data will NOT contain library-reserved events and messages. This includes all Kernel messages
-            and module messages with event codes 0 through 50.
+            and module messages with event codes 0 through 50. The only exception to this rule is messages with event
+            code 2, which report completion of commands. These messages are parsed in addition to custom messages
+            sent by each hardware module.
 
             This method should be used as a convenience abstraction for the inner workings of the DataLogger class.
             For each ModuleInterface, it will decode and return the logged runtime data sent to the PC by the specific
@@ -300,20 +333,29 @@ class ModuleInterface:  # pragma: no cover
             it sent the message to the PC.
 
         Raises:
+            RuntimeError: If this method is called before the ModuleInterface is used to initialize a
+                MicroControllerInterface class.
             ValueError: If the input path is not valid or does not point to an existing .npz archive.
         """
+        if self._log_directory is None or self._microcontroller_id is None:
+            error_message = (
+                f"Unable to parse the log entries generated by the MicroControllerInterface for module "
+                f"{self._module_id} of type {self._module_type}. The ModuleInterface has to be used to "
+                f"initialize a MicroControllerInterface before calling this method."
+            )
+            console.error(message=error_message, error=RuntimeError)
 
         # Generates the log file path using the MicroControllerInterface id. Assumes that the log has been compressed
-        # to the .npz format before calling this method
-        log_path = self._log_directory.joinpath(f"{self._micro_controller_id}_log.npz")
+        # to the .npz format before calling this method.
+        log_path = self._log_directory.joinpath(f"{self._microcontroller_id}_log.npz")
 
         # If a compressed log archive does not exist, raises an error
         if not log_path.exists():
             error_message = (
                 f"Unable to extract data for module {self._module_id} of type {self._module_type} from the log file "
-                f"recorded by the MicroControllerInterface with id {micro_controller_id}. "
-                f"This likely indicates that the logs have not been compressed via DataLogger's compress_logs() method "
-                f"and are not available for processing. Call log compression method before calling this method."
+                f"generated by the MicroControllerInterface with id {self._microcontroller_id}. This likely indicates "
+                f"that the logs have not been compressed via DataLogger's compress_logs() method and are not available "
+                f"for processing. Call log compression method before calling this method."
             )
             console.error(message=error_message, error=ValueError)
 
@@ -352,13 +394,18 @@ class ModuleInterface:  # pragma: no cover
             # Extracts the payload from each logged message.
             payload = message[9:]
 
-            # Ignores all payloads other than State and Data messages from the specific module instance managed by this
-            # interface. Also ignores payloads with event codes below 51
+            # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
+            # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
+            # '2'. In the future, if enough interest is shown, we may extend this list to also include outgoing
+            # messages. For now, these messages need to be parsed manually by users that need this data.
             if (
-                (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA)
+                (
+                    payload[0] != SerialProtocols.MODULE_STATE
+                    and payload[0] != SerialProtocols.MODULE_DATA
+                )
                 or payload[1] != self._module_type
                 or payload[2] != self._module_id
-                or payload[4] < 51
+                or (payload[4] != 2 and payload[4] < 51)
             ):
                 continue
 
@@ -402,12 +449,21 @@ class ModuleInterface:  # pragma: no cover
 
         return event_data
 
-    @property
-    def dequeue_command(self) -> DequeueModuleCommand:
-        """Returns the command that instructs the microcontroller to clear all queued commands for the specific module
-        instance managed by this ModuleInterface.
+    def dequeue_command(self) -> None:
+        """Instructs the microcontroller to clear all queued commands for the specific module instance managed by this
+        ModuleInterface.
+
+        If the ModuleInterface has not been used to initialize the MicroControllerInterface, raises a RuntimeError.
         """
-        return DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
+        if self._input_queue is None:
+            message = (
+                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
+                f"ModuleInterface has to be used to initialize the MicroControllerInterface before calling this method."
+            )
+            console.error(message=message, error=RuntimeError)
+        self._input_queue.put(
+            DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
+        )
 
     @property
     def module_type(self) -> np.uint8:
@@ -648,9 +704,12 @@ class MicroControllerInterface:  # pragma: no cover
             if module.mqtt_communication:
                 self._start_mqtt_client = True
 
-            # Fills placeholders with data
-            module._micro_controller_id = self._controller_id
+            # Overwrites the attributes for each processed ModuleInterface with valid data. This effectively binds some
+            # data and functionality realized through the main interface to each module interface. For example,
+            # ModuleInterface classes can use their own _input_queue to
+            module._microcontroller_id = self._controller_id
             module._log_directory = data_logger.output_directory
+            module._input_queue = self._input_queue
 
     def __repr__(self) -> str:
         """Returns a string representation of the class instance."""
@@ -687,10 +746,19 @@ class MicroControllerInterface:  # pragma: no cover
             | KernelCommand
         ),
     ) -> None:
-        """Sends the input message to the microcontroller managed by the Interface instance.
+        """Sends the input message to the microcontroller managed by this interface instance.
 
         This is the primary interface for communicating with the Microcontroller. It allows sending all valid outgoing
-        message structures to the Microcontroller for further processing.
+        message structures to the Microcontroller for further processing. This is the only interface that is explicitly
+        designed to communicate both with hardware modules and the Kernel class that manages the runtime of the
+        microcontroller.
+
+        Notes:
+            During initialization, the MicroControllerInterface provides each managed ModuleInterface with the reference
+            to the input_queue object. Each ModuleInterface can use its own _input_queue attribute to send the data
+            to the communication process, eliminating the need for the data to go through this method. If you are
+            developing a custom interface, you have the option for using either queue interface for submitting data to
+            be sent to the microcontroller.
 
         Raises:
             TypeError: If the input message is not a valid outgoing message structure.
@@ -1277,19 +1345,3 @@ class MicroControllerInterface:  # pragma: no cover
         # communication cycle. Disconnects from the terminator array and shuts down MQTT communication.
         terminator_array.disconnect()
         mqtt_communication.disconnect()
-
-    def vacate_shared_memory_buffer(self) -> None:
-        """Clears the SharedMemory buffer with the same name as the one used by the class.
-
-        While this method should not be needed if the class is used correctly, there is a possibility that invalid
-        class termination leaves behind non-garbage-collected SharedMemory buffer. In turn, this would prevent the
-        class remote Process from being started again. This method allows manually removing that buffer to reset the
-        system. The method is designed to do nothing if the buffer with the same name as the microcontroller does not
-        exist.
-        """
-        try:
-            buffer = SharedMemory(name=f"{self._controller_id}_terminator_array", create=False)
-            buffer.close()
-            buffer.unlink()
-        except FileNotFoundError:
-            pass
