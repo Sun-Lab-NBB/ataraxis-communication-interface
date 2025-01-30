@@ -34,7 +34,7 @@ classifiers = [
     # Supported Python Versions
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    # "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.13",
     # Supported OS systems
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
@@ -214,11 +214,6 @@ source = ["src/", ".tox/*/lib/python*/site-packages/"]
 # Same as above, specifies the output directory for the coverage .html report
 [tool.coverage.html]
 directory = "reports/coverage_html"
-
-# Optimizes coverage generation for parallel testing
-[tool.coverage.run]
-parallel = true
-concurrency = ["multiprocessing", "thread"]
 
 # Specifies additional ignore directives
 [tool.coverage.report]

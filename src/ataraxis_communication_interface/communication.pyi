@@ -793,9 +793,6 @@ class MQTTCommunication:
         _output_queue: A multithreading queue used to buffer incoming messages received from other MQTT clients before
             their data is requested via class methods.
         _client: Stores the initialized mqtt client instance that carries out the communication.
-
-    Raises:
-        RuntimeError: If the MQTT broker cannot be connected to using the provided IP and Port.
     """
 
     _ip: Incomplete
@@ -832,6 +829,9 @@ class MQTTCommunication:
         Notes:
             If this class instance subscribes (listens) to any topics, it will start a perpetually active thread
             with a listener callback to monitor incoming traffic.
+
+        Raises:
+            RuntimeError: If the MQTT broker cannot be connected to using the provided IP and Port.
         """
     def send_data(self, topic: str, payload: str | bytes | bytearray | float | None = None) -> None:
         """Publishes the input payload to the specified MQTT topic.

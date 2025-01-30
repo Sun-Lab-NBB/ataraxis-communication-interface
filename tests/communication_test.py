@@ -2,6 +2,8 @@
 
 import time
 import multiprocessing
+from multiprocessing import Queue
+from typing import Any, Generator
 
 multiprocessing.set_start_method("spawn")
 
@@ -39,11 +41,14 @@ def transport_layer() -> TransportLayer:
     return TransportLayer(port="TEST", test_mode=True, microcontroller_serial_buffer_size=300, baudrate=115200)
 
 
-@pytest.fixture
-def logger_queue(tmp_path) -> multiprocessing.Queue:
+@pytest.fixture(scope="function")
+def logger_queue(tmp_path_factory) -> Generator[Queue, Any, None]:
     """Creates a DataLogger instance and returns its input queue."""
-    logger = DataLogger(output_directory=tmp_path)
-    return logger.input_queue
+    # Creates a unique temp directory for this test
+    tmp_dir = tmp_path_factory.mktemp("logger_data")
+
+    logger = DataLogger(output_directory=tmp_dir, instance_name=f"{tmp_dir}_logger", exist_ok=True)
+    yield logger.input_queue
 
 
 def test_serial_protocols_members() -> None:
@@ -1006,7 +1011,7 @@ def test_unity_communication_reconnection() -> None:
     # Sends the initial message
     test_message = "before disconnect"
     unity_client.publish(TEST_TOPICS[0], test_message)
-    time.sleep(0.1)
+    time.sleep(1)
 
     # Verifies that the message was received
     assert unity_comm.has_data

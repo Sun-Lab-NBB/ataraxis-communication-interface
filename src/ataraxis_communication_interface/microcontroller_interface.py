@@ -215,14 +215,14 @@ class ModuleInterface:  # pragma: no cover
         # initializing the main interface, all module interfaces will have these attributes configured properly.
         self._log_directory: Path | None = None
         self._microcontroller_id: np.uint8 | None = None
-        self._input_queue: MPQueue | None = None
+        self._input_queue: MPQueue | None = None  # type: ignore
 
     def __repr__(self) -> str:
         """Returns the string representation of the ModuleInterface instance."""
         message = (
             f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
             f"combined_type_id={self._type_id}, mqtt_command_topics={self._mqtt_command_topics}, "
-            f"data_codes={sorted(self._data_codes)}, error_codes={sorted(self._error_codes)})"
+            f"data_codes={sorted(self._data_codes)}, error_codes={sorted(self._error_codes)})"  # type: ignore
         )
         return message
 
@@ -352,7 +352,7 @@ class ModuleInterface:  # pragma: no cover
 
         # Generates the log file path using the MicroControllerInterface id. Assumes that the log has been compressed
         # to the .npz format before calling this method.
-        log_path = self._log_directory.joinpath(f"{self._microcontroller_id}_log.npz")
+        log_path = self._log_directory.joinpath(f"{self._microcontroller_id}_log.npz")  # type: ignore
 
         # If a compressed log archive does not exist, raises an error
         if not log_path.exists():
@@ -457,15 +457,16 @@ class ModuleInterface:  # pragma: no cover
 
         If the ModuleInterface has not been used to initialize the MicroControllerInterface, raises a RuntimeError.
         """
-        if self._input_queue is None:
-            message = (
-                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface has to be used to initialize the MicroControllerInterface before calling this method."
+        if self._input_queue is not None:
+            self._input_queue.put(
+                DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
             )
-            console.error(message=message, error=RuntimeError)
-        self._input_queue.put(
-            DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
+
+        message = (
+            f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
+            f"ModuleInterface has to be used to initialize the MicroControllerInterface before calling this method."
         )
+        console.error(message=message, error=RuntimeError)
 
     @property
     def module_type(self) -> np.uint8:
