@@ -1,9 +1,9 @@
 """Contains tests for the classes and methods defined in the communications module."""
 
 import time
+from typing import Any, Generator
 import multiprocessing
 from multiprocessing import Queue
-from typing import Any, Generator
 
 multiprocessing.set_start_method("spawn")
 
