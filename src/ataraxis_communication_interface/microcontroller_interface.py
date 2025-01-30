@@ -749,7 +749,7 @@ class MicroControllerInterface:  # pragma: no cover
         """Sends the input message to the microcontroller managed by this interface instance.
 
         This is the primary interface for communicating with the Microcontroller. It allows sending all valid outgoing
-        message structures to the Microcontroller for further processing. This is the only interface that is explicitly
+        message structures to the Microcontroller for further processing. This is the only interface explicitly
         designed to communicate both with hardware modules and the Kernel class that manages the runtime of the
         microcontroller.
 
