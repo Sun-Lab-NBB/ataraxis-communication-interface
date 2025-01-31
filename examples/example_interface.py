@@ -82,10 +82,7 @@ class TestModuleInterface(ModuleInterface):
     # This abstract method acts as the gateway for interface developers to convert and direct the data received from
     # the hardware module for further real-time processing. For this example, we transfer all received
     # data into a multiprocessing queue, so that it can be accessed from the main process.
-    def process_received_data(
-        self,
-        message: ModuleData | ModuleState,
-    ) -> None:
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
         # This method will only receive messages with event-codes that match the content of the 'data_codes' set.
 
         # This case should not be possible, as we initialize the timer as part of the initialize_remote_assets() method.
@@ -125,6 +122,14 @@ class TestModuleInterface(ModuleInterface):
         # Initializes a milliseconds-precise timer. The timer cannot be passed to a remote process and has to be created
         # by the code running inside the process.
         self._timer = PrecisionTimer("ms")
+
+    # This is the inverse of the initialize_remote_assets() that is used to clean up all custom assets initialized
+    # inside the communication process. It is called at the end of the communication runtime, before the process is
+    # terminated.
+    def terminate_remote_assets(self) -> None:
+        # The PrecisionTimer does not require any special cleanup. Other assets may need to have their stop() or
+        # disconnect() method called from within this method.
+        pass
 
     # The methods below function as a translation interface. Specifically, they take in the input arguments and package
     # them into the appropriate message structures that can be sent to the microcontroller. If you do not require a

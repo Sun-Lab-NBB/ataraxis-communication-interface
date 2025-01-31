@@ -203,6 +203,17 @@ class ModuleInterface:
             message: The ModuleState or ModuleData object that stores the message received from the module instance
                 running on the microcontroller.
         """
+    @abstractmethod
+    def terminate_remote_assets(self) -> None:
+        """Terminates custom interface assets to be used in the remote process.
+
+        This method is the opposite of the initialize_remote_assets() method. It is called at the end of the
+        communication process to ensure any resources claimed during custom asset initialization can be properly
+        released before the communication runtime ends.
+
+        Notes:
+            This method will also be called if the communication process fails during runtime.
+        """
     def extract_logged_data(self) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
         """Extracts the data sent by the hardware module instance running on the microcontroller from the .npz
         log file generated during ModuleInterface runtime.

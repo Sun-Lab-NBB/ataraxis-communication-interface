@@ -91,167 +91,231 @@ Note, the example below should be run together with the companion
 [microcontroller module](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart) example. 
 See the [examples](./examples) folder for the .py files used in all sections of this ReadMe.
 ```
-# Imports the necessary assets, including the TestModuleInterface class
-from pathlib import Path
+# Imports the required assets
+from multiprocessing import (
+    Queue as MPQueue,
+    Manager,
+)
+from multiprocessing.managers import SyncManager
 
 import numpy as np
 from ataraxis_time import PrecisionTimer
-from example_interface import TestModuleInterface
-from ataraxis_data_structures import DataLogger
 
-from ataraxis_communication_interface import MicroControllerInterface
+from ataraxis_communication_interface import (
+    ModuleData,
+    ModuleState,
+    ModuleInterface,
+    ModuleParameters,
+    OneOffModuleCommand,
+    RepeatedModuleCommand,
+)
 
-# Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
-if __name__ == "__main__":
-    # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
-    # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
-    output_directory = Path("/home/cyberaxolotl/Desktop/Demos/AXCI")  # Change this to your desired output directory
-    data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
 
-    # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
-    # different module_id codes, but the same type (family) id code. These codes match the values used on the
-    # microcontroller.
-    interface_1 = TestModuleInterface(module_type=np.uint8(1), module_id=np.uint8(1))
-    interface_2 = TestModuleInterface(module_type=np.uint8(1), module_id=np.uint8(2))
-    interfaces = (interface_1, interface_2)
+# Defines the TestModuleInterface class by subclassing the base ModuleInterface class. This class is designed to
+# interface with the TestModule class from the companion ataraxis-micro-controller library, running on the
+# microcontroller.
+class TestModuleInterface(ModuleInterface):
+    # As a minimum, the initialization method has to take in the module type and instance ID. Each user manually
+    # assigns these values in microcontroller's main .cpp file and python script, the values are not inherently
+    # meaningful. The values used on the PC and microcontroller have to match.
+    def __init__(self, module_type: np.uint8, module_id: np.uint8) -> None:
+        # Defines the set of event-codes that the interface will interpret as runtime error events. If the module sends
+        # a message with one of the event-codes from this set to the PC, the interface will automatically raise a
+        # RuntimeError.
+        error_codes = {np.uint8(51)}  # kOutputLocked is the only error code used by TestModule.
 
-    # Defines microcontroller parameters necessary to establish serial communication. Critically, this example uses a
-    # Teensy 4.1 microcontroller, and the parameters defined below may not work for your microcontroller!
-    # See MicroControllerInterface docstrings / API documentation for more details about each of these parameters.
-    controller_id = np.uint8(222)  # Matches the microcontroller ID defined in the microcontroller's main.cpp file
-    microcontroller_serial_buffer_size = 8192
-    baudrate = 115200
-    port = "/dev/ttyACM0"
+        # Defines the set of event-codes that the interface will interpret as data events that require additional
+        # processing. When the interface receives a message containing one of these event-codes, it will call the
+        # process_received_data() method on that message. The method can then process the data as necessary and send it
+        # to other destinations.
+        data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}  # kHigh, kLow and kEcho.
 
-    # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
-    # ataraxis-micro-controller library and abstracts most inner-workings of the library. This interface also allows
-    # issuing controller-wide commands and parameters.
-    mc_interface = MicroControllerInterface(
-        controller_id=controller_id,
-        data_logger=data_logger,
-        module_interfaces=interfaces,
-        microcontroller_serial_buffer_size=microcontroller_serial_buffer_size,
-        microcontroller_usb_port=port,
-        baudrate=baudrate,
-    )
+        # Messages with event-codes above 50 that are not in either of the sets above will be saved (logged) to disk,
+        # but will not be processed further during runtime.
 
-    # Initialization can take some time. Notifies the user that the process is initializing.
-    print("Initializing the communication process...")
+        # The base interface class also allows direct communication between the module and other clients over the MQTT
+        # protocol. This example does not demonstrate this functionality, so sets to None to disable.
+        mqtt_command_topics = None
 
-    # Starts the logging process. By default, the process uses a separate core (process) and 5 concurrently active
-    # threads to log all incoming data. The same data logger instance can be used by multiple MiroControllerInterface
-    # instances and other Ataraxis classes that support logging data. Note, if this method is not called, no data
-    # will be saved to disk.
-    data_logger.start()
+        # Initializes the parent class, using the sets defined above
+        super().__init__(
+            module_type=module_type,
+            module_id=module_id,
+            mqtt_communication=False,  # Since this example does not work with other MQTT clients, sets to False.
+            mqtt_command_topics=mqtt_command_topics,
+            data_codes=data_codes,
+            error_codes=error_codes,
+        )
 
-    # Starts the serial communication with the microcontroller. This method may take up to 15 seconds to execute, as
-    # it verifies that the microcontroller is configured correctly, given the MicroControllerInterface configuration.
-    # Also, this method JIT-compiles some assets as it runs, which speeds up all future communication.
-    mc_interface.start()
+        # Initializes a multiprocessing Queue. In this example, we use the multiprocessing Queue to send the data
+        # to the main process from the communication process. You can initialize any assets that can be pickled as part
+        # of this method runtime.
+        self._mp_manager: SyncManager = Manager()
+        self._output_queue: MPQueue = self._mp_manager.Queue()  # type: ignore
 
-    # As a safety feature, the microcontroller is locked when the communication starts. This prevents the
-    # microcontroller from changing the states of output pins, but does not interfere with reading input pins or
-    # setting runtime parameters. Since this demonstration manipulates an output pin, we need to unlock the
-    # microcontroller before proceeding further.
-    mc_interface.unlock_controller()
+        # Just for demonstration purposes, here is an example of an asset that CANNOT be pickled. Therefore, we have
+        # to initialize the attribute to a placeholder and have the actual initialization as part of the
+        # initialize_remote_assets() method.
+        self._timer: PrecisionTimer | None = None
 
-    # You have to manually generate and submit each module-addressed command (or parameter message) to the
-    # microcontroller. This is in contrast to MicroControllerInterface commands, which are sent to the microcontroller
-    # automatically (see unlock_controller above).
+    # This abstract method acts as the gateway for interface developers to convert and direct the data received from
+    # the hardware module for further real-time processing. For this example, we transfer all received
+    # data into a multiprocessing queue, so that it can be accessed from the main process.
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+        # This method will only receive messages with event-codes that match the content of the 'data_codes' set.
 
-    # Generates and sends new runtime parameters to both hardware module instances running on the microcontroller.
-    # On and Off durations are in microseconds. 1 second = 1_000_000 microseconds.
-    interface_1.set_parameters(
-        on_duration=np.uint32(1000000), off_duration=np.uint32(1000000), echo_value=np.uint16(121)
-    )
-    interface_2.set_parameters(
-        on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
-    )
+        # This case should not be possible, as we initialize the timer as part of the initialize_remote_assets() method.
+        if self._timer is None:
+            raise RuntimeError("PrecisionTimer not initialized.")
 
-    # Requests instance 1 to return its echo value. By default, the echo command only runs once.
-    interface_1.echo()
+        timestamp = self._timer.elapsed  # Returns the number of milliseconds elapsed since timer initialization
 
-    # Since TestModuleInterface class used in this demonstration is configured to output all received data via
-    # MicroControllerInterface's multiprocessing queue, we can access the queue to verify the returned echo value.
+        # Event codes 52 and 53 are used to communicate the current state of the output pin managed by the example
+        # module.
+        if message.event == 52 or message.event == 53:
+            # These event-codes are transmitted by State messages, so there is no additional data to parse other than
+            # event codes. The codes are transformed into boolean values and are exported via the multiprocessing queue.
+            message_type = "pin state"
+            state = True if message.event == 52 else False
+            self._output_queue.put((self.module_id, message_type, state, timestamp))
 
-    # Waits until the microcontroller responds to the echo command.
-    while interface_1.output_queue.empty():
-        continue
+        # Since there are only three possible data_codes and two are defined above, the only remaining data code is
+        # 54: the echo value.
+        elif isinstance(message, ModuleData) and message.event == 54:
+            # The echo value is transmitted by a Data message. Data message also includes a data_object, in addition
+            # to the event code. Upon reception, the data object is automatically deserialized into the appropriate
+            # object, so it can be accessed directly.
+            message_type = "echo value"
+            value = message.data_object
+            self._output_queue.put((self.module_id, message_type, value, timestamp))
 
-    # Retrieves and prints the microcontroller's response. The returned value should match the parameter set above: 121.
-    print(f"TestModule instance 1 returned {interface_1.output_queue.get()[2]}")
+    # Since this example does not receive commands from MQTT, this method is defined with a plain None return
+    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
+        """Not used."""
+        return
 
-    # We can also set both instances to execute two different commands at the same time if both commands are noblock
-    # compatible. The TestModules are written in a way that these commands are noblock compatible.
+    # Use this method to initialize or configure any assets that cannot be pickled and 'transferred' to the remote
+    # Process. In a way, this is a secondary __init__ method called before the main runtime logic of the remote
+    # communication process is executed.
+    def initialize_remote_assets(self) -> None:
+        # Initializes a milliseconds-precise timer. The timer cannot be passed to a remote process and has to be created
+        # by the code running inside the process.
+        self._timer = PrecisionTimer("ms")
 
-    # Instructs the first TestModule instance to start pulsing the managed pin (Pin 5 by default). With the parameters
-    # we sent earlier, it will keep the pin ON for 1 second and then keep it off for ~ 2 seconds (1 from off_duration,
-    # 1 from waiting before repeating the command). The microcontroller will repeat this command at regular intervals
-    # until it is given a new command or receives a 'dequeue' command (see below).
-    interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=True)
+    # This is the inverse of the initialize_remote_assets() that is used to clean up all custom assets initialized 
+    # inside the communication process. It is called at the end of the communication runtime, before the process is 
+    # terminated.
+    def terminate_remote_assets(self) -> None:
+        # The PrecisionTimer does not require any special cleanup. Other assets may need to have their stop() or 
+        # disconnect() method called from within this method.
+        pass
 
-    # Also instructs the second TestModule instance to start sending its echo value to the PC once every 500
-    # milliseconds.
-    interface_2.echo(repetition_delay=np.uint32(500000))
+    # The methods below function as a translation interface. Specifically, they take in the input arguments and package
+    # them into the appropriate message structures that can be sent to the microcontroller. If you do not require a
+    # dynamic interface, all messages can also be defined statically at initialization. Then, class methods can just
+    # send the appropriate predefined structure to the communication process, the same way we do with the dequeue
+    # command and the MicroControllerInterface commands.
 
-    # Delays for 10 seconds, accumulating echo values from TestModule 2 and pin On / Off notifications from TestModule
-    # 1. Uses the PrecisionTimer class to delay the main process thread for 10 seconds, without blocking other
-    # concurrent threads.
-    delay_timer = PrecisionTimer("s")
-    delay_timer.delay_noblock(10)
+    # This method takes in values for PC-addressable module runtime parameters, packages them into the ModuleParameters
+    # message, and sends them to the microcontroller. Note, the arguments to this method match the parameter names used
+    # in the microcontroller TestModule class implementation.
+    def set_parameters(
+        self,
+        on_duration: np.uint32,  # The time the pin stays HIGH during pulses, in microseconds.
+        off_duration: np.uint32,  # The time the pin stays LOW during pulses, in microseconds.
+        echo_value: np.uint16,  # The value to be echoed back to the PC during echo() command runtimes.
+    ) -> None:
+        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
+        # prevents this command from running unless the MicroControllerInterface is initialized.
+        if self._input_queue is None:
+            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
 
-    # Cancels both recurrent commands by issuing a dequeue command. Note, the dequeue command does not interrupt already
-    # running commands, it only prevents further command repetitions.
-    interface_1.reset_command_queue()
-    interface_2.reset_command_queue()
+        # Parameters have to be arranged in the exact order expected by the receiving structure. Additionally,
+        # each parameter has to use the appropriate numpy type.
+        message = ModuleParameters(
+            module_type=self._module_type,
+            module_id=self._module_id,
+            return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
+            parameter_data=(on_duration, off_duration, echo_value),
+        )
 
-    # Counts the number of pin pulses and received echo values accumulated during the delay.
-    pulse_count = 0
-    echo_count = 0
-    while not interface_1.output_queue.empty():
-        message = interface_1.output_queue.get()
-        # Pin pulses are counted when the microcontroller sends a notification that the pin was set to HIGH state.
-        # The microcontroller also sends a notification when Pin state is LOW, but we do not consider it here.
-        if message[0] == interface_1.module_id and message[1] == "pin state" and message[2]:
-            pulse_count += 1
+        # Directly submits the message to the communication process. The process is initialized and managed by the
+        # MicroControllerInterface class that also manages the runtime of this specific interface. Once both
+        # TestModuleInterface AND MicroControllerInterface are initialized, TestModuleInterface will have access to some
+        # MicroControllerInterface assets via private attributes inherited from the base ModuleInterface class.
+        self._input_queue.put(message)
 
-    while not interface_2.output_queue.empty():
-        message = interface_2.output_queue.get()
-        # Echo values are only counted if the echo value matches the value we set via the parameter message.
-        if message[0] == interface_2.module_id and message[1] == "echo value" and message[2] == 333:
-            echo_count += 1
+    # Instructs the managed TestModule to emit a pulse via the manged output pin. The pulse will use the on_duration
+    # and off_duration TestModule parameters to determine the duration of High and Low phases. The arguments to this
+    # method specify whether the pulse is executed once or is continuously repeated with a certain microsecond delay.
+    # Additionally, they determine whether the microcontroller will block while executing the pulse or allow concurrent
+    # execution of other commands.
+    def pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = True) -> None:
+        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
+        # prevents this command from running unless the MicroControllerInterface is initialized.
+        if self._input_queue is None:
+            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
 
-    # The result seen here depends on the communication speed between the PC and the microcontroller and the precision
-    # of microcontroller clocks. For Teensy 4.1, which was used to write this example, we expect the pin to pulse 4
-    # times and the echo value to be transmitted 21 times during the test period. Note that these times are slightly
-    # higher than the theoretically expected 3 and 20. This is because the modules are fast enough to start an extra
-    # cycle for both pulse() and echo() commands in the time it takes the dequeue command to arrive to the
-    # microcontroller.
-    print("TestModule 1 Pin pulses:", pulse_count)
-    print("TestModule 2 Echo values:", echo_count)
+        # Repetition delay of 0 is interpreted as a one-time command (only runs once).
+        command: RepeatedModuleCommand | OneOffModuleCommand
+        if repetition_delay == 0:
+            command = OneOffModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
+                command=np.uint8(1),
+                noblock=np.bool(noblock),
+            )
+        else:
+            command = RepeatedModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
+                command=np.uint8(1),
+                noblock=np.bool(noblock),
+                cycle_delay=repetition_delay,
+            )
 
-    # You can also try the same test as above, but this time with pulse noblock=False. In this case, pulsing the pin and
-    # returning echo values will interfere with each other, which will drastically reduce the number of returned echo
-    # values.
+        # Directly submits the command to the communication process.
+        self._input_queue.put(command)
 
-    # Stops the serial communication and the data logger processes.
-    mc_interface.stop()
-    data_logger.stop()
+    # This method returns a message that instructs the TestModule to respond with the current value of its echo_value
+    # parameter. Unlike the pulse() command, echo() command does not require blocking, so the method does not have the
+    # noblock argument. However, the command still supports recurrent execution.
+    def echo(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
+        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
+        # prevents this command from running unless the MicroControllerInterface is initialized.
+        if self._input_queue is None:
+            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
 
-    # Compresses all logged data into a single .npz archive. This is a prerequisite for reading the logged data via the
-    # ModuleInterface default methods!
-    data_logger.compress_logs(remove_sources=True)  # Removes intermediate .npy log entries to save space.
+        command: RepeatedModuleCommand | OneOffModuleCommand
+        if repetition_delay == 0:
+            command = OneOffModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
+                command=np.uint8(2),
+                noblock=np.bool(False),
+            )
 
-    # If you want to process the data logged during runtime, you first need to extract it from the archive. To help
-    # with this, the base ModuleInterface exposes a method that reads the data logged during runtime. The method
-    # ONLY reads the data received from the module with the same type and ID as the ModuleInterface whose method is
-    # called and only reads module messages with event-codes above 51. In other words, the method ignores
-    # system-reserved messages that are also logged, but are likely not needed for further data analysis.
+        else:
+            command = RepeatedModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
+                command=np.uint8(2),
+                noblock=np.bool(False),
+                cycle_delay=repetition_delay,
+            )
 
-    # Log compression generates an '.npz' archive for each unique source. For MicroControllerInterface class, its
-    # controlled_id is used as the source_id. In our case, the log is saved under '222_data_log.npz'.
-    log_data = interface_1.extract_logged_data()
-    print(f"Extracted event data: {log_data}")
+        # Directly submits the command to the communication process.
+        self._input_queue.put(command)
+
+    @property
+    def output_queue(self) -> MPQueue:  # type: ignore
+        # A helper property that returns the output queue object used by the class to send data from the communication
+        # process back to the central process.
+        return self._output_queue
 ```
 
 ### User-Defined Variables
@@ -356,12 +420,12 @@ methods**. Additionally, all commands and parameter messages generated by the in
 These methods act as a gateway that custom interface developers can use to execute custom logic to process incoming or
 outgoing data. The MicroControllerInterface class that manages the communication will call these methods for incoming or
 outgoing data according to the configuration of each managed ModuleInterface (see below for details). Currently, there 
-are three abstract methods defined by the base ModuleInterface class: initialize_remote_assets(), 
-process_received_data() and parse_mqtt_command()
+are four abstract methods defined by the base ModuleInterface class: initialize_remote_assets(), 
+terminate_remote_assets(), process_received_data() and parse_mqtt_command()
 
 #### initialize_remote_assets
 This method is called by the MicroControllerInterface once for each ModuleInterface at the beginning of the 
-communication cycle. The methods should be used to initialize or configure custom assets (queue, shared memory buffers, 
+communication cycle. The method should be used to initialize or configure custom assets (queue, shared memory buffers, 
 timer, etc.) that cannot be pickled and transferred to the communication Process. Any assets that can be pickled can be
 initialized during the interface __init__ method runtime. All assets should be stored in class attributes, so that they
 can be accessed from other abstract methods.
@@ -370,6 +434,22 @@ def initialize_remote_assets(self) -> None:
     # Initializes a milliseconds-precise timer. The timer cannot be passed to a remote process and has to be created
     # by the code running inside the process.
     self._timer = PrecisionTimer("ms")
+```
+
+#### terminate_remote_assets
+This method is the inverse of the initialize_remote_assets() method. It is called by the MicroControllerInterface for
+each ModuleInterface at the end of the communication cycle. This method should be used to clean up (terminate) any 
+assets initialized at the beginning of the communication runtime to ensure all resources are released before the process
+is terminated. The example below is not from the TestModuleInterface, but showcases the proper termination of the 
+MQTTCommunication class used by some interfaces in the Sun lab.
+```
+def terminate_remote_assets(self) -> None:
+    # This was called inside the initialize_remote_assets()
+    # self._communication = MQTTCommunication()
+    # self._communication.connect()
+    
+    # This is called in the terminate_remote_assets()
+    self._communication.disconnect()
 ```
 
 #### parse_mqtt_command
