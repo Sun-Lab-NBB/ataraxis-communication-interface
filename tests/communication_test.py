@@ -1,7 +1,9 @@
 """Contains tests for the classes and methods defined in the communications module."""
 
 import time
+from typing import Any, Generator
 import multiprocessing
+from multiprocessing import Queue
 
 multiprocessing.set_start_method("spawn")
 
@@ -39,11 +41,14 @@ def transport_layer() -> TransportLayer:
     return TransportLayer(port="TEST", test_mode=True, microcontroller_serial_buffer_size=300, baudrate=115200)
 
 
-@pytest.fixture
-def logger_queue(tmp_path) -> multiprocessing.Queue:
+@pytest.fixture(scope="function")
+def logger_queue(tmp_path_factory) -> Generator[Queue, Any, None]:
     """Creates a DataLogger instance and returns its input queue."""
-    logger = DataLogger(output_directory=tmp_path)
-    return logger.input_queue
+    # Creates a unique temp directory for this test
+    tmp_dir = tmp_path_factory.mktemp("logger_data")
+
+    logger = DataLogger(output_directory=tmp_dir, instance_name=f"{tmp_dir}_logger", exist_ok=True)
+    yield logger.input_queue
 
 
 def test_serial_protocols_members() -> None:
@@ -245,7 +250,7 @@ def test_dequeue_module_command() -> None:
 
     # Test repr
     expected_repr = (
-        f"kDequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, " f"module_id=2, return_code=3)."
+        f"kDequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)."
     )
     assert repr(cmd) == expected_repr
 
@@ -266,7 +271,7 @@ def test_kernel_command() -> None:
     assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 2, 1])
 
     # Test repr
-    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, " f"return_code=2)."
+    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, return_code=2)."
     assert repr(cmd) == expected_repr
 
 
@@ -859,13 +864,14 @@ def test_unity_communication_init_and_repr() -> None:
 def test_unity_communication_init_error() -> None:
     """Verifies the error handling behavior of MQTTCommunication __init__() method."""
     message = (
-        f"Unable to initialize MQTTCommunication class instance. Failed to connect to MQTT broker at "
-        f"{BROKER_IP}:{1880}. This likely indicates that the broker is not running or that there is an "
-        f"issue with the provided IP and socket port."
+        f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
+        f"broker at {BROKER_IP}:{1880}. This likely indicates that the broker is not running or that "
+        f"there is an issue with the provided IP and socket port."
     )
     with pytest.raises(RuntimeError, match=error_format(message)):
         # Invalid port
-        MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
+        comm = MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
+        comm.connect()
 
 
 @pytest.mark.xdist_group(name="group1")
@@ -1005,7 +1011,7 @@ def test_unity_communication_reconnection() -> None:
     # Sends the initial message
     test_message = "before disconnect"
     unity_client.publish(TEST_TOPICS[0], test_message)
-    time.sleep(0.1)
+    time.sleep(1)
 
     # Verifies that the message was received
     assert unity_comm.has_data
