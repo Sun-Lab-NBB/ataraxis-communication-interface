@@ -311,6 +311,21 @@ class ModuleInterface:  # pragma: no cover
             f"process_received_data() method must be implemented when subclassing the base ModuleInterface class."
         )
 
+    @abstractmethod
+    def terminate_remote_assets(self) -> None:
+        """Terminates custom interface assets to be used in the remote process.
+
+        This method is the opposite of the initialize_remote_assets() method. It is called at the end of the
+        communication process to ensure any resources claimed during custom asset initialization can be properly
+        released before the communication runtime ends.
+
+        Notes:
+            This method will also be called if the communication process fails during runtime.
+        """
+        raise NotImplementedError(
+            f"terminate_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
+        )
+
     def extract_logged_data(self) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
         """Extracts the data sent by the hardware module instance running on the microcontroller from the .npz
         log file generated during ModuleInterface runtime.
@@ -461,6 +476,7 @@ class ModuleInterface:  # pragma: no cover
             self._input_queue.put(
                 DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
             )
+            return
 
         message = (
             f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
@@ -1378,3 +1394,7 @@ class MicroControllerInterface:  # pragma: no cover
 
             if start_mqtt_client:
                 mqtt_communication.disconnect()
+
+            # Terminates all custom assets
+            for module in module_interfaces:
+                module.terminate_remote_assets()

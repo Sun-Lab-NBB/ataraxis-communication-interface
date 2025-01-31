@@ -26,7 +26,7 @@ from ataraxis_communication_interface import MicroControllerInterface
 if __name__ == "__main__":
     # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
     # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
-    output_directory = Path("/home/cyberaxolotl/Desktop/Demos/AXCI")  # Change this to your desired output directory
+    output_directory = Path("/home/cybermouse/Desktop/Demos/AXCI")  # Change this to your desired output directory
     data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
 
     # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
