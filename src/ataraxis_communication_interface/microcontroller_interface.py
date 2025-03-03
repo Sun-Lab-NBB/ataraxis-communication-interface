@@ -1214,14 +1214,16 @@ class MicroControllerInterface:  # pragma: no cover
                     # topic is guaranteed to be inside the mqtt_input_map dictionary and have at least one Module which
                     # can process its data.
                     for module in mqtt_command_map[topic]:
-                        # Transmits the data to the microcontroller. Since parse_mqtt_command() is ONLY called for
-                        # topics specified by the user, expects that the method ALWAYS returns a valid message.
-                        serial_communication.send_message(
-                            module.parse_mqtt_command(
-                                topic=topic,
-                                payload=payload,
-                            )
+                        # Transmits the data to the microcontroller. parse_mqtt_command can either return a valid
+                        # message to be sent to the microcontroller or directly send the message via internal
+                        # input_queue binding. If returned command is not None, it is transmitted to the
+                        # microcontroller. Otherwise, assumes the command was directly sent to the input_queue.
+                        command = module.parse_mqtt_command(
+                            topic=topic,
+                            payload=payload,
                         )
+                        if command is not None:
+                            serial_communication.send_message(command)
 
                 # Attempts to receive the data from microcontroller
                 in_data = serial_communication.receive_message()
