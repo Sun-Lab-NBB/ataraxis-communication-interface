@@ -379,92 +379,12 @@ class ModuleInterface:  # pragma: no cover
             )
             console.error(message=error_message, error=ValueError)
 
-        # Loads the archive into RAM
-        archive: NpzFile = np.load(file=log_path)
-
-        # Precreates the dictionary to store the extracted data.
-        event_data = {}
-
-        # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
-        # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
-        # microseconds relative to onset timestamp.
-        timestamp_offset = 0
-        onset_us = np.uint64(0)
-        timestamp: np.uint64
-        for number, item in enumerate(archive.files):
-            message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
-
-            # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
-            # message starting at index 1. If timestamp value is 0, the message contains the onset timestamp value
-            # stored as 8-byte payload. Index 0 stores the source ID (uint8 value)
-            if np.uint64(message[1:9].view(np.uint64)[0]) == 0:
-                # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
-                onset_us = np.uint64(message[9:].view("<i8")[0].copy())
-
-                # Breaks the loop onc the onset is found. Generally, the onset is expected to be found very early into
-                # the loop
-                timestamp_offset = number  # Records the item number at which the onset value was found.
-                break
-
-        # Once the onset has been discovered, processes the rest of the module instance data. Continues searching from
-        # the position where the offset is found.
-        for item in archive.files[timestamp_offset + 1 :]:
-            message = archive[item]
-
-            # Extracts the payload from each logged message.
-            payload = message[9:]
-
-            # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
-            # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
-            # '2'. In the future, if enough interest is shown, we may extend this list to also include outgoing
-            # messages. For now, these messages need to be parsed manually by users that need this data.
-            if (
-                (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA)
-                or payload[1] != self._module_type
-                or payload[2] != self._module_id
-                or (payload[4] != 2 and payload[4] < 51)
-            ):
-                continue
-
-            # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
-            # message, in microseconds since epoch onset.
-            elapsed_microseconds = np.uint64(message[1:9].view(np.uint64)[0].copy())
-            timestamp = onset_us + elapsed_microseconds
-
-            # Extracts command, event, and, if supported, data object from the message payload.
-            command_code = np.uint8(payload[3])
-            event = np.uint8(payload[4])
-
-            # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
-            # in size. Extracts and formats the data object, included with the logged payload.
-            data: Any = None
-            if len(payload) > 5:
-                # noinspection PyTypeChecker
-                prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
-
-                # Depending on the prototype, reads the data object as an array or scalar
-                if isinstance(prototype, np.ndarray):
-                    data = payload[6:].view(prototype.dtype)[:]
-                elif prototype is not None:
-                    data = payload[6:].view(prototype.dtype)[0]
-                else:
-                    error_message = (
-                        f"Unable to extract data for module {self._module_id} of type {self._module_type} from the log "
-                        f"file. Failed to obtain the prototype to read the data object for message with "
-                        f"event code {event} and command code {command_code}. No matching prototype was found for "
-                        f"prototype code {payload[5]}."
-                    )
-                    console.error(message=error_message, error=ValueError)
-
-            # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event code,
-            # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
-            # the active command code.
-            if event not in event_data:
-                event_data[event] = [{"timestamp": timestamp, "data": data, "command": command_code}]
-            else:
-                event_data[event].append({"timestamp": timestamp, "data": data, "command": command_code})
-
-        return event_data
+        # Since version 3.1.0 the library now provides a global, instance-independent function that stores the
+        # extraction logic. The logic remains unchanged since version 3.0.0, but this method is now largely a wrapper
+        # around the global method.
+        return extract_logged_hardware_module_data(
+            log_path=log_path, module_id=int(self._module_id), module_type=int(self._module_type)
+        )
 
     def reset_command_queue(self) -> None:
         """Instructs the microcontroller to clear all queued commands for the specific module instance managed by this
@@ -584,6 +504,10 @@ class MicroControllerInterface:  # pragma: no cover
         _microcontroller_serial_buffer_size: Stores the microcontroller's serial buffer size, in bytes.
         _mqtt_ip: Stores the IP address of the MQTT broker used for MQTT communication.
         _mqtt_port: Stores the port number of the MQTT broker used for MQTT communication.
+        _modules: Stores the tuple of ModuleInterface instances managed by this MicroControllerInterface.
+        _logger_queue: Stores the Multiprocessing Queue object used to pipe log data to the DataLogger cores.
+        _log_directory: Stores the output directory used by the DataLogger to save temporary log entries and the final
+            compressed .npz log archive.
         _mp_manager: Stores the multiprocessing Manager used to initialize and manage input and output Queue
             objects.
         _input_queue: Stores the multiprocessing Queue used to pipe the data to be sent to the microcontroller to
@@ -695,6 +619,7 @@ class MicroControllerInterface:  # pragma: no cover
         # Extracts the queue from the logger instance. Other than for this step, this class does not use the instance
         # for anything else.
         self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore
+        self._log_directory: Path = data_logger.output_directory
 
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
         # data between the communication process and the main process managing the overall runtime.
@@ -1061,7 +986,7 @@ class MicroControllerInterface:  # pragma: no cover
 
             # If the module is configured to process incoming data or raise runtime errors, maps its type+id combined
             # code to the interface instance. This is used to quickly find the module interface instance addressed by
-            # incoming data, so that it can handle teh data or error message.
+            # incoming data, so that it can handle the data or error message.
             if len(module.data_codes) != 0 or len(module.error_codes) != 0:
                 processing_map[module.type_id] = module
 
@@ -1400,3 +1325,165 @@ class MicroControllerInterface:  # pragma: no cover
             # Terminates all custom assets
             for module in module_interfaces:
                 module.terminate_remote_assets()
+
+    @property
+    def log_path(self) -> Path:
+        """Returns the path to the compressed .npz log archive that would be generated for the MicroControllerInterface
+        by the DataLogger instance given to the class at initialization.
+
+        Primarily, this path should be used as an argument to the instance-independent
+        'extract_logged_hardware_module_data' data extraction function.
+        """
+        return self._log_directory.joinpath(f"{self._controller_id}_log.npz")
+
+
+def extract_logged_hardware_module_data(
+    log_path: Path, module_type: int, module_id: int
+) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
+    """Extracts the data for the hardware module instance running on an Ataraxis Micro Controller (AMC) device from the
+    .npz log file generated by a DataLogger instance during runtime.
+
+    This function reads the '.npz' archive generated by the DataLogger 'compress_logs' method for a specific
+    ModuleInterface and MicroControllerInterface combination and extracts all custom event-codes and data objects
+    transmitted by the target hardware module instance from the microcontroller to the PC. At this time, the extraction
+    specifically looks for the data sent by the hardware module to the PC but, in the future, it may be updated to also
+    parse the data sent by the PC to the hardware module.
+
+    This function is process- and thread-safe and can be pickled. It is specifically designed to be executed in-parallel
+    for many concurrently used ModuleInterface instances, but it can also be used standalone. If you have an initialized
+    ModuleInterface instance, it is recommended to use its 'extract_logged_data' method instead, as it automatically
+    resolves the log_path argument and the module type and ID codes.
+
+    Notes:
+        The extracted data will NOT contain library-reserved events and messages. This includes all Kernel messages
+        and module messages with event codes 0 through 50. The only exceptions to this rule are messages with event
+        code 2, which report completion of commands. These messages are parsed in addition to custom messages
+        sent by each hardware module.
+
+        This function should be used as a convenience abstraction for the inner workings of the DataLogger class.
+        For each ModuleInterface, it will decode and return the logged runtime data sent to the PC by the specific
+        hardware module instance controlled by the interface. You need to manually implement further data
+        processing steps as necessary for your specific use case and module implementation.
+
+        The function assumes that it is given an .npz archive generated for a MicroControllerInterface instance and WILL
+        behave unexpectedly if it is instead given an archive generated by another Ataraxis class, such as
+        VideoSystem. Also, it expects that the archive contains the data for the target hardware module, identified by
+        its type and instance ID codes. The function may behave unexpectedly if the archive does not contain the data
+        for the module.
+
+    Args:
+        log_path: The path to the .npz archive file that stores the logged data generated by the
+            MicroControllerInterface and all NModuleInterfaces managed by that microcontroller interface instance during
+            runtime.
+        module_type: The byte id code for the type (family) of the hardware module instance whose data needs to be
+            extracted.
+        module_id: The byte id code for the specific instance of the hardware module whose data needs to be
+            extracted.
+
+    Returns:
+        A dictionary that uses numpy uint8 event codes as keys and stores lists of dictionaries under each key.
+        Each inner dictionary contains three elements. First, an uint64 timestamp, representing the number of
+        microseconds since the UTC epoch onset. Second, the data object, transmitted with the message
+        (or None, for state-only events). Third, the uint8 code of the command that the module was executing when
+        it sent the message to the PC.
+
+    Raises:
+        ValueError: If the input path is not valid or does not point to an existing .npz archive. If the function is
+            unable to properly extract a logged data object for the target hardware module.
+    """
+    # If a compressed log archive does not exist, raises an error
+    if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
+        error_message = (
+            f"Unable to extract data for module {module_id} of type {module_type} from the log file {log_path}. This "
+            f"likely indicates that the logs have not been compressed via DataLogger's compress_logs() method and are "
+            f"not available for processing. Call log compression method before calling this method. Valid "
+            f"'log_path' arguments must point to an .npz archive file."
+        )
+        console.error(message=error_message, error=ValueError)
+
+    # Loads the archive into RAM
+    archive: NpzFile = np.load(file=log_path)
+
+    # Precreates the dictionary to store the extracted data.
+    event_data = {}
+
+    # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
+    # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
+    # microseconds relative to onset timestamp.
+    timestamp_offset = 0
+    onset_us = np.uint64(0)
+    timestamp: np.uint64
+    for number, item in enumerate(archive.files):
+        message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
+
+        # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
+        # message starting at index 1. If timestamp value is 0, the message contains the onset timestamp value
+        # stored as 8-byte payload. Index 0 stores the source ID (uint8 value)
+        if np.uint64(message[1:9].view(np.uint64)[0]) == 0:
+            # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
+            onset_us = np.uint64(message[9:].view("<i8")[0].copy())
+
+            # Breaks the loop onc the onset is found. Generally, the onset is expected to be found very early into
+            # the loop
+            timestamp_offset = number  # Records the item number at which the onset value was found.
+            break
+
+    # Once the onset has been discovered, processes the rest of the module instance data. Continues searching from
+    # the position where the offset is found.
+    for item in archive.files[timestamp_offset + 1 :]:
+        message = archive[item]
+
+        # Extracts the payload from each logged message.
+        payload = message[9:]
+
+        # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
+        # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
+        # '2'. In the future, if enough interest is shown, we may extend this list to also include outgoing
+        # messages. For now, these messages need to be parsed manually by users that need this data.
+        if (
+            (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA)
+            or payload[1] != module_type
+            or payload[2] != module_id
+            or (payload[4] != 2 and payload[4] < 51)
+        ):
+            continue
+
+        # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
+        # message, in microseconds since epoch onset.
+        elapsed_microseconds = np.uint64(message[1:9].view(np.uint64)[0].copy())
+        timestamp = onset_us + elapsed_microseconds
+
+        # Extracts command, event, and, if supported, data object from the message payload.
+        command_code = np.uint8(payload[3])
+        event = np.uint8(payload[4])
+
+        # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
+        # in size. Extracts and formats the data object, included with the logged payload.
+        data: Any = None
+        if len(payload) > 5:
+            # noinspection PyTypeChecker
+            prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
+
+            # Depending on the prototype, reads the data object as an array or scalar
+            if isinstance(prototype, np.ndarray):
+                data = payload[6:].view(prototype.dtype)[:]
+            elif prototype is not None:
+                data = payload[6:].view(prototype.dtype)[0]
+            else:
+                error_message = (
+                    f"Unable to extract data for module {module_id} of type {module_type} from the log "
+                    f"file. Failed to obtain the prototype to read the data object for message with "
+                    f"event code {event} and command code {command_code}. No matching prototype was found for "
+                    f"prototype code {payload[5]}."
+                )
+                console.error(message=error_message, error=ValueError)
+
+        # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event code,
+        # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
+        # the active command code.
+        if event not in event_data:
+            event_data[event] = [{"timestamp": timestamp, "data": data, "command": command_code}]
+        else:
+            event_data[event].append({"timestamp": timestamp, "data": data, "command": command_code})
+
+    return event_data
