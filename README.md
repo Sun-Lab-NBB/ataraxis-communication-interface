@@ -403,6 +403,14 @@ which is required for the log parser to find the target log file. Overall, it is
 immediately after finishing the communication runtime, as the class would be configured correctly for the parsing to 
 work as intended.
 
+***Attention!*** Since version 3.1.0 the library exposes a global, multiprocessing-safe, and instance-independent 
+function `extract_logged_hardware_module_data()`. This function behaves exactly like the instance-bound log extraction 
+method does, but can be used to parse logged data without the need to have initialized MicroControllerInterface or 
+ModuleInterface instances. You can use the `log_path` property of an initialized MicroControllerInterface instance to 
+get the path to the .npz archive that stores logged data after compression, and the `module_type` and `module_id` 
+properties of an initialized ModuleInterface instance to get the type and instance ID codes of the module. This data 
+is required by the extraction function to parse the data sent by the target hardware module to the PC during runtime.
+
 ### Custom Module Interfaces
 For this library an interface is a class that contains the logic for sending the command and parameter data to the 
 hardware module and receiving and processing the data sent by the module to the PC. The microcontroller and PC libraries
@@ -479,7 +487,7 @@ Currently, the method is designed to only process commands and work with all val
 This method allows processing incoming ModuleState and ModuleData messages as they are received by the PC. 
 MicroControllerInterface calls this method for any State or Data message received from the hardware module, if the 
 event code from that messages matches one of the codes in the data_codes attribute of the ModuleInterface. Therefore, 
-this method will only be called on the messages specified by teh ModuleInterface developer.
+this method will only be called on the messages specified by the ModuleInterface developer.
 
 **Note:** The MicroControllerInterface class ***automatically*** saves (logs) each received and sent message to the PC
 as a stream of bytes. Therefore, this method should ***not*** be used to save the data for post-runtime analysis. 
