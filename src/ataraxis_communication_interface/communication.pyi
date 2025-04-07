@@ -1,12 +1,14 @@
 from enum import IntEnum
+from queue import Queue
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 from collections.abc import Callable as Callable
 from multiprocessing import Queue as MPQueue
 
 import numpy as np
 from _typeshed import Incomplete
 from numpy.typing import NDArray
+from ataraxis_time import PrecisionTimer
 import paho.mqtt.client as mqtt
 from ataraxis_transport_layer_pc import TransportLayer
 
@@ -268,8 +270,8 @@ class RepeatedModuleCommand:
     return_code: np.uint8 = ...
     noblock: np.bool_ = ...
     cycle_delay: np.uint32 = ...
-    packed_data: NDArray[np.uint8] | None = ...
-    protocol_code: np.uint8 = ...
+    packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
+    protocol_code: np.uint8 = field(init=False, default=SerialProtocols.REPEATED_MODULE_COMMAND.as_uint8())
     def __post_init__(self) -> None:
         """Packs the data into the numpy array to optimize future transmission speed."""
     def __repr__(self) -> str:
@@ -284,8 +286,8 @@ class OneOffModuleCommand:
     command: np.uint8
     return_code: np.uint8 = ...
     noblock: np.bool_ = ...
-    packed_data: NDArray[np.uint8] | None = ...
-    protocol_code: np.uint8 = ...
+    packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
+    protocol_code: np.uint8 = field(init=False, default=SerialProtocols.ONE_OFF_MODULE_COMMAND.as_uint8())
     def __post_init__(self) -> None:
         """Packs the data into the numpy array to optimize future transmission speed."""
     def __repr__(self) -> str:
@@ -302,8 +304,8 @@ class DequeueModuleCommand:
     module_type: np.uint8
     module_id: np.uint8
     return_code: np.uint8 = ...
-    packed_data: NDArray[np.uint8] | None = ...
-    protocol_code: np.uint8 = ...
+    packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
+    protocol_code: np.uint8 = field(init=False, default=SerialProtocols.DEQUEUE_MODULE_COMMAND.as_uint8())
     def __post_init__(self) -> None:
         """Packs the data into the numpy array to optimize future transmission speed."""
     def __repr__(self) -> str:
@@ -318,8 +320,8 @@ class KernelCommand:
 
     command: np.uint8
     return_code: np.uint8 = ...
-    packed_data: NDArray[np.uint8] | None = ...
-    protocol_code: np.uint8 = ...
+    packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
+    protocol_code: np.uint8 = field(init=False, default=SerialProtocols.KERNEL_COMMAND.as_uint8())
     def __post_init__(self) -> None:
         """Packs the data into the numpy array to optimize future transmission speed."""
     def __repr__(self) -> str:
@@ -333,9 +335,9 @@ class ModuleParameters:
     module_id: np.uint8
     parameter_data: tuple[np.signedinteger[Any] | np.unsignedinteger[Any] | np.floating[Any] | np.bool, ...]
     return_code: np.uint8 = ...
-    packed_data: NDArray[np.uint8] | None = ...
-    parameters_size: NDArray[np.uint8] | None = ...
-    protocol_code: np.uint8 = ...
+    packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
+    parameters_size: NDArray[np.uint8] | None = field(init=False, default=None)
+    protocol_code: np.uint8 = field(init=False, default=SerialProtocols.MODULE_PARAMETERS.as_uint8())
     def __post_init__(self) -> None:
         """Packs the data into the numpy array to optimize future transmission speed."""
     def __repr__(self) -> str:
@@ -352,9 +354,9 @@ class KernelParameters:
     action_lock: np.bool
     ttl_lock: np.bool
     return_code: np.uint8 = ...
-    packed_data: NDArray[np.uint8] | None = ...
-    parameters_size: NDArray[np.uint8] | None = ...
-    protocol_code: np.uint8 = ...
+    packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
+    parameters_size: NDArray[np.uint8] | None = field(init=False, default=None)
+    protocol_code: np.uint8 = field(init=False, default=SerialProtocols.KERNEL_PARAMETERS.as_uint8())
     def __post_init__(self) -> None:
         """Packs the data into the numpy array to optimize future transmission speed."""
     def __repr__(self) -> str:
@@ -382,13 +384,13 @@ class ModuleData:
         _transport_layer: Stores the reference to the TransportLayer class.
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    module_type: Incomplete
-    module_id: Incomplete
-    command: Incomplete
-    event: Incomplete
-    data_object: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    module_type: np.uint8
+    module_id: np.uint8
+    command: np.uint8
+    event: np.uint8
+    data_object: np.unsignedinteger[Any] | NDArray[Any]
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -425,11 +427,11 @@ class KernelData:
         _transport_layer: Stores the reference to the TransportLayer class.
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    command: Incomplete
-    event: Incomplete
-    data_object: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    command: np.uint8
+    event: np.uint8
+    data_object: np.unsignedinteger[Any] | NDArray[Any]
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -465,12 +467,12 @@ class ModuleState:
         event: The code of the event that prompted sending the message.
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    module_type: Incomplete
-    module_id: Incomplete
-    command: Incomplete
-    event: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    module_type: np.uint8
+    module_id: np.uint8
+    command: np.uint8
+    event: np.uint8
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -502,10 +504,10 @@ class KernelState:
         event: The code of the event that prompted sending the message.
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    command: Incomplete
-    event: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    command: np.uint8
+    event: np.uint8
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -536,9 +538,9 @@ class ReceptionCode:
         reception_code: The reception code originally sent as part of the outgoing Command or Parameters messages.
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    reception_code: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    reception_code: np.uint8
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -573,9 +575,9 @@ class ControllerIdentification:
 
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    controller_id: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    controller_id: np.uint8
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -610,9 +612,9 @@ class ModuleIdentification:
 
     """
 
-    protocol_code: Incomplete
-    message: Incomplete
-    module_type_id: Incomplete
+    protocol_code: np.uint8
+    message: NDArray[np.uint8]
+    module_type_id: np.uint16
     _transport_layer: Incomplete
     def __init__(self, transport_layer: TransportLayer) -> None: ...
     def update_message_data(self) -> None:
@@ -685,8 +687,8 @@ class SerialCommunication:
     _controller_identification: Incomplete
     _module_identification: Incomplete
     _reception_code: Incomplete
-    _timestamp_timer: Incomplete
-    _source_id: Incomplete
+    _timestamp_timer: PrecisionTimer
+    _source_id: np.uint8
     _logger_queue: Incomplete
     _usb_port: Incomplete
     def __init__(
@@ -795,12 +797,12 @@ class MQTTCommunication:
         _client: Stores the initialized mqtt client instance that carries out the communication.
     """
 
-    _ip: Incomplete
-    _port: Incomplete
+    _ip: str
+    _port: int
     _connected: bool
-    _monitored_topics: Incomplete
-    _output_queue: Incomplete
-    _client: Incomplete
+    _monitored_topics: tuple[str, ...]
+    _output_queue: Queue
+    _client: mqtt.Client
     def __init__(
         self, ip: str = "127.0.0.1", port: int = 1883, monitored_topics: None | tuple[str, ...] = None
     ) -> None: ...

@@ -408,8 +408,8 @@ function `extract_logged_hardware_module_data()`. This function behaves exactly 
 method does, but can be used to parse logged data without the need to have initialized MicroControllerInterface or 
 ModuleInterface instances. You can use the `log_path` property of an initialized MicroControllerInterface instance to 
 get the path to the .npz archive that stores logged data after compression, and the `module_type` and `module_id` 
-properties of an initialized ModuleInterface instance to get the type and instance ID codes of the module. This data 
-is required by the extraction function to parse the data sent by the target hardware module to the PC during runtime.
+properties of initialized ModuleInterface instances to get the type and instance ID codes of each module for which to 
+parse the data.
 
 ### Custom Module Interfaces
 For this library an interface is a class that contains the logic for sending the command and parameter data to the 
