@@ -9,6 +9,7 @@ from .communication import (
 )
 from .microcontroller_interface import (
     ModuleInterface as ModuleInterface,
+    ExtractedModuleData as ExtractedModuleData,
     MicroControllerInterface as MicroControllerInterface,
     extract_logged_hardware_module_data as extract_logged_hardware_module_data,
 )
@@ -24,4 +25,5 @@ __all__ = [
     "MQTTCommunication",
     "DequeueModuleCommand",
     "extract_logged_hardware_module_data",
+    "ExtractedModuleData",
 ]
