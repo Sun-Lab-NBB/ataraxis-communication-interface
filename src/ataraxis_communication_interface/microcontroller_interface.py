@@ -1,17 +1,11 @@
-"""This module provides the ModuleInterface and MicroControllerInterface classes. They aggregate the methods to
-enable Python PC clients to bidirectionally interface with custom hardware modules managed by an Arduino or Teensy
-microcontroller. Additionally, these classes contain the bindings to connect to the microcontrollers via the MQTT
-protocol, facilitating indirect communication with local and remote processes over MQTT broker.
-
-Each microcontroller hardware module that manages physical hardware should be matched to a specialized interface
-derived from the base ModuleInterface class. Similarly, for each concurrently active microcontroller, there has to be a
-specific MicroControllerInterface instance that manages the ModuleInterface instances for the modules of that
-controller.
+"""This module provides the ModuleInterface and MicroControllerInterface classes. They aggregate the methods that allow
+Python PC clients to bidirectionally interface with custom hardware modules managed by an Arduino or Teensy
+microcontroller.
 """
 
 from abc import abstractmethod
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from threading import Thread
 from dataclasses import dataclass
@@ -20,12 +14,9 @@ from multiprocessing import (
     Manager,
     Process,
 )
-from multiprocessing.managers import SyncManager
 
 import numpy as np
-from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
-from numpy.lib.npyio import NpzFile
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
 
@@ -48,25 +39,15 @@ from .communication import (
     ControllerIdentification,
 )
 
+# Prevents typing-related imports from being imported at runtime
+if TYPE_CHECKING:
+    from multiprocessing.managers import SyncManager
 
-@dataclass()
-class ExtractedModuleData:
-    """This class stores the data extracted from the log archive for a single hardware module instance.
+    from numpy.typing import NDArray
+    from numpy.lib.npyio import NpzFile
 
-    This class is used by the extract_logged_hardware_module_data() function to output the extracted data. It provides
-    a convenient way for packaging the extracted data so that it can be used for further processing.
-    """
-
-    module_type: int
-    """Stores the type (family) code of the hardware module whose data is stored in the 'data' attribute."""
-    module_id: int
-    """Stores the unique identifier code of the hardware module whose data is stored in the 'data' attribute."""
-    data: dict[Any, list[dict[str, np.uint64 | Any]]]
-    """A tuple of dictionaries that uses numpy uint8 event codes as keys and stores lists of dictionaries under each 
-    key. Each inner dictionary contains three elements. First, an uint64 timestamp, representing the number of
-    microseconds since the UTC epoch onset. Second, the data object, transmitted with the message (or None, for 
-    state-only events). Third, the uint8 code of the command that the module was executing when it sent the message to 
-    the PC."""
+# Defines static constants used in this module
+_MAXIMUM_BYTE_VALUE = 255
 
 
 class ModuleInterface:  # pragma: no cover
@@ -112,8 +93,8 @@ class ModuleInterface:  # pragma: no cover
             True when implementing the class. Similarly, if your interface is configured to receive commands from
             MQTT, set this flag to True.
         error_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate runtime
-            errors. This set will be used during runtime to identify and raise error messages in response to
-            managed module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
+            errors. This set will be used during runtime to identify and raise error messages in response to the managed
+            module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
             for internal library use and should NOT be used as part of this set or custom hardware module class design.
             If the class does not produce runtime errors, set to None.
         data_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate states
@@ -163,14 +144,14 @@ class ModuleInterface:  # pragma: no cover
         mqtt_command_topics: set[str] | None = None,
     ) -> None:
         # Ensures that input byte-codes use valid value ranges
-        if not isinstance(module_type, np.uint8) or not 1 <= module_type <= 255:
+        if not isinstance(module_type, np.uint8) or not 1 <= module_type <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_type' argument, but encountered "
                 f"{module_type} of type {type(module_type).__name__}."
             )
             console.error(message=message, error=TypeError)
-        if not isinstance(module_id, np.uint8) or not 1 <= module_id <= 255:
+        if not isinstance(module_id, np.uint8) or not 1 <= module_id <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_id' argument, but encountered "
@@ -211,7 +192,7 @@ class ModuleInterface:  # pragma: no cover
         self._module_id: np.uint8 = module_id
 
         # Combines type and ID codes into a 16-bit value. This is used to ensure every module instance has a unique
-        # ID + Type combination. This method is position-aware, so inverse type-id pairs will be coded as different
+        # ID + Type combination. This method is position-aware, so inverse type-id pairs are coded as different
         # values e.g.: 4-5 != 5-4
         self._type_id: np.uint16 = np.uint16(
             (self._module_type.astype(np.uint16) << 8) | self._module_id.astype(np.uint16)
@@ -235,50 +216,16 @@ class ModuleInterface:  # pragma: no cover
         # initialization, it updates these attributes for all managed interfaces via referencing. Therefore, after
         # initializing the main interface, all module interfaces will have these attributes configured properly.
         self._log_directory: Path | None = None
+        # noinspection PyTypeHints
         self._microcontroller_id: np.uint8 | None = None
-        self._input_queue: MPQueue | None = None  # type: ignore
+        self._input_queue: MPQueue | None = None
 
     def __repr__(self) -> str:
         """Returns the string representation of the ModuleInterface instance."""
-        message = (
+        return (
             f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
             f"combined_type_id={self._type_id}, mqtt_command_topics={self._mqtt_command_topics}, "
-            f"data_codes={sorted(self._data_codes)}, error_codes={sorted(self._error_codes)})"  # type: ignore
-        )
-        return message
-
-    @abstractmethod
-    def parse_mqtt_command(
-        self, topic: str, payload: bytes | bytearray
-    ) -> OneOffModuleCommand | RepeatedModuleCommand | DequeueModuleCommand | None:
-        """Packages and returns a ModuleCommand message to send to the microcontroller, based on the input MQTT
-        command message topic and payload.
-
-        This method is called by the MicroControllerInterface when other MQTT clients send command messages to one of
-        the topics monitored by this ModuleInterface instance. This method resolves, packages, and returns the
-        appropriate ModuleCommand message structure, based on the input message topic and payload.
-
-        Notes:
-            This method is called only if 'mqtt_command_topics' class argument was used to set the monitored topics
-            during class initialization. This method will never receive a message with a topic that is not inside the
-            'mqtt_command_topics' set.
-
-            Use this method to translate incoming MQTT messages into the appropriate command messages for the hardware
-            module. While we currently do not explicitly support translating MQTT messages into parameter messages, this
-            can be added in the future if enough interest is shown.
-
-            See the /examples folder included with the library for examples on how to implement this method.
-
-        Args:
-            topic: The MQTT topic to which the other MQTT client sent the module-addressed command.
-            payload: The payload of the message.
-
-        Returns:
-            A OneOffModuleCommand, RepeatedModuleCommand, or DequeueModuleCommand instance that stores the message to
-            be sent to the microcontroller. None, if the class instance is not configured to receive commands from MQTT.
-        """
-        raise NotImplementedError(
-            f"parse_mqtt_command() method must be implemented when subclassing the base ModuleInterface class."
+            f"data_codes={sorted(self._data_codes)}, error_codes={sorted(self._error_codes)})"
         )
 
     @abstractmethod
@@ -296,9 +243,10 @@ class ModuleInterface:  # pragma: no cover
 
             All assets managed or created by this method should be stored in the ModuleInterface instance's attributes.
         """
-        raise NotImplementedError(
-            f"initialize_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
+        message = (
+            "initialize_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
         )
+        raise NotImplementedError(message)
 
     @abstractmethod
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
@@ -328,9 +276,8 @@ class ModuleInterface:  # pragma: no cover
             message: The ModuleState or ModuleData object that stores the message received from the module instance
                 running on the microcontroller.
         """
-        raise NotImplementedError(
-            f"process_received_data() method must be implemented when subclassing the base ModuleInterface class."
-        )
+        message = "process_received_data() method must be implemented when subclassing the base ModuleInterface class."
+        raise NotImplementedError(message)
 
     @abstractmethod
     def terminate_remote_assets(self) -> None:
@@ -343,72 +290,10 @@ class ModuleInterface:  # pragma: no cover
         Notes:
             This method will also be called if the communication process fails during runtime.
         """
-        raise NotImplementedError(
-            f"terminate_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
+        message = (
+            "terminate_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
         )
-
-    def extract_logged_data(self) -> dict[Any, list[dict[str, np.uint64 | Any]]]:
-        """Extracts the data sent by the hardware module instance running on the microcontroller from the .npz
-        log file generated during ModuleInterface runtime.
-
-        This method reads the compressed '.npz' archives generated by the MicroControllerInterface class that works
-        with this ModuleInterface during runtime and extracts all custom event-codes and data objects transmitted by
-        the interfaced module instance from the microcontroller.
-
-        Notes:
-            The extracted data will NOT contain library-reserved events and messages. This includes all Kernel messages
-            and module messages with event codes 0 through 50. The only exception to this rule is messages with event
-            code 2, which report completion of commands. These messages are parsed in addition to custom messages
-            sent by each hardware module.
-
-            This method should be used as a convenience abstraction for the inner workings of the DataLogger class.
-            For each ModuleInterface, it will decode and return the logged runtime data sent to the PC by the specific
-            hardware module instance controlled by the interface. You need to manually implement further data
-            processing steps as necessary for your specific use case and module implementation.
-
-        Returns:
-            A dictionary that uses numpy uint8 event codes as keys and stores lists of dictionaries under each key.
-            Each inner dictionary contains three elements. First, an uint64 timestamp, representing the number of
-            microseconds since the UTC epoch onset. Second, the data object, transmitted with the message
-            (or None, for state-only events). Third, the uint8 code of the command that the module was executing when
-            it sent the message to the PC.
-
-        Raises:
-            RuntimeError: If this method is called before the ModuleInterface is used to initialize a
-                MicroControllerInterface class.
-            ValueError: If the input path is not valid or does not point to an existing .npz archive.
-        """
-        if self._log_directory is None or self._microcontroller_id is None:
-            error_message = (
-                f"Unable to parse the log entries generated by the MicroControllerInterface for module "
-                f"{self._module_id} of type {self._module_type}. The ModuleInterface has to be used to "
-                f"initialize a MicroControllerInterface before calling this method."
-            )
-            console.error(message=error_message, error=RuntimeError)
-
-        # Generates the log file path using the MicroControllerInterface id. Assumes that the log has been compressed
-        # to the .npz format before calling this method.
-        log_path = self._log_directory.joinpath(f"{self._microcontroller_id}_log.npz")  # type: ignore
-
-        # If a compressed log archive does not exist, raises an error
-        if not log_path.exists():
-            error_message = (
-                f"Unable to extract data for module {self._module_id} of type {self._module_type} from the log file "
-                f"generated by the MicroControllerInterface with id {self._microcontroller_id}. This likely indicates "
-                f"that the logs have not been compressed via DataLogger's compress_logs() method and are not available "
-                f"for processing. Call log compression method before calling this method."
-            )
-            console.error(message=error_message, error=ValueError)
-
-        # Since version 3.1.0 the library now provides a global, instance-independent function that stores the
-        # extraction logic. The logic remains unchanged since version 3.0.0, but this method is now largely a wrapper
-        # around the global method.
-        data: tuple[ExtractedModuleData, ...] = extract_logged_hardware_module_data(
-            log_path=log_path, module_type_id=((int(self._module_id), int(self._module_type)),)
-        )
-
-        # Extracts and returns the dictionary to maintain compatibility with the old library version.
-        return data[0].data
+        raise NotImplementedError(message)
 
     def reset_command_queue(self) -> None:
         """Instructs the microcontroller to clear all queued commands for the specific module instance managed by this
@@ -430,46 +315,36 @@ class ModuleInterface:  # pragma: no cover
 
     @property
     def module_type(self) -> np.uint8:
-        """Returns the id-code that describes the broad type (family) of Modules managed by this interface class."""
+        """Returns the id-code of the type (family) of modules managed by this interface instance."""
         return self._module_type
 
     @property
     def module_id(self) -> np.uint8:
-        """Returns the code that identifies the specific Module instance managed by the Interface class instance."""
+        """Returns the id-code of the specific module instance managed by this interface instance."""
         return self._module_id
 
     @property
     def data_codes(self) -> set[np.uint8]:
-        """Returns the set of message event-codes that are processed during runtime, in addition to logging them to
-        disk.
+        """Returns the set of message event-codes that are processed during runtime ('online'), in addition to logging
+        them to disk.
         """
         return self._data_codes
 
     @property
-    def mqtt_command_topics(self) -> set[str]:
-        """Returns the set of MQTT topics this instance monitors for incoming MQTT commands."""
-        return self._mqtt_command_topics
-
-    @property
     def type_id(self) -> np.uint16:
-        """Returns the unique 16-bit unsigned integer value that results from combining the type-code and the id-code
-        of the instance.
+        """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
+        the id-code of the instance.
         """
         return self._type_id
 
     @property
     def error_codes(self) -> set[np.uint8]:
-        """Returns the set of error event-codes used by the module instance."""
+        """Returns the set of event-codes used by the module instance to communicate runtime errors."""
         return self._error_codes
-
-    @property
-    def mqtt_communication(self) -> bool:
-        """Returns True if the class instance is configured to communicate with MQTT during runtime."""
-        return self._mqtt_communication
 
 
 class MicroControllerInterface:  # pragma: no cover
-    """Interfaces with an Arduino or Teensy microcontroller running ataraxis-micro-controller library.
+    """Interfaces with an Arduino or Teensy microcontroller running the ataraxis-micro-controller library.
 
     This class contains the logic that sets up a remote daemon process with SerialCommunication, MQTTCommunication,
     and DataLogger bindings to facilitate bidirectional communication and data logging between the microcontroller and
@@ -498,9 +373,7 @@ class MicroControllerInterface:  # pragma: no cover
             buffer. This size is used to calculate the maximum size of transmitted and received message payloads. This
             information is usually available from the microcontroller's vendor.
         microcontroller_usb_port: The serial USB port to which the microcontroller is connected. This information is
-            used to set up the bidirectional serial communication with the controller. You can use
-            list_available_ports() function from ataraxis-transport-layer-pc library to discover addressable USB ports
-            to pass to this argument. The function is also accessible through the CLI command: 'axtl-ports'.
+            used to set up the bidirectional serial communication with the controller.
         data_logger: An initialized DataLogger instance used to log the data produced by this Interface
             instance. The DataLogger itself is NOT managed by this instance and will need to be activated separately.
             This instance only extracts the necessary information to pipe the data to the logger.
@@ -582,7 +455,7 @@ class MicroControllerInterface:  # pragma: no cover
         baudrate: int = 115200,
         mqtt_broker_ip: str = "127.0.0.1",
         mqtt_broker_port: int = 1883,
-    ):
+    ) -> None:
         # Initializes the started tracker. This is needed to avoid errors if initialization fails, and __del__ is called
         # for a partially initialized class.
         self._started: bool = False
@@ -593,7 +466,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         # Ensures that input arguments have valid types. Only checks the arguments that are not passed to other classes,
         # such as TransportLayer, which has its own argument validation.
-        if not isinstance(controller_id, np.uint8) or not 1 <= controller_id <= 255:
+        if not isinstance(controller_id, np.uint8) or not 1 <= controller_id <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the MicroControllerInterface instance. Expected an unsigned integer value "
                 f"between 1 and 255 for 'controller_id' argument, but encountered {controller_id} of type "
@@ -642,12 +515,12 @@ class MicroControllerInterface:  # pragma: no cover
 
         # Extracts the queue from the logger instance. Other than for this step, this class does not use the instance
         # for anything else.
-        self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore
+        self._logger_queue: MPQueue = data_logger.input_queue
         self._log_directory: Path = data_logger.output_directory
 
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
         # data between the communication process and the main process managing the overall runtime.
-        self._input_queue: MPQueue = self._mp_manager.Queue()  # type: ignore
+        self._input_queue: MPQueue = self._mp_manager.Queue()
         self._terminator_array: None | SharedMemoryArray = None
         self._communication_process: None | Process = None
         self._watchdog_thread: None | Thread = None
@@ -769,7 +642,7 @@ class MicroControllerInterface:  # pragma: no cover
         timer = PrecisionTimer(precision="ms")
 
         # The watchdog function will run until the global shutdown command is issued.
-        while not self._terminator_array.read_data(index=0):  # type: ignore
+        while not self._terminator_array.read_data(index=0):
             # Checks process state every 20 ms. Releases the GIL while waiting.
             timer.delay_noblock(delay=20, allow_sleep=True)
 
@@ -806,7 +679,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         The MicroControllerInterface class will not be able to carry out any communications until this method is called.
         After this method finishes its runtime, a watchdog thread is used to monitor the status of the process until
-        stop() method is called, notifying the user if the process terminates prematurely.
+        the stop() method is called, notifying the user if the process terminates prematurely.
 
         Notes:
             If send_message() was called before calling start(), all queued messages will be transmitted in one step.
@@ -866,6 +739,7 @@ class MicroControllerInterface:  # pragma: no cover
             # that there is a communication issue where the data does not reach the controller or the PC. The
             # initialization process should be very fast, likely on the order of hundreds of microseconds. Waiting for
             # 15 seconds is likely excessive.
+
             if not self._communication_process.is_alive() or start_timer.elapsed > 15:
                 # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
                 self._terminator_array.write_data(0, np.uint8(1))
@@ -911,7 +785,7 @@ class MicroControllerInterface:  # pragma: no cover
         # Changes the started tracker value. Amongst other things this soft-inactivates the watchdog thread.
         self._started = False
 
-        # Sets the terminator trigger to 1, which triggers communication process shutdown. This also shuts down the
+        # Sets the terminator trigger to 1, which triggers the communication process shutdown. This also shuts down the
         # watchdog thread.
         if self._terminator_array is not None:
             self._terminator_array.write_data(0, np.uint8(1))
@@ -933,8 +807,8 @@ class MicroControllerInterface:  # pragma: no cover
     def _runtime_cycle(
         controller_id: np.uint8,
         module_interfaces: tuple[ModuleInterface, ...],
-        input_queue: MPQueue,  # type: ignore
-        logger_queue: MPQueue,  # type: ignore
+        input_queue: MPQueue,
+        logger_queue: MPQueue,
         terminator_array: SharedMemoryArray,
         usb_port: str,
         baudrate: int,
@@ -965,15 +839,14 @@ class MicroControllerInterface:  # pragma: no cover
                 outgoing messages to be logged (saved) to disk.
             terminator_array: The shared memory array used to control the communication process runtime.
             usb_port: The serial port to which the target microcontroller is connected.
-            baudrate: The communication baudrate to use. This option is ignored for controllers that use USB interface,
-                 but is essential for controllers that use the UART interface.
+            baudrate: The communication baudrate to use. This option is ignored for controllers that use the USB
+                interface, but is essential for controllers that use the UART interface.
             microcontroller_buffer_size: The size of the microcontroller's serial buffer. This is used to determine
                 the maximum size of the incoming and outgoing message payloads.
             mqtt_ip: The IP-address of the MQTT broker to use for communication with other MQTT processes.
             mqtt_port: The port number of the MQTT broker to use for communication with other MQTT processes.
             start_mqtt_client: Determines whether to start the MQTT client used by MQTTCommunication instance.
         """
-
         # Constructs Kernel-addressed commands used to verify that the Interface and the microcontroller are
         # configured appropriately
         identify_controller_command = KernelCommand(
@@ -1006,7 +879,7 @@ class MicroControllerInterface:  # pragma: no cover
                 # Extends the list of module interfaces that listen for that particular topic. This allows addressing
                 # multiple modules at the same time, as long as they all listen to the same topic.
                 existing_modules = mqtt_command_map.get(topic, [])
-                mqtt_command_map[topic] = existing_modules + [module]  # type: ignore
+                mqtt_command_map[topic] = [*existing_modules, module]
 
             # If the module is configured to process incoming data or raise runtime errors, maps its type+id combined
             # code to the interface instance. This is used to quickly find the module interface instance addressed by
@@ -1015,12 +888,11 @@ class MicroControllerInterface:  # pragma: no cover
                 processing_map[module.type_id] = module
 
         # Converts the list of interface instance into a tuple for slightly higher runtime efficiency.
-        for key in mqtt_command_map.keys():
-            mqtt_command_map[key] = tuple(mqtt_command_map[key])
+        mqtt_command_map = {key: tuple(value) for key, value in mqtt_command_map.items()}
 
         # Initializes the serial communication class and connects to the target microcontroller.
         serial_communication = SerialCommunication(
-            usb_port=usb_port,
+            port=usb_port,
             source_id=controller_id,
             logger_queue=logger_queue,
             baudrate=baudrate,
@@ -1055,7 +927,7 @@ class MicroControllerInterface:  # pragma: no cover
             # The response will be None if there is no data to receive and a valid message otherwise.
             response = serial_communication.receive_message()
 
-        # If response is received, but the ID contained in the received message does not match the expected ID,
+        # If a response is received, but the ID contained in the received message does not match the expected ID,
         # raises an error
         if response.controller_id != controller_id:
             # Raises the error.
@@ -1133,7 +1005,7 @@ class MicroControllerInterface:  # pragma: no cover
         if start_mqtt_client:
             mqtt_communication.connect()
 
-        # Reports that communication class has been successfully initialized. Seeing this code means
+        # Reports that the communication class has been successfully initialized. Seeing this code means
         # that the communication appears to be functioning correctly and that the interface and the microcontroller
         # appear to be configured well. While this does not guarantee the runtime will continue running
         # without errors, it is very likely to be so.
@@ -1165,7 +1037,7 @@ class MicroControllerInterface:  # pragma: no cover
                     for module in mqtt_command_map[topic]:
                         # Transmits the data to the microcontroller. parse_mqtt_command can either return a valid
                         # message to be sent to the microcontroller or directly send the message via internal
-                        # input_queue binding. If returned command is not None, it is transmitted to the
+                        # input_queue binding. If the returned command is not None, it is transmitted to the
                         # microcontroller. Otherwise, assumes the command was directly sent to the input_queue.
                         command = module.parse_mqtt_command(
                             topic=topic,
@@ -1174,7 +1046,7 @@ class MicroControllerInterface:  # pragma: no cover
                         if command is not None:
                             serial_communication.send_message(command)
 
-                # Attempts to receive the data from microcontroller
+                # Attempts to receive the data from the microcontroller
                 in_data = serial_communication.receive_message()
 
                 # If no data is available cycles the loop
@@ -1361,6 +1233,28 @@ class MicroControllerInterface:  # pragma: no cover
         return self._log_directory.joinpath(f"{self._controller_id}_log.npz")
 
 
+@dataclass()
+class ExtractedModuleData:
+    """This class stores the data extracted from the log archive for a single hardware module instance.
+
+    This class is used by the extract_logged_hardware_module_data() function to output the extracted data. It provides
+    a convenient way for packaging the extracted data so that it can be used for further processing.
+    """
+
+    module_type: int
+    """Stores the type (family) code of the hardware module whose data is stored in the 'data' attribute."""
+    module_id: int
+    """Stores the unique identifier code of the hardware module instance whose data is stored in the 'data' 
+    attribute."""
+    # noinspection PyTypeHints
+    data: dict[Any, list[dict[str, np.uint64 | Any]]]
+    """A tuple of dictionaries that uses numpy uint8 event codes as keys and stores lists of dictionaries under each 
+    key. Each inner dictionary contains three elements. First, an uint64 timestamp, representing the number of
+    microseconds since the UTC epoch onset. Second, the data object transmitted with the message (or None, for 
+    state-only events). Third, the uint8 code of the command that the module was executing when it sent the message to 
+    the PC."""
+
+
 def extract_logged_hardware_module_data(
     log_path: Path, module_type_id: tuple[tuple[int, int], ...]
 ) -> tuple[ExtractedModuleData, ...]:
@@ -1430,7 +1324,7 @@ def extract_logged_hardware_module_data(
 
     # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
     # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
-    # microseconds relative to onset timestamp.
+    # microseconds relative to the onset timestamp.
     timestamp_offset = 0
     onset_us = np.uint64(0)
     timestamp: np.uint64
@@ -1438,8 +1332,8 @@ def extract_logged_hardware_module_data(
         message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
 
         # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
-        # message starting at index 1. If timestamp value is 0, the message contains the onset timestamp value
-        # stored as 8-byte payload. Index 0 stores the source ID (uint8 value)
+        # message starting at index 1. If the timestamp value is 0, the message contains the onset timestamp value
+        # stored as an 8-byte payload. Index 0 stores the source ID (uint8 value)
         if np.uint64(message[1:9].view(np.uint64)[0]) == 0:
             # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
             onset_us = np.uint64(message[9:].view("<i8")[0].copy())
@@ -1517,10 +1411,8 @@ def extract_logged_hardware_module_data(
             )
 
     # Creates ExtractedModuleData instances for each module and returns the tuple of created instances to caller
-    result = tuple(
+    return tuple(
         ExtractedModuleData(module_type=module[0], module_id=module[1], data=module_event_data[module])
         for module in module_type_id
         if module_event_data[module]  # Only includes modules that have data
     )
-
-    return result

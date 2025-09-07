@@ -23,15 +23,15 @@ from .microcontroller_interface import (
 )
 
 __all__ = [
-    "MicroControllerInterface",
-    "ModuleInterface",
-    "ModuleState",
-    "ModuleData",
-    "ModuleParameters",
-    "RepeatedModuleCommand",
-    "OneOffModuleCommand",
-    "MQTTCommunication",
     "DequeueModuleCommand",
-    "extract_logged_hardware_module_data",
     "ExtractedModuleData",
+    "MQTTCommunication",
+    "MicroControllerInterface",
+    "ModuleData",
+    "ModuleInterface",
+    "ModuleParameters",
+    "ModuleState",
+    "OneOffModuleCommand",
+    "RepeatedModuleCommand",
+    "extract_logged_hardware_module_data",
 ]

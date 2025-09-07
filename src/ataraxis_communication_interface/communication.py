@@ -1,16 +1,10 @@
-"""This module provides the SerialCommunication and MQTTCommunication classes that enable communication between
-the PC, Arduino / Teensy microcontrollers running Ataraxis software and the other infrastructure with MQTT bindings.
-
-SerialCommunication supports the PC-MicroController communication over USB / UART interface, while MQTTCommunication
-supports the communication over the MQTT protocol (virtual / real TCP sockets). MQTTCommunication can be used to
-transmit data locally (within the same PC) or remotely via a network connection.
-
-Additionally, this module exposes message and helper structures used to serialize and deserialize the transmitted data.
+"""This module provides the SerialCommunication and MQTTCommunication classes that jointly support the communication
+between and within host-machines (PCs) and Arduino / Teensy microcontrollers.
 """
 
 from enum import IntEnum
 from queue import Queue
-from typing import Any, Dict, Union
+from typing import Any, TypeAlias
 from dataclasses import field, dataclass
 from collections.abc import Callable
 from multiprocessing import Queue as MPQueue
@@ -24,18 +18,22 @@ from ataraxis_data_structures import LogPackage
 from ataraxis_time.time_helpers import get_timestamp
 from ataraxis_transport_layer_pc import TransportLayer
 
+# Defines constants frequently used in this module
+_ZERO_BYTE = np.uint8(0)
+_ZERO_LONG = np.uint32(0)
+_TRUE = np.bool(True)
+
 
 class SerialProtocols(IntEnum):
     """Stores the protocol codes used in data transmission between the PC and the microcontroller over the serial port.
 
     Each sent and received message starts with the specific protocol code from this enumeration that instructs the
-    receiver on how to process the rest of the data payload. The codes available through this class have to match the
-    contents of the kProtocols Enumeration available from the ataraxis-micro-controller library
-    (axmc_communication_assets namespace).
+    receiver on how to process the rest of the data payload. The codes available through this enumeration have to match
+    the contents of the kProtocols enumeration available from the ataraxis-micro-controller library.
 
     Notes:
-        The values available through this enumeration should be read through their 'as_uint8' property to enforce the
-        type expected by other classes from ths library.
+        The values available through this enumeration should be accessed through their 'as_uint8' property to enforce
+        the type expected by other classes from this library.
     """
 
     UNDEFINED = 0
@@ -54,11 +52,11 @@ class SerialProtocols(IntEnum):
     """Protocol for sending Kernel-addressed commands. All Kernel commands are always non-repeatable (one-shot)."""
 
     MODULE_PARAMETERS = 5
-    """Protocol for sending Module-addressed parameters. This relies on transmitting arbitrary sized parameter objects 
+    """Protocol for sending Module-addressed parameters. This relies on transmitting arbitrary-sized parameter objects 
     likely to be unique for each module type (family)."""
 
     KERNEL_PARAMETERS = 6
-    """Protocol for sending Kernel-addressed parameters. The parameters transmitted via these messages will be used to 
+    """Protocol for sending Kernel-addressed parameters. The parameters transmitted via these messages are used to 
     overwrite the global parameters shared by the Kernel and all Modules of the microcontroller (global runtime 
     parameters)."""
 
@@ -79,52 +77,54 @@ class SerialProtocols(IntEnum):
     RECEPTION_CODE = 11
     """Protocol used to ensure that the microcontroller has received a previously sent command or parameter message. 
     Specifically, when an outgoing message includes a reception_code, this code is transmitted back to the PC using 
-    this service protocol to acknowledge message reception. Currently, this protocol is only intended for testing 
-    purposes, as at this time the Communication class does not explicitly ensure message delivery."""
+    this service protocol to acknowledge message reception. Note, despite the existence of this functionality, the 
+    Communication class currently does not support Quality of Service (QoS) levels above 0 (does not support ensuring 
+    message delivery)."""
 
     CONTROLLER_IDENTIFICATION = 12
-    """Protocol used to identify the controller connected to a particular USB port. This service protocol is used by 
-    the controller that receives the 'IdentifyController' Kernel-addressed command and replies with it's ID code. 
-    This protocol is automatically used by the MicrocontrollerInterface class during initialization and should not be 
-    used manually."""
+    """Protocol used to identify the microcontroller connected to a particular USB port. This service protocol is used 
+    by the controller that receives the 'IdentifyController' Kernel-addressed command and replies with it's ID code."""
 
     MODULE_IDENTIFICATION = 13
     """Protocol used to identify all hardware module instances managed by the connected microcontroller. This service 
     protocol is used by the controller that receives the 'IdentifyModules' Kernel-addressed command and sequentially 
-    transmits the combined type_id uint16 code for each managed module instance. This protocol is automatically used
-    by the MicrocontrollerInterface class during initialization and should not be used manually."""
+    transmits the combined type_id uint16 code for each managed module instance."""
 
     def as_uint8(self) -> np.uint8:
-        """Convert the enum value to numpy.uint8 type.
-
-        Returns:
-            np.uint8: The enum value as a numpy unsigned 8-bit integer.
-        """
+        """Returns the specified the enumeration value as a numpy uint8 type."""
         return np.uint8(self.value)
 
 
 # Type alias for supported numpy types
-NumericType = Union[
-    np.bool_, np.uint8, np.int8, np.uint16, np.int16, np.uint32, np.int32, np.uint64, np.int64, np.float32, np.float64
-]
-PrototypeType = Union[
-    NumericType,
-    NDArray[np.bool_],
-    NDArray[np.uint8],
-    NDArray[np.int8],
-    NDArray[np.uint16],
-    NDArray[np.int16],
-    NDArray[np.uint32],
-    NDArray[np.int32],
-    NDArray[np.uint64],
-    NDArray[np.int64],
-    NDArray[np.float32],
-    NDArray[np.float64],
-]
+# noinspection PyTypeHints
+PrototypeType: TypeAlias = (
+    np.bool_
+    | np.uint8
+    | np.int8
+    | np.uint16
+    | np.int16
+    | np.uint32
+    | np.int32
+    | np.uint64
+    | np.int64
+    | np.float32
+    | np.float64
+    | NDArray[np.bool_]
+    | NDArray[np.uint8]
+    | NDArray[np.int8]
+    | NDArray[np.uint16]
+    | NDArray[np.int16]
+    | NDArray[np.uint32]
+    | NDArray[np.int32]
+    | NDArray[np.uint64]
+    | NDArray[np.int64]
+    | NDArray[np.float32]
+    | NDArray[np.float64]
+)
 
 
 # Defines prototype factories for all supported types
-_PROTOTYPE_FACTORIES: Dict[int, Callable[[], PrototypeType]] = {
+_PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]] = {
     # 1 byte total
     1: lambda: np.bool_(0),  # kOneBool
     2: lambda: np.uint8(0),  # kOneUint8
@@ -335,14 +335,9 @@ _PROTOTYPE_FACTORIES: Dict[int, Callable[[], PrototypeType]] = {
 class SerialPrototypes(IntEnum):
     """Stores the prototype codes used in data transmission between the PC and the microcontroller over the serial port.
 
-    Prototype codes are used by Data messages (Kernel and Module) to inform the receiver about the structure (prototype)
-    that can be used to deserialize the included data object. Transmitting these codes with the message ensures that
-    the receiver has the necessary information to decode the data without doing any additional processing. In turn,
-    this allows optimizing the reception procedure to efficiently decode the data objects.
-
-    Notes:
-        While the use of 8-bit (byte) value limits the number of mapped prototypes to 255 (256 if 0 is made a valid
-        value), this number should be enough to support many unique runtime configurations.
+    Data messages use prototype codes to inform the receiver about the structure (prototype) that can be used to
+    deserialize the included data object. Transmitting these codes with the message ensures that the receiver has the
+    necessary information to decode the data.
     """
 
     # 1 byte total
@@ -754,35 +749,21 @@ class SerialPrototypes(IntEnum):
     """An array of 15 double-precision 64-bit floating-point numbers"""
 
     def as_uint8(self) -> np.uint8:
-        """Converts the enum value to numpy.uint8 type.
-
-        Returns:
-            The enum value as a numpy unsigned 8-bit integer.
-        """
+        """Returns the specified the enumeration value as a numpy uint8 type."""
         return np.uint8(self.value)
 
+    # noinspection PyTypeHints
     def get_prototype(self) -> PrototypeType:
-        """Returns the prototype object associated with this prototype enum value.
-
-        The prototype object returned by this method can be passed to the reading method of the TransportLayer
-        class to deserialize the received data object. This should be automatically done by the SerialCommunication
-        class that uses this enum class.
-
-        Returns:
-            The prototype object that is either a numpy scalar or shallow array type.
-        """
+        """Returns the prototype object associated with the prototype enumeration value."""
         return _PROTOTYPE_FACTORIES[self.value]()
 
+    # noinspection PyTypeHints
     @classmethod
     def get_prototype_for_code(cls, code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.
 
-        The prototype object returned by this method can be passed to the reading method of the TransportLayer
-        class to deserialize the received data object. This should be automatically done by the SerialCommunication
-        class that uses this enum.
-
         Args:
-            code: The prototype byte-code to retrieve the prototype for.
+            code: The prototype byte-code for which to retrieve the prototype object.
 
         Returns:
             The prototype object that is either a numpy scalar or shallow array type. If the input code is not one of
@@ -802,29 +783,25 @@ class RepeatedModuleCommand:
     module_type: np.uint8
     """The type (family) code of the module to which the command is addressed."""
     module_id: np.uint8
-    """The ID of the specific module within the broader module-family."""
+    """The ID of the specific module instance within the module's family."""
     command: np.uint8
-    """The code of the command to execute. Valid command codes are in the range between 1 and 255."""
-    return_code: np.uint8 = np.uint8(0)
-    """
-    When this attribute is set to a value other than 0, the microcontroller will send this code back to the PC upon 
-    successfully receiving and decoding the command.
-    """
-    noblock: np.bool_ = np.bool(True)
-    """
-    Determines whether the command runs in blocking or non-blocking mode. If set to False, the controller
-    will block in-place for any sensor- or time-waiting loops during command execution. Otherwise, the
-    controller will run other commands while waiting for the block to complete.
-    """
-    cycle_delay: np.uint32 = np.uint32(0)
+    """The code of the command to execute."""
+    return_code: np.uint8 = _ZERO_BYTE
+    """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
+    successfully receiving and decoding the message."""
+    noblock: np.bool_ = _TRUE
+    """Determines whether the controller should execute other commands while waiting for any sensor- or time-waiting 
+    loops in this command."""
+    cycle_delay: np.uint32 = _ZERO_LONG
     """The period of time, in microseconds, to delay before repeating (cycling) the command."""
+    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.REPEATED_MODULE_COMMAND.as_uint8())
-    """Stores the protocol code used by this type of messages."""
+    """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Packs the data into the numpy array to optimize future transmission speed."""
+        """Serializes the instance data."""
         packed = np.empty(10, dtype=np.uint8)
         packed[0:6] = [
             self.protocol_code,
@@ -838,39 +815,38 @@ class RepeatedModuleCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the RepeatedModuleCommand object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"RepeatedModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, command={self.command}, return_code={self.return_code}, "
             f"noblock={self.noblock}, cycle_delay={self.cycle_delay} us)."
         )
-        return message
 
 
 @dataclass(frozen=True)
 class OneOffModuleCommand:
-    """Instructs the addressed Module to run the specified command exactly once (non-recurrently)."""
+    """Instructs the addressed Module to run the specified command exactly once."""
 
     module_type: np.uint8
     """The type (family) code of the module to which the command is addressed."""
     module_id: np.uint8
-    """The ID of the specific module within the broader module-family."""
+    """The ID of the specific module instance within the module's family."""
     command: np.uint8
-    """The code of the command to execute. Valid command codes are in the range between 1 and 255."""
-    return_code: np.uint8 = np.uint8(0)
-    """When this attribute is set to a value other than 0, the microcontroller will send this code back
-    to the PC upon successfully receiving and decoding the command."""
-    noblock: np.bool_ = np.bool(True)
-    """Determines whether the command runs in blocking or non-blocking mode. If set to False, the controller
-    will block in-place for any sensor- or time-waiting loops during command execution. Otherwise, the
-    controller will run other commands while waiting for the block to complete."""
+    """The code of the command to execute."""
+    return_code: np.uint8 = _ZERO_BYTE
+    """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
+    successfully receiving and decoding the message."""
+    noblock: np.bool_ = _TRUE
+    """Determines whether the controller should execute other commands while waiting for any sensor- or time-waiting 
+    loops in this command."""
+    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.ONE_OFF_MODULE_COMMAND.as_uint8())
-    """Stores the protocol code used by this type of messages."""
+    """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Packs the data into the numpy array to optimize future transmission speed."""
+        """Serializes the instance data."""
         packed = np.empty(6, dtype=np.uint8)
         packed[0:6] = [
             self.protocol_code,
@@ -883,37 +859,38 @@ class OneOffModuleCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the OneOffModuleCommand object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"OneOffModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, command={self.command}, return_code={self.return_code}, "
             f"noblock={self.noblock})."
         )
-        return message
 
 
 @dataclass(frozen=True)
 class DequeueModuleCommand:
     """Instructs the addressed Module to clear (empty) its command queue.
 
-    Note, clearing the command queue does not terminate already executing commands, but it prevents recurrent commands
-    from running again.
+    Notes:
+        Clearing the command queue does not terminate already executing commands, but it prevents recurrent commands
+        from running again.
     """
 
     module_type: np.uint8
     """The type (family) code of the module to which the command is addressed."""
     module_id: np.uint8
-    """The ID of the specific module within the broader module-family."""
-    return_code: np.uint8 = np.uint8(0)
-    """When this attribute is set to a value other than 0, the microcontroller will send this code back
-    to the PC upon successfully receiving and decoding the command."""
+    """The ID of the specific module instance within the module's family."""
+    return_code: np.uint8 = _ZERO_BYTE
+    """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
+    successfully receiving and decoding the message."""
+    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.DEQUEUE_MODULE_COMMAND.as_uint8())
-    """Stores the protocol code used by this type of messages."""
+    """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Packs the data into the numpy array to optimize future transmission speed."""
+        """Serializes the instance data."""
         packed = np.empty(4, dtype=np.uint8)
         packed[0:4] = [
             self.protocol_code,
@@ -924,33 +901,34 @@ class DequeueModuleCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the RepeatedModuleCommand object."""
-        message = (
-            f"kDequeueModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
+        """Returns the string representation of the instance."""
+        return (
+            f"DequeueModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, return_code={self.return_code})."
         )
-        return message
 
 
 @dataclass(frozen=True)
 class KernelCommand:
     """Instructs the Kernel to run the specified command exactly once.
 
-    Currently, the Kernel only supports blocking one-off commands.
+    Notes:
+        Currently, the Kernel only supports blocking one-off commands.
     """
 
     command: np.uint8
-    """The code of the command to execute. Valid command codes are in the range between 1 and 255."""
-    return_code: np.uint8 = np.uint8(0)
-    """When this attribute is set to a value other than 0, the microcontroller will send this code back
-    to the PC upon successfully receiving and decoding the command."""
+    """The code of the command to execute."""
+    return_code: np.uint8 = _ZERO_BYTE
+    """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
+    successfully receiving and decoding the message."""
+    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.KERNEL_COMMAND.as_uint8())
-    """Stores the protocol code used by this type of messages."""
+    """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Packs the data into the numpy array to optimize future transmission speed."""
+        """Serializes the instance data."""
         packed = np.empty(3, dtype=np.uint8)
         packed[0:3] = [
             self.protocol_code,
@@ -960,37 +938,39 @@ class KernelCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the KernelCommand object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"KernelCommand(protocol_code={self.protocol_code}, command={self.command}, "
             f"return_code={self.return_code})."
         )
-        return message
 
 
 @dataclass(frozen=True)
 class ModuleParameters:
-    """Instructs the addressed Module to overwrite its custom parameters object with the included object data."""
+    """Instructs the addressed Module to overwrite its custom parameters object with the included object's data."""
 
     module_type: np.uint8
-    """The type (family) code of the module to which the parameters are addressed."""
+    """The type (family) code of the module to which the command is addressed."""
     module_id: np.uint8
-    """The ID of the specific module within the broader module-family."""
+    """The ID of the specific module instance within the module's family."""
+    # noinspection PyTypeHints
     parameter_data: tuple[np.signedinteger[Any] | np.unsignedinteger[Any] | np.floating[Any] | np.bool, ...]
-    """A tuple of parameter values to send. Each value will be serialized into bytes and sequentially
-    packed into the data object included with the message. Each parameter value has to use a scalar numpy type."""
-    return_code: np.uint8 = np.uint8(0)
-    """When this attribute is set to a value other than 0, the microcontroller will send this code back
-    to the PC upon successfully receiving and decoding the command."""
+    """A tuple of parameter values to send. The values inside the tuple must match the type and format of the values 
+    used in the addressed module's parameter structure on the microcontroller."""
+    return_code: np.uint8 = _ZERO_BYTE
+    """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
+    successfully receiving and decoding the message."""
+    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores serialized message data."""
+    # noinspection PyTypeHints
     parameters_size: NDArray[np.uint8] | None = field(init=False, default=None)
-    """Stores the total size of serialized parameters in bytes."""
+    """Stores the total size of the serialized parameters in bytes."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.MODULE_PARAMETERS.as_uint8())
-    """Stores the protocol code used by this type of messages."""
+    """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Packs the data into the numpy array to optimize future transmission speed."""
+        """Serializes the instance data."""
         # Converts scalar parameter values to byte arrays (serializes them)
         byte_parameters = [np.frombuffer(np.array([param]), dtype=np.uint8).copy() for param in self.parameter_data]
 
@@ -998,7 +978,7 @@ class ModuleParameters:
         parameters_size = np.uint8(sum(param.size for param in byte_parameters))
         object.__setattr__(self, "parameters_size", parameters_size)
 
-        # Pre-allocates the full array with exact size (header and parameters object)
+        # Pre-allocates the full array with the exact size (header and parameters object)
         packed_data = np.empty(4 + parameters_size, dtype=np.uint8)
 
         # Packs the header data into the precreated array
@@ -1020,13 +1000,12 @@ class ModuleParameters:
         object.__setattr__(self, "packed_data", packed_data)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ModuleParameters object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"ModuleParameters(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, return_code={self.return_code}, "
             f"parameter_object_size={self.parameters_size} bytes)."
         )
-        return message
 
 
 @dataclass(frozen=True)
@@ -1038,26 +1017,41 @@ class KernelParameters:
     """
 
     action_lock: np.bool
-    """Determines whether the controller allows non-ttl modules to change output pin states.
-    When True, all hardware-connected pins are blocked from changing states. This has no effect on sensor and
-    TTL pins."""
+    """Determines whether the controller allows modules capable of actuating physical hardware to change output pin 
+    states. When True, all pins capable of directly changing the physical state of any hardware are prevented from 
+    changing their states."""
     ttl_lock: np.bool
-    """Same as action_lock, but specifically controls output TTL (Transistor-to-Transistor Logic) pin
-    activity. This has no effect on sensor and non-ttl hardware-connected pins."""
-    return_code: np.uint8 = np.uint8(0)
-    """When this attribute is set to a value other than 0, the microcontroller will send this code back
-    to the PC upon successfully receiving and decoding the command."""
+    """Same as action_lock, but specifically controls output Transistor-to-Transistor Logic (TTL) pins."""
+    require_keepalive_pulses: np.bool
+    """Determines whether the microcontroller requires the PC to continuously send the 'keepalive' command messages to 
+    continue executing commands. When this field is True, the controller automatically resets itself if it does not 
+    receive the 'keepalive' messages over the 'keepalive_interval' of microseconds."""
+    keepalive_interval: np.uint32
+    """The maximum period of time, in microseconds, that can separate two keepalive messages before the 
+    microcontroller resets itself, if 'require_keepalive_pulses' is True."""
+    return_code: np.uint8 = _ZERO_BYTE
+    """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
+    successfully receiving and decoding the message."""
+    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores serialized message data."""
+    # noinspection PyTypeHints
     parameters_size: NDArray[np.uint8] | None = field(init=False, default=None)
-    """Stores the total size of serialized parameters in bytes."""
+    """Stores the total size of the serialized parameters in bytes."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.KERNEL_PARAMETERS.as_uint8())
-    """Stores the protocol code used by this type of messages."""
+    """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Packs the data into the numpy array to optimize future transmission speed."""
-        packed_data = np.empty(4, dtype=np.uint8)
-        packed_data[0:4] = [self.protocol_code, self.return_code, self.action_lock, self.ttl_lock]
+        """Serializes the instance data."""
+        packed_data = np.empty(9, dtype=np.uint8)
+        packed_data[0:5] = [
+            self.protocol_code,
+            self.return_code,
+            self.action_lock,
+            self.ttl_lock,
+            self.require_keepalive_pulses,
+        ]
+        packed_data[5:9] = np.frombuffer(self.keepalive_interval.tobytes(), dtype=np.uint8)
 
         object.__setattr__(
             self, "parameters_size", packed_data.nbytes - 2
@@ -1065,33 +1059,27 @@ class KernelParameters:
         object.__setattr__(self, "packed_data", packed_data)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the KernelParameters object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"KernelParameters(protocol_code={self.protocol_code}, return_code={self.return_code}, "
             f"parameter_object_size={self.parameters_size} bytes)."
         )
-        return message
 
 
 class ModuleData:
-    """Communicates the event state-code of the sender Module and includes an additional data object.
-
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its lifetime
-    to call update_message_data() method when necessary to parse valid incoming message data.
+    """Communicates the event state-code of the sender Module and a data object related to the event.
 
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
         message: Stores the serialized message payload.
         module_type: The type (family) code of the module that sent the message.
-        module_id: The ID of the specific module within the broader module-family.
-        command: The code of the command the module was executing when it sent the message.
+        module_id: The ID of the specific module instance within the broader module family.
+        command: The code of the command executed by the module that sent the message.
         event: The code of the event that prompted sending the message.
-        data_object: The data object decoded from the received message. Note, data messages only support the objects
-            whose prototypes are defined in the SerialPrototypes enumeration.
+        data_object: The data object decoded from the message.
         _transport_layer: Stores the reference to the TransportLayer class.
     """
 
@@ -1106,6 +1094,7 @@ class ModuleData:
         self.module_id: np.uint8 = np.uint8(0)
         self.command: np.uint8 = np.uint8(0)
         self.event: np.uint8 = np.uint8(0)
+        # noinspection PyTypeHints
         self.data_object: np.unsignedinteger[Any] | NDArray[Any] = np.uint8(0)
 
         # Saves transport_layer reference into an attribute.
@@ -1114,10 +1103,6 @@ class ModuleData:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever ModuleData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
 
         Raises:
             ValueError: If the prototype code transmitted with the message is not valid.
@@ -1150,32 +1135,26 @@ class ModuleData:
             self.data_object, _ = self._transport_layer.read_data(prototype, start_index=6)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ModuleData object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"ModuleData(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, command={self.command}, event={self.event}, "
             f"data_object={self.data_object})."
         )
-        return message
 
 
 class KernelData:
-    """Communicates the event state-code of the Kernel and includes an additional data object.
-
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its lifetime
-    to call update_message_data() method when necessary to parse valid incoming message data.
+    """Communicates the event state-code of the Kernel and a data object related to the event.
 
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
         message: Stores the serialized message payload.
-        command: The code of the command the Kernel was executing when it sent the message.
+        command: The code of the command executed by the Kernel that sent the message.
         event: The code of the event that prompted sending the message.
-        data_object: The data object decoded from the received message. Note, data messages only support the objects
-            whose prototypes are defined in the SerialPrototypes enumeration.
+        data_object: The data object decoded from the message.
         _transport_layer: Stores the reference to the TransportLayer class.
     """
 
@@ -1188,6 +1167,7 @@ class KernelData:
         self.message: NDArray[np.uint8] = np.empty(1, dtype=np.uint8)
         self.command: np.uint8 = np.uint8(0)
         self.event: np.uint8 = np.uint8(0)
+        # noinspection PyTypeHints
         self.data_object: np.unsignedinteger[Any] | NDArray[Any] = np.uint8(0)
 
         # Saves transport_layer reference into an attribute.
@@ -1196,10 +1176,6 @@ class KernelData:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
 
         Raises:
             ValueError: If the prototype code transmitted with the message is not valid.
@@ -1231,30 +1207,25 @@ class KernelData:
             self.data_object, _ = self._transport_layer.read_data(prototype, start_index=4)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the KernelData object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"KernelData(protocol_code={self.protocol_code}, command={self.command}, event={self.event}, "
             f"data_object={self.data_object})."
         )
-        return message
 
 
 class ModuleState:
     """Communicates the event state-code of the sender Module.
 
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its lifetime
-    to call update_message_data() method when necessary to parse valid incoming message data.
-
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
         message: Stores the serialized message payload.
         module_type: The type (family) code of the module that sent the message.
-        module_id: The ID of the specific module within the broader module-family.
-        command: The code of the command the module was executing when it sent the message.
+        module_id: The ID of the specific module instance within the broader module family.
+        command: The code of the command executed by the module that sent the message.
         event: The code of the event that prompted sending the message.
     """
 
@@ -1276,11 +1247,6 @@ class ModuleState:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever ModuleData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
-
         """
         # First, uses the payload size to read the entire message into the _message field. The whole message is stored
         # separately from parsed data to simplify data logging
@@ -1295,29 +1261,25 @@ class ModuleState:
         self.event = self.message[4]
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ModuleState object."""
-        message = (
+        """Returns the string representation of the instance."""
+        return (
             f"ModuleState(module_type={self.module_type}, module_id={self.module_id}, command={self.command}, "
             f"event={self.event})."
         )
-        return message
 
 
 class KernelState:
     """Communicates the event state-code of the Kernel.
 
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its lifetime
-    to call update_message_data() method when necessary to parse valid incoming message data.
-
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
         message: Stores the serialized message payload.
-        command: The code of the command the Kernel was executing when it sent the message.
+        command: The code of the command executed by the Kernel that sent the message.
         event: The code of the event that prompted sending the message.
+        _transport_layer: Stores the reference to the TransportLayer class.
     """
 
     def __init__(self, transport_layer: TransportLayer) -> None:
@@ -1336,10 +1298,6 @@ class KernelState:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
         """
         # First, uses the payload size to read the entire message into the _message field. The whole message is stored
         # separately from parsed data to simplify data logging
@@ -1352,26 +1310,21 @@ class KernelState:
         self.event = self.message[2]
 
     def __repr__(self) -> str:
-        """Returns a string representation of the KernelState object."""
-        message = f"KernelState(command={self.command}, event={self.event})."
-        return message
+        """Returns the string representation of the instance."""
+        return f"KernelState(command={self.command}, event={self.event})."
 
 
 class ReceptionCode:
-    """Returns the reception_code originally received from the PC to indicate that the message with that code was
-    received and parsed.
-
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its lifetime
-    to call update_message_data() method when necessary to parse valid incoming message data.
+    """Communicates the reception code originally received with the message sent by the PC to indicate that the message
+    was received and parsed by the microcontroller.
 
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
         message: Stores the serialized message payload.
-        reception_code: The reception code originally sent as part of the outgoing Command or Parameters messages.
+        reception_code: The reception code originally sent as part of the outgoing Command or Parameters message.
     """
 
     def __init__(self, transport_layer: TransportLayer) -> None:
@@ -1389,10 +1342,6 @@ class ReceptionCode:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
         """
         # First, uses the payload size to read the entire message into the _message field. The whole message is stored
         # separately from parsed data to simplify data logging
@@ -1404,23 +1353,15 @@ class ReceptionCode:
         self.reception_code = self.message[1]
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ReceptionCode object."""
-        message = f"ReceptionCode(reception_code={self.reception_code})."
-        return message
+        """Returns the string representation of the instance."""
+        return f"ReceptionCode(reception_code={self.reception_code})."
 
 
 class ControllerIdentification:
     """Identifies the connected microcontroller by communicating its unique byte id-code.
 
-    For the ID codes to be unique, they have to be manually assigned to the Kernel class of each concurrently
-    used microcontroller.
-
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its
-    lifetime to call update_message_data() method when necessary to parse valid incoming message data.
-
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
@@ -1445,10 +1386,6 @@ class ControllerIdentification:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
         """
         # First, uses the payload size to read the entire message into the _message field. The whole message is stored
         # separately from parsed data to simplify data logging
@@ -1460,24 +1397,15 @@ class ControllerIdentification:
         self.controller_id = self.message[1]
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ControllerIdentification object."""
-        message = f"ControllerIdentification(controller_id={self.controller_id})."
-        return message
+        """Returns the string representation of the instance."""
+        return f"ControllerIdentification(controller_id={self.controller_id})."
 
 
 class ModuleIdentification:
     """Identifies a hardware module instance by communicating its combined type + id 16-bit code.
 
-    It is expected that each hardware module instance will have a unique combination of type (family) code and instance
-    (ID) code. The user assigns both type and ID codes at their discretion when writing the main .cpp file for each
-    microcontroller.
-
-    This class initializes to nonsensical defaults and expects the SerialCommunication class that manages its
-    lifetime to call update_message_data() method when necessary to parse valid incoming message data.
-
     Args:
-        transport_layer: The reference to the TransportLayer class that is initialized and managed by the
-            SerialCommunication class. This reference is used to read and parse the message data.
+        transport_layer: The reference to the TransportLayer class used to communicate with the microcontroller.
 
     Attributes:
         protocol_code: Stores the protocol code used by this type of messages.
@@ -1501,10 +1429,6 @@ class ModuleIdentification:
     def update_message_data(self) -> None:
         """Reads and parses the data stored in the reception buffer of the TransportLayer class, overwriting class
         attributes.
-
-        This method should be called by the SerialCommunication class whenever KernelData message is received and needs
-        to be parsed (as indicated by the incoming message protocol). This method will then access the reception buffer
-        and attempt to parse the data.
         """
         # First, uses the payload size to read the entire message into the _message field. The whole message is stored
         # separately from parsed data to simplify data logging
@@ -1517,49 +1441,41 @@ class ModuleIdentification:
         self.module_type_id, _ = self._transport_layer.read_data(data_object=np.uint16(0), start_index=1)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ModuleIdentification object."""
-        message = f"ModuleIdentification(module_type_id={self.module_type_id})."
-        return message
+        """Returns the string representation of the instance."""
+        return f"ModuleIdentification(module_type_id={self.module_type_id})."
 
 
 class SerialCommunication:
-    """Wraps a TransportLayer class instance and exposes methods that allow communicating with a microcontroller
-    running ataraxis-micro-controller library using the USB or UART protocol.
-
-    This class is built on top of the TransportLayer, designed to provide the microcontroller communication
-    interface (API) for other Ataraxis libraries. This class is not designed to be instantiated directly and
-    should instead be used through the MicroControllerInterface class available through this library!
+    """Exposes methods that allow communicating with a microcontroller running the ataraxis-micro-controller library
+    using the USB or UART protocol.
 
     Notes:
-        This class is explicitly designed to use the same parameters as the Communication class used by the
-        microcontroller. Do not modify this class unless you know what you are doing.
+        This class is built on top of the low-level TransportLayer class.
+
+        This class is explicitly designed to use the same parameters as the Communication class used in the companion
+        microcontroller codebase.
 
         Due to the use of many non-pickleable classes, this class cannot be piped to a remote process and has to be
         initialized by the remote process directly.
 
-        This class is designed to integrate with DataLogger class available from the ataraxis_data_structures library.
-        The DataLogger is used to write all incoming and outgoing messages to disk as serialized message payloads.
+        This class is designed to integrate with the DataLogger class available from the ataraxis_data_structures
+        library. The DataLogger is used to write all incoming and outgoing messages to disk.
 
     Args:
-        source_id: The ID code to identify the source of the logged messages. This is used by the DataLogger to
-            distinguish between log sources (classes that sent data to be logged) and, therefore, has to be unique for
-            all Ataraxis classes that use DataLogger and are active at the same time.
+        source_id: The ID code to identify the source of the messages saved on disk by the DataLogger class instance.
         microcontroller_serial_buffer_size: The size, in bytes, of the buffer used by the target microcontroller's
             Serial buffer. Usually, this information is available from the microcontroller's manufacturer
             (UART / USB controller specification).
-        usb_port: The name of the USB port to use for communication to, e.g.: 'COM3' or '/dev/ttyUSB0'. This has to be
-            the port to which the target microcontroller is connected. Use the list_available_ports() function available
-            from this library to get the list of discoverable serial port names.
-        logger_queue: The multiprocessing Queue object exposed by the DataLogger class (via 'input_queue' property).
-            This queue is used to buffer and pipe data to be logged to the logger cores.
+        port: The name of the USB port to use for communication to, e.g.: 'COM3' or '/dev/ttyUSB0'.
+        logger_queue: The multiprocessing Queue object exposed by the DataLogger class via the 'input_queue' property.
         baudrate: The baudrate to use for the communication over the UART protocol. Should match the value used by
             the microcontrollers that only support UART protocol. This is ignored for microcontrollers that use the
             USB protocol.
-        test_mode: This parameter is only used during testing. When True, it initializes the underlying TransportLayer
-            class in the test configuration. Make sure this is set to False during production runtime.
+        test_mode: This parameter is only used during testing and should be disabled during production runtimes. It
+            allows simulating microcontroller communication without the need for a physical microcontroller.
 
     Attributes:
-        _transport_layer: The TransportLayer instance that handles the communication.
+        _transport_layer: Stores the TransportLayer instance that handles the communication.
         _module_data: Received ModuleData messages are unpacked into this structure.
         _kernel_data: Received KernelData messages are unpacked into this structure.
         _module_state: Received ModuleState messages are unpacked into this structure.
@@ -1567,7 +1483,7 @@ class SerialCommunication:
         _controller_identification: Received ControllerIdentification messages are unpacked into this structure.
         _module_identification: Received ModuleIdentification messages are unpacked into this structure.
         _reception_code: Received ReceptionCode messages are unpacked into this structure.
-        _timestamp_timer: The PrecisionTimer instance used to stamp incoming and outgoing data as it is logged.
+        _timestamp_timer: Stores the PrecisionTimer instance used to stamp incoming and outgoing data as it is logged.
         _source_id: Stores the unique integer-code that identifies the class instance in data logs.
         _logger_queue: Stores the multiprocessing Queue that buffers and pipes the data to the Logger process(es).
         _usb_port: Stores the ID of the USB port used for communication.
@@ -1577,8 +1493,8 @@ class SerialCommunication:
         self,
         source_id: np.uint8,
         microcontroller_serial_buffer_size: int,
-        usb_port: str,
-        logger_queue: MPQueue,  # type: ignore
+        port: str,
+        logger_queue: MPQueue,
         baudrate: int = 115200,
         *,
         test_mode: bool = False,
@@ -1587,7 +1503,7 @@ class SerialCommunication:
         # Communication class. This doubles up as an input argument check, as the class will raise an error if any
         # input argument is not valid.
         self._transport_layer = TransportLayer(
-            port=usb_port,
+            port=port,
             baudrate=baudrate,
             polynomial=np.uint16(0x1021),
             initial_crc_value=np.uint16(0xFFFF),
@@ -1616,17 +1532,17 @@ class SerialCommunication:
 
         # Constructs a timezone-aware stamp using UTC time. This creates a reference point for all later delta time
         # readouts. The time is returned as an array of bytes.
-        onset: NDArray[np.uint8] = get_timestamp(as_bytes=True)  # type: ignore
+        onset: NDArray[np.uint8] = get_timestamp(as_bytes=True)
         self._timestamp_timer.reset()  # Immediately resets the timer to make it as close as possible to the onset time
 
         # Logs the onset timestamp. All further timestamps will be treated as integer time deltas (in microseconds)
         # relative to the onset timestamp.
         package = LogPackage(self._source_id, np.uint64(0), onset)  # Packages the id, timestamp, and data.
         self._logger_queue.put(package)
-        self._usb_port = usb_port
+        self._usb_port = port
 
     def __repr__(self) -> str:
-        """Returns a string representation of the SerialCommunication object."""
+        """Returns the string representation of the instance."""
         return f"SerialCommunication(usb_port={self._usb_port}, source_id={self._source_id})."
 
     def send_message(
@@ -1640,17 +1556,16 @@ class SerialCommunication:
             | ModuleParameters
         ),
     ) -> None:
-        """Serializes the input command or parameters message and sends it to the connected microcontroller.
+        """Serializes the input command or parameter update message and sends it to the connected microcontroller.
 
-        This method relies on every valid outgoing message structure exposing a packed_data attribute, that contains
-        the serialized payload data to be sent. Functionally, this method is a wrapper around the
-        TransportLayer's write_data() and send_data() methods.
+        Notes:
+            This method is a wrapper around the TransportLayer's write_data() and send_data() methods.
 
         Args:
-            message: The command or parameters message to send to the microcontroller.
+            message: The command or parameter update message to send to the microcontroller.
         """
-        # Writes the pre-packaged data into the transmission buffer. Mypy flags packed_data as potentially None, but for
-        # valid messages packed_data cannot be None, so this is a false positive.
+        # Writes the pre-packaged data into the transmission buffer. Mypy flags packed_data as potentially None, but
+        # for valid messages packed_data cannot be None, so this is a false positive.
         self._transport_layer.write_data(data_object=message.packed_data)
 
         # Constructs and sends the data message to the connected system.
@@ -1658,7 +1573,7 @@ class SerialCommunication:
         stamp = self._timestamp_timer.elapsed  # Stamps transmission time.
 
         # Logs the transmitted message data
-        self._log_data(stamp, message.packed_data)  # type: ignore
+        self._log_data(stamp, message.packed_data)
 
     def receive_message(
         self,
@@ -1674,21 +1589,19 @@ class SerialCommunication:
     ):
         """Receives the incoming message from the connected microcontroller and parses into the appropriate structure.
 
-        This method uses the protocol code, assumed to be stored in the first variable of each received payload, to
-        determine how to parse the data. It then parses into a precreated message structure stored in class attributes.
-
         Notes:
             To optimize overall runtime speed, this class creates message structures for all supported messages at
             initialization and overwrites the appropriate message attribute with the data extracted from each received
             message payload. This method than returns the reference to the overwritten class attribute. Therefore,
             it is advised to copy or finish working with the structure returned by this method before receiving another
-            message. Otherwise, it is possible that the received message will be used to overwrite the data of the
+            message. Otherwise, it is possible for the newly received message to overwrite the data of the
             previously referenced structure, leading to the loss of unprocessed / unsaved data.
 
+            This method is a wrapper around the TransportLayer's receive_data() and read_data() methods.
+
         Returns:
-            A reference the parsed message structure instance stored in class attributes, or None, if no message was
-            received. Note, None return does not indicate an error, but rather indicates that the microcontroller did
-            not send any data.
+            A reference to the parsed message structure instance stored in class attributes, or None, if no message was
+            received.
 
         Raises:
             ValueError: If the received message uses an invalid (unrecognized) message protocol code.
@@ -1755,7 +1668,7 @@ class SerialCommunication:
         raise ValueError(message)  # pragma: no cover
 
     def _log_data(self, timestamp: int, data: NDArray[np.uint8]) -> None:
-        """Packages and sends the input data to teh DataLogger instance that writes it to disk.
+        """Packages and sends the input data to the DataLogger instance that writes it to disk.
 
         Args:
             timestamp: The value of the timestamp timer 'elapsed' property that communicates the number of elapsed
@@ -1770,36 +1683,29 @@ class SerialCommunication:
 
 
 class MQTTCommunication:
-    """Wraps an MQTT client and exposes methods for bidirectionally communicating with other clients connected to the
-    same MQTT broker.
+    """Exposes methods for bidirectionally communicating with other MQTT clients connected to the same MQTT broker.
 
-    This class leverages MQTT protocol on Python side and to establish bidirectional communication between the Python
-    process running this class and other MQTT clients. Primarily, the class is intended to be used together with
-    SerialCommunication class to transfer data between microcontrollers and the rest of the infrastructure used during
-    runtime. Usually, both communication classes will be managed by the same process (core) that handles the necessary
-    transformations to bridge MQTT and Serial communication protocols used by this library. This class is not designed
-    to be instantiated directly and should instead be used through the MicroControllerInterface class available through
-    this library!
+    This class leverages MQTT protocol on the Python side and to establish bidirectional communication between the
+    local Python process and other MQTT clients. Primarily, the class is intended to be used alongside the
+    SerialCommunication class to transfer the data between microcontrollers and the rest of the runtime infrastructure.
 
     Notes:
-        MQTT protocol requires a broker that facilitates communication, which this class does NOT provide. Make sure
-        your infrastructure includes a working MQTT broker before using this class. See https://mqtt.org/ for more
-        details.
+        The MQTT protocol requires a broker that facilitates communication, which has to be available to this class
+        at initialization. See https://mqtt.org/ for more details.
 
     Args:
-        ip: The IP address of the MQTT broker that facilitates the communication.
-        port: The socket port used by the MQTT broker that facilitates the communication.
-        monitored_topics: The list of MQTT topics which the class instance should subscribe to and monitor for incoming
-            messages.
+        ip: The IP address of the MQTT broker.
+        port: The socket port used by the MQTT broker.
+        monitored_topics: The list of MQTT topics to monitor for incoming messages.
 
     Attributes:
         _ip: Stores the IP address of the MQTT broker.
         _port: Stores the port used by the broker's TCP socket.
         _connected: Tracks whether the class instance is currently connected to the MQTT broker.
-        _monitored_topics: Stores the topics the class should monitor for incoming messages sent by other MQTT clients.
+        _monitored_topics: Stores the topics monitored by the instance for incoming messages.
         _output_queue: A multithreading queue used to buffer incoming messages received from other MQTT clients before
-            their data is requested via class methods.
-        _client: Stores the initialized mqtt client instance that carries out the communication.
+            their data is accessed via class methods.
+        _client: Stores the initialized MQTT client instance that carries out the communication.
     """
 
     def __init__(
@@ -1811,37 +1717,36 @@ class MQTTCommunication:
         self._ip: str = ip
         self._port: int = port
         self._connected = False
-        self._monitored_topics: tuple[str, ...] = monitored_topics if monitored_topics is not None else tuple()
+        self._monitored_topics: tuple[str, ...] = monitored_topics if monitored_topics is not None else ()
 
         # Initializes the queue to buffer incoming data. The queue may not be used if the class is not configured to
         # receive any data, but this is a fairly minor inefficiency.
-        self._output_queue: Queue = Queue()  # type: ignore
+        self._output_queue: Queue = Queue()
 
         # Initializes the MQTT client. Note, it needs to be connected before it can send and receive messages!
         # noinspection PyArgumentList,PyUnresolvedReferences
         self._client: mqtt.Client = mqtt.Client(
             protocol=mqtt.MQTTv5,
             transport="tcp",
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,  # type: ignore
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         )
 
     def __repr__(self) -> str:
-        """Returns a string representation of the MQTTCommunication object."""
+        """Returns the string representation of the instance."""
         return (
             f"MQTTCommunication(broker_ip={self._ip}, socket_port={self._port}, connected={self._connected}, "
             f"subscribed_topics={self._monitored_topics}"
         )
 
     def __del__(self) -> None:
-        """Ensures proper resource release when the class instance is garbage-collected."""
+        """Ensures that the instance disconnects from the broker before being garbage-collected."""
         self.disconnect()
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:  # pragma: no cover
-        """The callback function used to receive data from MQTT broker.
+        """The custom callback function used to receive data from the MQTT broker.
 
-        When passed to the client, this function will be called each time a new message is received. This function
-        will then record the message topic and payload and put them into the output_queue for the data to be consumed
-        by external processes.
+        This function records the topic and payload of each received message and puts them into the output_queue for
+        the data to be consumed by external callers.
 
         Args:
             _client: The MQTT client that received the message. Currently not used.
@@ -1852,30 +1757,26 @@ class MQTTCommunication:
         self._output_queue.put_nowait((message.topic, message.payload))
 
     def connect(self) -> None:
-        """Connects to the MQTT broker and subscribes to the requested input topics.
+        """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
-        This method has to be called to initialize communication, both for incoming and outgoing messages. Any message
-        sent to the MQTT broker from other clients before this method is called may not reach this class.
+        This method has to be called to after class initialization to start the communication process. Any message
+        sent to the MQTT broker from other clients before this method is called may not reach this instance.
 
         Notes:
-            If this class instance subscribes (listens) to any topics, it will start a perpetually active thread
-            with a listener callback to monitor incoming traffic.
+            If this instance is configured to subscribe (listen) to any topics, it starts a perpetually active thread
+            with a listener callback to monitor the incoming traffic.
 
         Raises:
-            RuntimeError: If the MQTT broker cannot be connected to using the provided IP and Port.
+            RuntimeError: If the MQTT broker cannot be connected using the provided IP and Port.
         """
         # Guards against re-connecting an already connected client.
         if self._connected:
             return
 
         # Connects to the broker
-        try:
-            result = self._client.connect(self._ip, self._port)
-            if result != mqtt.MQTT_ERR_SUCCESS:
-                # If the result is not the expected code, raises an exception
-                raise Exception  # pragma: no cover
-        # The exception can also be raised by connect() method raising an exception internally.
-        except Exception:
+        result = self._client.connect(self._ip, self._port)
+        if result != mqtt.MQTT_ERR_SUCCESS:
+            # If the result is not the expected code, raises an exception
             message = (
                 f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
                 f"broker at {self._ip}:{self._port}. This likely indicates that the broker is not running or that "
@@ -1901,13 +1802,9 @@ class MQTTCommunication:
     def send_data(self, topic: str, payload: str | bytes | bytearray | float | None = None) -> None:
         """Publishes the input payload to the specified MQTT topic.
 
-        This method should be used for sending data to MQTT via one of the input topics. This method does not verify
-        the validity of the input topic or payload data.
-
         Args:
             topic: The MQTT topic to publish the data to.
-            payload: The data to be published. When set to None, an empty message will be sent, which is often used as
-                a boolean trigger.
+            payload: The data to be published. Setting this to None sends an empty message.
 
         Raises:
             RuntimeError: If the instance is not connected to the MQTT broker.
@@ -1924,19 +1821,17 @@ class MQTTCommunication:
     @property
     def has_data(self) -> bool:
         """Returns True if the instance received messages from other MQTT clients and can output received data via the
-        get_dataq() method.
+        get_data() method.
         """
-        if not self._output_queue.empty():
-            return True
-        return False
+        return bool(not self._output_queue.empty())
 
     def get_data(self) -> tuple[str, bytes | bytearray] | None:
         """Extracts and returns the first available message stored inside the instance buffer queue.
 
         Returns:
             A two-element tuple. The first element is a string that communicates the MQTT topic of the received message.
-            The second element is the payload of the message, which is a bytes or bytearray object. If no buffered
-            objects are stored in the queue (queue is empty), returns None.
+            The second element is the payload of the message, which is a bytes or bytearray object. If the queue is
+            empty, returns None.
 
         Raises:
             RuntimeError: If the instance is not connected to the MQTT broker.

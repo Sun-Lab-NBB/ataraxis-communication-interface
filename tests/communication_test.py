@@ -250,7 +250,7 @@ def test_dequeue_module_command() -> None:
 
     # Test repr
     expected_repr = (
-        f"kDequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)."
+        f"DequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)."
     )
     assert repr(cmd) == expected_repr
 
