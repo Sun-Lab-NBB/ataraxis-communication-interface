@@ -1,5 +1,5 @@
-"""This library enables interfacing with custom hardware modules running on Arduino or Teensy microcontrollers through
-Python interface clients.
+"""This library allows interfacing with custom hardware modules running on Arduino or Teensy microcontrollers and
+exchanging data within and between PCs.
 
 See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface for more details.
 API documentation: https://ataraxis-communication-interface-api.netlify.app/

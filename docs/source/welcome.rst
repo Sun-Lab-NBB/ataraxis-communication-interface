@@ -1,11 +1,11 @@
 Welcome to ataraxis-communication-interface API documentation page
 ==================================================================
 
-ataraxis-communication-interface is a Python library that enables interfacing with custom hardware modules running on
-Arduino or Teensy microcontrollers through Python interface clients.
+ataraxis-communication-interface is a Python library that allows interfacing with custom hardware modules running on
+Arduino or Teensy microcontrollers and exchanging data within and between PCs.
 
 This library is part of the broader 'Ataraxis' science-automation project, developed in the
-`Sun Lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It has a companion library written in C++,
+`Sun lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It has a companion library written in C++,
 `ataraxis-micro-controller <https://github.com/Sun-Lab-NBB/ataraxis-micro-controller>`_, intended for
 Arduino and Teensy microcontrollers managing user-defined custom hardware modules.
 
@@ -15,4 +15,4 @@ GitHub repository for installation instructions and library usage examples:
 
 .. _`ataraxis-communication-interface GitHub repository`: https://github.com/Sun-Lab-NBB/ataraxis-communication-interface
 .. _`ataraxis-micro-controller`: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller
-.. _`Sun Lab`: https://neuroai.github.io/sunlab/
+.. _`Sun lab`: https://neuroai.github.io/sunlab/

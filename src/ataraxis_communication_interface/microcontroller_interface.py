@@ -3,7 +3,7 @@ Python PC clients to bidirectionally interface with custom hardware modules mana
 microcontroller.
 """
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 import sys
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
@@ -48,38 +48,30 @@ if TYPE_CHECKING:
 
 # Defines static constants used in this module
 _MAXIMUM_BYTE_VALUE = 255
+_ZERO_BYTE = np.uint8(0)
+_ZERO_BOOL = np.bool(False)
+_ZERO_LONG = np.uint32(0)
 
 
-class ModuleInterface:  # pragma: no cover
-    """The base class from which all custom ModuleInterface classes should inherit.
+class ModuleInterface(ABC):  # pragma: no cover
+    """The base class from which all custom module interface implementations should inherit.
 
-    Inheriting from this class grants all subclasses the static API that the MicroControllerInterface class uses to
-    interface with specific module interfaces. It is essential that all abstract methods defined in this class are
-    implemented for each custom module interface implementation that subclasses this class.
+    Inheriting from this class achieves two goals. First, it grants all subclasses the static API used by the
+    MicroControllerInterface class to interact with module interfaces during PC-microcontroller communication. Second,
+    it provides the user-facing API for sending commands and parameters to the managed hardware module.
 
     Notes:
-        Similar to the ataraxis-micro-controller (AXMC) library, the interface class has to be implemented separately
-        for each custom module. The (base) class exposes the static API used by the MicroControllerInterface class to
-        integrate each custom interface implementation with the general communication runtime cycle. To make this
-        integration possible, this class defines some abstract (pure virtual) methods that developers have to implement
-        for their interfaces. Follow the implementation guidelines in the docstrings of each abstract method and check
-        the examples for further guidelines on how to implement each abstract method.
+        The interface class has to be implemented separately for each custom hardware module.
 
-        When inheriting from this class, remember to call the parent's init method in the child class init method by
-        using 'super().__init__()'! If this is not done, the MicroControllerInterface class will likely not be able to
-        properly interact with your custom interface class!
+        When inheriting from this class, initialize the superclass by calling the 'super().__init__()' during the
+        subclass initialization.
 
-        All data received from or sent to the microcontroller is automatically logged as byte-serialized numpy arrays.
-        If you do not need any additional processing steps, such as sending or receiving data over MQTT, do not enable
-        any custom processing flags when initializing this superclass!
+        All data received from or sent to the microcontroller is automatically logged to disk. Only provide additional
+        data and error codes if the interface must carry out 'online' error detection and / or data processing.
 
-        In addition to interfacing with the module, the class also contains methods to parse logged module data. It is
-        expected that these modules will be used immediately after runtime to parse raw logged data and transform it
-        into the desired format for further processing and analysis.
-
-        Some attributes of this class are assigned by the managing MicroControllerInterface class at its
-        initialization. Therefore, to be fully functional, each ModuleInterface class has to be bound to an initialized
-        MicroControllerInterface instance.
+        Some attributes of this class are assigned by the managing MicroControllerInterface during its initialization.
+        Each ModuleInterface subclass has to be bound to an initialized MicroControllerInterface instance to be fully
+        functional.
 
     Args:
         module_type: The id-code that describes the broad type (family) of custom hardware modules managed by this
@@ -88,10 +80,6 @@ class ModuleInterface:  # pragma: no cover
         module_id: The code that identifies the specific custom hardware module instance managed by the interface class
             instance. This is used to identify unique modules in a broader module family, such as different rotary
             encoders if more than one is used at the same time. Valid byte-codes range from 1 to 255.
-        mqtt_communication: Determines whether this interface needs to communicate with MQTT. If your implementation of
-            the process_received_data() method requires sending data to MQTT via MQTTCommunication, set this flag to
-            True when implementing the class. Similarly, if your interface is configured to receive commands from
-            MQTT, set this flag to True.
         error_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate runtime
             errors. This set will be used during runtime to identify and raise error messages in response to the managed
             module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
@@ -102,33 +90,15 @@ class ModuleInterface:  # pragma: no cover
             disk during communication runtime. Messages with event-codes from this set would also be passed to the
             process_received_data() method for additional processing. If the class does not require additional
             processing for any incoming data, set to None.
-        mqtt_command_topics: A set of MQTT topics used by other MQTT clients to send commands to the module accessible
-            through this interface instance. If the interface does not receive commands from mqtt, set this to None. The
-            MicroControllerInterface set will use the set to initialize the MQTTCommunication class instance to
-            monitor the requested topics and will use the use parse_mqtt_command() method to convert MQTT messages to
-            module-addressed command structures.
 
     Attributes:
-        _module_type: Stores the type (family) of the interfaced module.
-        _module_id: Stores the specific module instance ID within the broader type (family).
-        _type_id: Stores the type and id combined into a single uint16 value. This value should be unique for all
-            possible type-id pairs and is used to ensure that each used module instance has a unique ID-type
-            combination.
-        _data_codes: Stores all event-codes that require additional processing.
-        _mqtt_command_topics: Stores MQTT topics to monitor for incoming commands.
-        _error_codes: Stores all expected error-codes as a set.
-        _mqtt_communication: Determines whether this interface needs to communicate with MQTT.
-        _log_directory: Stores the path to the directory where the MicroControllerInterface that manages this class logs
-            all received and transmitted messages related to this interface. The value for this attribute is assigned
-            automatically by the managing MicroControllerInterface class during its initialization.
-        _microcontroller_id: Stores the unique ID byte-code of the microcontroller that controls the hardware module
-            interfaced by this class instance. The value for this attribute is assigned automatically by the managing
-            MicroControllerInterface class during its initialization.
-        _input_queue: Stores the multiprocessing queue that enables sending the data to the microcontroller
-            via the managing MicroControllerInterface class. Putting messages into this queue is equivalent to
-            submitting them to the send_data() method exposed by the managing MicroControllerInterface class. The value
-            for this attribute is assigned automatically by the managing MicroControllerInterface class during its
-            initialization.
+        _module_type: Stores the id-code of the managed hardware module's type (family).
+        _module_id: Stores the specific instance ID of the managed hardware module.
+        _type_id: Stores the type and id codes combined into a single uint16 value.
+        _data_codes: Stores all message event-codes that require additional processing.
+        _error_codes: Stores all message error-codes that warrant runtime interruption.
+        _input_queue: Stores the multiprocessing queue used to send command and parameter messages to the
+            microcontroller communication process, so that they can be transmitted to the managed hardware module.
 
     Raises:
         TypeError: If input arguments are not of the expected type.
@@ -138,41 +108,29 @@ class ModuleInterface:  # pragma: no cover
         self,
         module_type: np.uint8,
         module_id: np.uint8,
-        mqtt_communication: bool,
         error_codes: set[np.uint8] | None = None,
         data_codes: set[np.uint8] | None = None,
-        mqtt_command_topics: set[str] | None = None,
     ) -> None:
         # Ensures that input byte-codes use valid value ranges
         if not isinstance(module_type, np.uint8) or not 1 <= module_type <= _MAXIMUM_BYTE_VALUE:
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_type' argument, but encountered "
                 f"{module_type} of type {type(module_type).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(module_id, np.uint8) or not 1 <= module_id <= _MAXIMUM_BYTE_VALUE:
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_id' argument, but encountered "
                 f"{module_id} of type {type(module_id).__name__}."
-            )
-            console.error(message=message, error=TypeError)
-        if (mqtt_command_topics is not None and not isinstance(mqtt_command_topics, set)) or (
-            isinstance(mqtt_command_topics, set) and not all(isinstance(topic, str) for topic in mqtt_command_topics)
-        ):
-            message = (
-                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
-                f"Expected a set of strings or None for 'mqtt_command_topics' argument, but encountered "
-                f"{mqtt_command_topics} of type {type(mqtt_command_topics).__name__} and / or at least one "
-                f"non-string item."
             )
             console.error(message=message, error=TypeError)
         if (error_codes is not None and not isinstance(error_codes, set)) or (
             isinstance(error_codes, set) and not all(isinstance(code, np.uint8) for code in error_codes)
         ):
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
                 f"Expected a set of numpy uint8 values or None for 'error_codes' argument, but encountered "
                 f"{error_codes} of type {type(error_codes).__name__} and / or at least one non-uint8 item."
             )
@@ -181,7 +139,7 @@ class ModuleInterface:  # pragma: no cover
             isinstance(data_codes, set) and not all(isinstance(code, np.uint8) for code in data_codes)
         ):
             message = (
-                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
                 f"Expected a set of numpy uint8 values or None for 'data_codes' argument, but encountered "
                 f"{data_codes} of type {type(data_codes).__name__} and / or at least one non-uint8 item."
             )
@@ -198,120 +156,168 @@ class ModuleInterface:  # pragma: no cover
             (self._module_type.astype(np.uint16) << 8) | self._module_id.astype(np.uint16)
         )
 
-        # Resolves code and topic sets for additional data input and output processing
-        self._mqtt_command_topics: set[str] = mqtt_command_topics if mqtt_command_topics is not None else set()
+        # Resolves message codes that require additional (custom) processing.
         self._data_codes: set[np.uint8] = data_codes if data_codes is not None else set()
 
         # Adds error-handling support. This allows raising errors when the module sends a message with an error code
         # from the microcontroller to the PC.
         self._error_codes: set[np.uint8] = error_codes if error_codes is not None else set()
 
-        # If the class is configured to receive commands from MQTT, ensures that MQTT communication is enabled
-        if len(self._mqtt_command_topics) > 0:
-            mqtt_communication = True
-        self._mqtt_communication: bool = mqtt_communication
-
         # These attributes are initialized to placeholder values. The actual values are assigned by the
         # MicroControllerInterface class that manages this ModuleInterface. During MicroControllerInterface
-        # initialization, it updates these attributes for all managed interfaces via referencing. Therefore, after
-        # initializing the main interface, all module interfaces will have these attributes configured properly.
-        self._log_directory: Path | None = None
-        # noinspection PyTypeHints
-        self._microcontroller_id: np.uint8 | None = None
+        # initialization, it updates these attributes for all managed interfaces via referencing.
         self._input_queue: MPQueue | None = None
 
     def __repr__(self) -> str:
-        """Returns the string representation of the ModuleInterface instance."""
+        """Returns the string representation of the instance."""
         return (
-            f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
-            f"combined_type_id={self._type_id}, mqtt_command_topics={self._mqtt_command_topics}, "
-            f"data_codes={sorted(self._data_codes)}, error_codes={sorted(self._error_codes)})"
+            f"{self.__name__}(module_type={self._module_type}, module_id={self._module_id}, "
+            f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
+            f"error_codes={sorted(self._error_codes)})"
         )
 
     @abstractmethod
     def initialize_remote_assets(self) -> None:
-        """Initializes custom interface assets to be used in the remote process.
+        """Initializes custom interface instance assets used in the remote microcontroller communication process.
 
-        This method is called at the beginning of the communication runtime by the managing MicroControllerInterface.
-        Use this method to create and initialize any assets that cannot be pickled (to be transferred into the remote
-        process).
-
-        Notes:
-            This method is called early in the preparation phase of the communication runtime, before any communication
-            is actually carried out. Use this method to initialize unpickable assets, such as PrecisionTimer instances
-            or connect to shared resources, such as SharedMemory buffers.
-
-            All assets managed or created by this method should be stored in the ModuleInterface instance's attributes.
-        """
-        message = (
-            "initialize_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
-        )
-        raise NotImplementedError(message)
-
-    @abstractmethod
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """Processes the incoming message and executes user-defined logic.
-
-        This method is called by the MicroControllerInterface when the ModuleInterface instance receives a message from
-        the microcontroller that uses an event code provided at class initialization as 'data_codes' argument. This
-        method should be used to implement custom processing logic for the incoming data.
+        This method is called during the initial setup sequence of the remote microcontroller communication process,
+        before the PC-microcontroller communication cycle.
 
         Notes:
-            Primarily, this method is intended to execute custom data transmission logic. For example, it can be used
-            to send a message over MQTT (via a custom implementation or our MQTTCommunication class), put the data into
-            a multithreading or multiprocessing queue, or use it to set a SharedMemory object. Use this method as a
-            gateway to inject custom data handling into the communication runtime.
-
-            Keep the logic inside this method as minimal as possible. All data from the microcontroller goes through the
-            same communication process, so it helps to minimize real time processing of the data, as it allows for
-            better communication throughput. Treat this method like you would treat a microcontroller hardware interrupt
-            function.
-
-            If your communication / processing assets cannot be pickled (to be transferred into the remote process
-            used for communication), implement their initialization via the initialize_remote_assets() method.
-
-            See the /examples folder included with the library for examples on how to implement this method.
-
-        Args:
-            message: The ModuleState or ModuleData object that stores the message received from the module instance
-                running on the microcontroller.
+            This method should be used to instantiate all interface assets that do not support pickling, such as
+            PrecisionTimer instances or SharedMemory buffers. All assets initialized by this method must be destroyed
+            by the terminate_remote_assets() method.
         """
-        message = "process_received_data() method must be implemented when subclassing the base ModuleInterface class."
-        raise NotImplementedError(message)
+        raise NotImplementedError
 
     @abstractmethod
     def terminate_remote_assets(self) -> None:
-        """Terminates custom interface assets to be used in the remote process.
+        """Terminates custom interface instance assets used in the remote microcontroller communication process.
 
-        This method is the opposite of the initialize_remote_assets() method. It is called at the end of the
-        communication process to ensure any resources claimed during custom asset initialization can be properly
-        released before the communication runtime ends.
+        This method is the opposite of the initialize_remote_assets() method. It is called as part of the remote
+        communication process shutdown routine to ensure any resources claimed by the interface are properly
+        released before the communication process terminates.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+        """Processes the input message and, if necessary, executes the user-defined logic.
+
+        This method is called during communication when the interface receives a message from the microcontroller that
+        uses an event code provided at class initialization as 'data_codes' argument.
 
         Notes:
-            This method will also be called if the communication process fails during runtime.
+            All incoming message data is automatically cached (saved) to disk via the DataLogger class instance. This
+            method is primarily intended to support 'online' data processing and communication. For example, it can be
+            used to extract the data included in the message and transmit it to other processes via a
+            SharedMemory or multiprocessing Queue instance.
+
+        Args:
+            message: The ModuleState or ModuleData instance that stores the message data received from the managed
+                hardware module instance.
         """
-        message = (
-            "terminate_remote_assets() method must be implemented when subclassing the base ModuleInterface class."
+        raise NotImplementedError
+
+    def send_command(self, command: np.uint8, noblock: np.bool, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
+        """Packages the input command data into the appropriate message structure and sends it to the managed hardware
+        module.
+
+        Args:
+            command: The id-code of the command to execute.
+            noblock: Determines whether the microcontroller managing the hardware module is allowed to concurrently
+                execute other commands while executing the requested command.
+            repetition_delay: The time, in microseconds, to wait before repeating the command. If set to 0, the command
+                is only executed once.
+        """
+        # Prevents interfacing with the microcontroller until the communication is initialized.
+        if self._input_queue is None:
+            message = (
+                f"Unable to submit the command {command} to module {self._module_id} of type {self._module_type}. The "
+                f"{self.__name__} interface instance has to be used to initialize a MicroControllerInterface instance "
+                f"before calling this method."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        # If repetition delay is 0, the command is non-cyclic (one-off)
+        if repetition_delay == _ZERO_LONG:
+            command_message = OneOffModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=_ZERO_BYTE,
+                command=command,
+                noblock=noblock,
+            )
+
+        # Otherwise, the command is cyclic
+        else:
+            command_message = RepeatedModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=_ZERO_BYTE,
+                command=command,
+                noblock=noblock,
+                cycle_delay=repetition_delay,
+            )
+
+        # Submits the packaged command for execution.
+        self._input_queue.put(command_message)
+
+    # noinspection PyTypeHints
+    def send_parameters(
+        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any]] | np.bool | np.floating[[Any], ...]
+    ) -> None:
+        """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
+        hardware module.
+
+        Args:
+            parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
+                module. Note, the parameters must appear in the same order and use the same data-types as the module's
+                parameter structure on the microcontroller.
+        """
+        # Prevents interfacing with the microcontroller until the communication is initialized.
+        if self._input_queue is None:
+            message = (
+                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
+                f"{self.__name__} interface instance has to be used to initialize a MicroControllerInterface instance "
+                f"before calling this method."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        # Packages the data into a parameters' message and submits it to the microcontroller.
+        self._input_queue.put(
+            ModuleParameters(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=_ZERO_BYTE,
+                parameter_data=parameter_data,
+            )
         )
-        raise NotImplementedError(message)
 
     def reset_command_queue(self) -> None:
-        """Instructs the microcontroller to clear all queued commands for the specific module instance managed by this
-        ModuleInterface.
-
-        If the ModuleInterface has not been used to initialize the MicroControllerInterface, raises a RuntimeError.
-        """
-        if self._input_queue is not None:
-            self._input_queue.put(
-                DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
+        """Instructs the microcontroller to clear the managed hardware module's command queue."""
+        # Prevents interfacing with the microcontroller until the communication is initialized.
+        if self._input_queue is None:
+            message = (
+                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
+                f"{self.__name__} interface instance has to be used to initialize a MicroControllerInterface instance "
+                f"before calling this method."
             )
-            return
+            console.error(message=message, error=RuntimeError)
 
-        message = (
-            f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-            f"ModuleInterface has to be used to initialize the MicroControllerInterface before calling this method."
+        # Packages the data into a dequeue command message and submits it for execution.
+        self._input_queue.put(
+            DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
         )
-        console.error(message=message, error=RuntimeError)
+
+    def set_input_queue(self, input_queue: MPQueue) -> None:
+        """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object.
+
+        This service method is automatically used during MicroControllerInterface initialization to finalize module
+        interface configuration. Calling this method is a prerequisite for allowing the module interface instance to
+        communicate with the managed hardware module.
+        """
+        self._input_queue = input_queue
 
     @property
     def module_type(self) -> np.uint8:
@@ -324,18 +330,18 @@ class ModuleInterface:  # pragma: no cover
         return self._module_id
 
     @property
-    def data_codes(self) -> set[np.uint8]:
-        """Returns the set of message event-codes that are processed during runtime ('online'), in addition to logging
-        them to disk.
-        """
-        return self._data_codes
-
-    @property
     def type_id(self) -> np.uint16:
         """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
         the id-code of the instance.
         """
         return self._type_id
+
+    @property
+    def data_codes(self) -> set[np.uint8]:
+        """Returns the set of message event-codes that are processed during runtime ('online'), in addition to logging
+        them to disk.
+        """
+        return self._data_codes
 
     @property
     def error_codes(self) -> set[np.uint8]:
