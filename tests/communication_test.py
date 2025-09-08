@@ -667,7 +667,7 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
     assert isinstance(comm._module_identification, ModuleIdentification)
     assert isinstance(comm._reception_code, ReceptionCode)
     assert comm._source_id == 1
-    assert comm._usb_port == "TEST"
+    assert comm._port == "TEST"
 
     # Test string representation
     expected_repr = "SerialCommunication(usb_port=TEST, source_id=1)."
