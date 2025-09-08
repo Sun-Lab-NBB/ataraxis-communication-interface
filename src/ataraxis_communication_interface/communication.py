@@ -1022,13 +1022,6 @@ class KernelParameters:
     changing their states."""
     ttl_lock: np.bool
     """Same as action_lock, but specifically controls output Transistor-to-Transistor Logic (TTL) pins."""
-    require_keepalive_pulses: np.bool
-    """Determines whether the microcontroller requires the PC to continuously send the 'keepalive' command messages to 
-    continue executing commands. When this field is True, the controller automatically resets itself if it does not 
-    receive the 'keepalive' messages over the 'keepalive_interval' of microseconds."""
-    keepalive_interval: np.uint32
-    """The maximum period of time, in microseconds, that can separate two keepalive messages before the 
-    microcontroller resets itself, if 'require_keepalive_pulses' is True."""
     return_code: np.uint8 = _ZERO_BYTE
     """When this field is set to a value other than 0, the microcontroller sends this code back to the PC upon 
     successfully receiving and decoding the message."""
@@ -1043,15 +1036,8 @@ class KernelParameters:
 
     def __post_init__(self) -> None:
         """Serializes the instance data."""
-        packed_data = np.empty(9, dtype=np.uint8)
-        packed_data[0:5] = [
-            self.protocol_code,
-            self.return_code,
-            self.action_lock,
-            self.ttl_lock,
-            self.require_keepalive_pulses,
-        ]
-        packed_data[5:9] = np.frombuffer(self.keepalive_interval.tobytes(), dtype=np.uint8)
+        packed_data = np.empty(4, dtype=np.uint8)
+        packed_data[0:4] = [self.protocol_code, self.return_code, self.action_lock, self.ttl_lock]
 
         object.__setattr__(
             self, "parameters_size", packed_data.nbytes - 2

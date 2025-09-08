@@ -265,7 +265,7 @@ class ModuleInterface(ABC):  # pragma: no cover
 
     # noinspection PyTypeHints
     def send_parameters(
-        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any]] | np.bool | np.floating[[Any], ...]
+        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any] | np.bool | np.floating[Any], ...]
     ) -> None:
         """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
         hardware module.
@@ -352,175 +352,129 @@ class ModuleInterface(ABC):  # pragma: no cover
 class MicroControllerInterface:  # pragma: no cover
     """Interfaces with an Arduino or Teensy microcontroller running the ataraxis-micro-controller library.
 
-    This class contains the logic that sets up a remote daemon process with SerialCommunication, MQTTCommunication,
-    and DataLogger bindings to facilitate bidirectional communication and data logging between the microcontroller and
-    concurrently active local (same PC) and remote (network) processes. Additionally, it exposes methods that send
-    runtime parameters and commands to the Kernel and Module classes running on the connected microcontroller.
+    This class creates and manages a remote daemon process that facilitates bidirectional communication and data
+    logging between the target microcontroller and the host-machine (PC). Additionally, it exposes methods that send
+    runtime parameters and commands to the Kernel instance that manages the runtime behavior of the microcontroller.
 
     Notes:
-        An instance of this class has to be instantiated for each microcontroller active at the same time. The
-        communication will not be started until the start() method of the class instance is called.
+        An instance of this class has to be instantiated for each microcontroller active at the same time.
 
-        This class uses SharedMemoryArray to control the runtime of the remote process, which makes it impossible to
-        have more than one instance of this class with the same controller_id at a time.
+        Initializing this class does not automatically start the communication. Call the start() method of an
+        initialized class instance to start the communication with the microcontroller.
+
+        This class uses SharedMemoryArray to manage the remote process. Due to the SharedMemoryArray implementation,
+        this ensures that only a single class instance with the same controlled_id can exist at the same time.
 
         Initializing MicroControllerInterface also completes the configuration of all ModuleInterface instances passed
-        to the class constructor. It is essential to initialize both the interfaces and the MicroControllerInterface
-        to have access to the full range of functionality provided by each ModuleInterface class.
+        to the class constructor.
 
     Args:
-        controller_id: The unique identifier code of the managed microcontroller. This information is hardcoded via the
-            ataraxis-micro-controller (AXMC) library running on the microcontroller, and this class ensures that the
-            code used by the connected microcontroller matches this argument when the connection is established.
-            Critically, this code is also used as the source_id for the data sent from this class to the DataLogger.
-            Therefore, it is important for this code to be unique across ALL concurrently active Ataraxis data
-            producers, such as: microcontrollers and video systems. Valid codes are values between 1 and 255.
-        microcontroller_serial_buffer_size: The size, in bytes, of the microcontroller's serial interface (UART or USB)
-            buffer. This size is used to calculate the maximum size of transmitted and received message payloads. This
-            information is usually available from the microcontroller's vendor.
-        microcontroller_usb_port: The serial USB port to which the microcontroller is connected. This information is
-            used to set up the bidirectional serial communication with the controller.
-        data_logger: An initialized DataLogger instance used to log the data produced by this Interface
-            instance. The DataLogger itself is NOT managed by this instance and will need to be activated separately.
-            This instance only extracts the necessary information to pipe the data to the logger.
-        module_interfaces: A tuple of classes that inherit from the ModuleInterface class that interface with specific
-            hardware module instances managed by the connected microcontroller.
-        baudrate: The baudrate at which the serial communication should be established. This argument is ignored
-            for microcontrollers that use the USB communication protocol, such as most Teensy boards. The correct
-            baudrate for microcontrollers using the UART communication protocol depends on the clock speed of the
-            microcontroller's CPU and the supported UART revision. Setting this to an unsupported value for
-            microcontrollers that use UART will result in communication errors.
-        mqtt_broker_ip: The ip address of the MQTT broker used for MQTT communication. Typically, this would be a
-            'virtual' ip-address of the locally running MQTT broker, but the class can carry out cross-machine
-            communication if necessary. MQTT communication will only be initialized if any of the input modules
-            requires this functionality.
-        mqtt_broker_port: The TCP port of the MQTT broker used for MQTT communication. This is used in conjunction
-            with the mqtt_broker_ip argument to connect to the MQTT broker.
+        controller_id: The unique identifier code of the managed microcontroller.
+        buffer_size: The microcontroller's serial interface (UART or USB) buffer size, in bytes. This information
+            is typically available from the microcontroller's vendor.
+        port: The serial USB port to which the microcontroller is connected.
+        data_logger: An initialized DataLogger instance to use for logging the communication data.
+        module_interfaces: A tuple of ModuleInterface-derived instances that interface with specific hardware modules
+            managed by the microcontroller.
+        baudrate: The baudrate to use during communication if the managed microcontroller uses the UART serial
+            interface. The value used here must match the value used by the microcontroller. This argument is ignored
+            if the managed microcontroller uses the USB serial interface.
+        keepalive_interval: The interval, in milliseconds, at which the interface sends keepalive messages to the
+            microcontroller.
 
     Raises:
         TypeError: If any of the input arguments are not of the expected type.
 
     Attributes:
-        _controller_id: Stores the id byte-code of the managed microcontroller.
-        _usb_port: Stores the USB port to which the controller is connected.
-        _baudrate: Stores the baudrate to use for serial communication with the controller.
-        _microcontroller_serial_buffer_size: Stores the microcontroller's serial buffer size, in bytes.
-        _mqtt_ip: Stores the IP address of the MQTT broker used for MQTT communication.
-        _mqtt_port: Stores the port number of the MQTT broker used for MQTT communication.
-        _modules: Stores the tuple of ModuleInterface instances managed by this MicroControllerInterface.
-        _logger_queue: Stores the Multiprocessing Queue object used to pipe log data to the DataLogger cores.
+        _started: Tracks whether the communication process has been started.
+        _controller_id: Stores the id-code of the managed microcontroller.
+        _usb_port: Stores the USB port used for microcontroller communication.
+        _baudrate: Stores the baudrate used during communication over the UART serial interface.
+        _buffer_size: Stores the microcontroller's serial buffer size, in bytes.
+        _modules: Stores ModuleInterface instances managed by this MicroControllerInterface.
+        _logger_queue: Stores the Multiprocessing Queue object used to pipe log data to the DataLogger core(s).
         _log_directory: Stores the output directory used by the DataLogger to save temporary log entries and the final
-            compressed .npz log archive.
-        _mp_manager: Stores the multiprocessing Manager used to initialize and manage input and output Queue
-            objects.
+            .npz log archive.
+        _mp_manager: Stores the multiprocessing Manager used to initialize and manage the Queue instance that pipes
+            command and parameter messages to the communication process.
         _input_queue: Stores the multiprocessing Queue used to pipe the data to be sent to the microcontroller to
             the remote communication process.
-        _terminator_array: Stores the SharedMemoryArray instance used to control the runtime of the remote
-            communication process.
-        _communication_process: Stores the (remote) Process instance that runs the communication cycle.
-        _watchdog_thread: A thread used to monitor the runtime status of the remote communication process.
-        _reset_command: Stores the pre-packaged Kernel-addressed command that resets the microcontroller's hardware
-            and software.
-        _disable_locks: Stores the pre-packaged Kernel parameters configuration that disables all pin locks. This
-            allows writing to all microcontroller pins.
-        _enable_locks: Stores the pre-packaged Kernel parameters configuration that enables all pin locks. This
-            prevents every Module managed by the Kernel from writing to any of the microcontroller pins.
-        _started: Tracks whether the communication process has been started. This is used to prevent calling
-            the start() and stop() methods multiple times.
-        _start_mqtt_client: Determines whether to connect to MQTT broker during the main runtime cycle.
+        _terminator_array: Stores the SharedMemoryArray instance used to control the remote communication process.
+        _communication_process: Stores the Process instance that runs the communication cycle.
+        _watchdog_thread: Stores the thread used to monitor the runtime status of the remote communication process.
+        _reset_command: Stores the pre-packaged Kernel-addressed command that resets the managed microcontroller to the
+            default state.
+        _keepalive_interval: Stores the keepalive interval in milliseconds.
     """
 
-    # Pre-packages Kernel commands into attributes. Since Kernel commands are known and fixed at compilation,
-    # they only need to be defined once.
+    # Pre-packages user-addressable Kernel commands into attributes. Since Kernel commands are known and fixed at class
+    # initialization, they only need to be defined once.
     _reset_command = KernelCommand(
         command=np.uint8(2),
-        return_code=np.uint8(0),
-    )
-
-    # Also pre-packages the two most used parameter configurations (all-locked and all-unlocked). The class can
-    # also send messages with partial locks (e.g.: TTl ON, Action OFF), but those are usually not used outside
-    # specific debugging and testing scenarios.
-    _disable_locks = KernelParameters(
-        action_lock=np.bool(False),
-        ttl_lock=np.bool(False),
-        return_code=np.uint8(0),
-    )
-    _enable_locks = KernelParameters(
-        action_lock=np.bool(True),
-        ttl_lock=np.bool(True),
         return_code=np.uint8(0),
     )
 
     def __init__(
         self,
         controller_id: np.uint8,
-        microcontroller_serial_buffer_size: int,
-        microcontroller_usb_port: str,
+        buffer_size: int,
+        port: str,
         data_logger: DataLogger,
         module_interfaces: tuple[ModuleInterface, ...],
         baudrate: int = 115200,
-        mqtt_broker_ip: str = "127.0.0.1",
-        mqtt_broker_port: int = 1883,
+        keepalive_interval: int = 1000,
     ) -> None:
-        # Initializes the started tracker. This is needed to avoid errors if initialization fails, and __del__ is called
-        # for a partially initialized class.
+        # Initializes the started tracker first to avoid issues during __del__ runtime if the class is not able to
+        # initialize.
         self._started: bool = False
 
         # Since the manager is now terminated via __del__ method, it makes sense to have it high in the initialization
-        # order:
+        # order.
         self._mp_manager: SyncManager = Manager()
 
-        # Ensures that input arguments have valid types. Only checks the arguments that are not passed to other classes,
-        # such as TransportLayer, which has its own argument validation.
+        # Ensures that input arguments have valid types. Only checks the arguments that are not passed to other classes.
         if not isinstance(controller_id, np.uint8) or not 1 <= controller_id <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the MicroControllerInterface instance. Expected an unsigned integer value "
-                f"between 1 and 255 for 'controller_id' argument, but encountered {controller_id} of type "
+                f"between 1 and 255 for the 'controller_id' argument, but encountered {controller_id} of type "
                 f"{type(controller_id).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(module_interfaces, tuple) or not module_interfaces:
             message = (
-                f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
+                f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
                 f"{controller_id}. Expected a non-empty tuple of ModuleInterface instances for 'modules' argument, but "
                 f"encountered {module_interfaces} of type {type(module_interfaces).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not all(isinstance(module, ModuleInterface) for module in module_interfaces):
             message = (
-                f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
+                f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
                 f"{controller_id}. All items in 'modules' tuple must be ModuleInterface instances."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(data_logger, DataLogger):
             message = (
-                f"Unable to initialize the MicroControllerInterface instance for microcontroller with id "
+                f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
                 f"{controller_id}. Expected an initialized DataLogger instance for 'data_logger' argument, but "
                 f"encountered {data_logger} of type {type(data_logger).__name__}."
             )
             console.error(message=message, error=TypeError)
 
-        # Controller (kernel) ID information. Follows the same code-name-description format as module type and instance
-        # values do.
+        # Controller (kernel) ID information.
         self._controller_id: np.uint8 = controller_id
 
         # SerialCommunication parameters. This is used to initialize the communication in the remote process.
-        self._usb_port: str = microcontroller_usb_port
+        self._usb_port: str = port
         self._baudrate: int = baudrate
-        self._microcontroller_serial_buffer_size: int = microcontroller_serial_buffer_size
-
-        # MQTTCommunication parameters. This is used to initialize the MQTT communication from the remote process
-        # if the managed modules need this functionality.
-        self._mqtt_ip: str = mqtt_broker_ip
-        self._mqtt_port: int = mqtt_broker_port
+        self._buffer_size: int = buffer_size
 
         # Managed modules and data logger queue. Modules will be pre-processes as part of this initialization runtime.
         # Logger queue is fed directly into the SerialCommunication, which automatically logs all incoming and outgoing
         # data to disk.
         self._modules: tuple[ModuleInterface, ...] = module_interfaces
 
-        # Extracts the queue from the logger instance. Other than for this step, this class does not use the instance
-        # for anything else.
+        # Extracts the queue and log path from the logger instance.
         self._logger_queue: MPQueue = data_logger.input_queue
         self._log_directory: Path = data_logger.output_directory
 
@@ -531,18 +485,19 @@ class MicroControllerInterface:  # pragma: no cover
         self._communication_process: None | Process = None
         self._watchdog_thread: None | Thread = None
 
-        # Verifies that all input ModuleInterface instances have a unique type+id combination and logs their runtime
-        # constants (for module instances that support this process).
-        processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
+        # Saves the keepalive interval to class attributes.
+        self._keepalive_interval = keepalive_interval
 
-        # Loops over all module instances and processes their data
-        self._start_mqtt_client = False
+        # Verifies that all input ModuleInterface instances have a unique type+id combination and configures each
+        # module to use the input queue instantiated above to submit command and parameter messages to the
+        # microcontroller.
+        processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
         for module in self._modules:
             # If the module's combined type + id code is already inside the processed_types_id set, this means another
             # module with the same exact type and ID combination has already been processed.
             if module.type_id in processed_type_ids:
                 message = (
-                    f"Unable to initialize the MicroControllerInterface instance for microcontroller with "
+                    f"Unable to initialize the MicroControllerInterface instance for the microcontroller with "
                     f"id {controller_id}. Encountered two ModuleInterface instances with the same type-code "
                     f"({module.module_type}) and id-code ({module.module_id}), which is not allowed. Make sure each "
                     f"type and id combination is only used by a single ModuleInterface class instance."
@@ -551,22 +506,17 @@ class MicroControllerInterface:  # pragma: no cover
 
             # Adds each processed type+id code to the tracker set
             processed_type_ids.add(module.type_id)
-            if module.mqtt_communication:
-                self._start_mqtt_client = True
 
             # Overwrites the attributes for each processed ModuleInterface with valid data. This effectively binds some
             # data and functionality realized through the main interface to each module interface. For example,
             # ModuleInterface classes can use their own _input_queue to
-            module._microcontroller_id = self._controller_id
-            module._log_directory = data_logger.output_directory
-            module._input_queue = self._input_queue
+            module.set_input_queue(input_queue=self._input_queue)
 
     def __repr__(self) -> str:
-        """Returns a string representation of the class instance."""
+        """Returns the string representation of the class instance."""
         return (
             f"MicroControllerInterface(controller_id={self._controller_id}, usb_port={self._usb_port}, "
-            f"baudrate={self._baudrate}, mqtt_ip={self._mqtt_ip}, mqtt_port={self._mqtt_port}, "
-            f"started={self._started})"
+            f"baudrate={self._baudrate}, started={self._started})"
         )
 
     def __del__(self) -> None:
@@ -578,13 +528,17 @@ class MicroControllerInterface:  # pragma: no cover
         """Resets the connected MicroController to use default hardware and software parameters."""
         self._input_queue.put(self._reset_command)
 
-    def lock_controller(self) -> None:
-        """Configures connected MicroController parameters to prevent all modules from writing to any output pin."""
-        self._input_queue.put(self._enable_locks)
+    def toggle_ttl_lock(self, toggle: bool) -> None:
+        pass
 
-    def unlock_controller(self) -> None:
-        """Configures connected MicroController parameters to allow all modules to write to any output pin."""
-        self._input_queue.put(self._disable_locks)
+    def toggle_actor_lock(self, toggle: bool) -> None:
+        pass
+
+    def require_keepalive_pulses(self, toggle: bool)  -> None:
+        pass
+
+    def set_keepalive_interval(self, interval: np.uint32) -> None:
+        pass
 
     def send_message(
         self,
@@ -697,7 +651,7 @@ class MicroControllerInterface:  # pragma: no cover
         Raises:
             RuntimeError: If the instance fails to initialize the communication runtime.
         """
-        # If the process has already been started, returns without doing anything.
+        # Prevents restarting an already running communication process
         if self._started:
             return
 
@@ -721,7 +675,7 @@ class MicroControllerInterface:  # pragma: no cover
                 self._terminator_array,
                 self._usb_port,
                 self._baudrate,
-                self._microcontroller_serial_buffer_size,
+                self._buffer_size,
                 self._mqtt_ip,
                 self._mqtt_port,
                 self._start_mqtt_client,
@@ -853,8 +807,8 @@ class MicroControllerInterface:  # pragma: no cover
             mqtt_port: The port number of the MQTT broker to use for communication with other MQTT processes.
             start_mqtt_client: Determines whether to start the MQTT client used by MQTTCommunication instance.
         """
-        # Constructs Kernel-addressed commands used to verify that the Interface and the microcontroller are
-        # configured appropriately
+        # Constructs Kernel-addressed commands used to verify that the interface and the microcontroller have matching
+        # configurations.
         identify_controller_command = KernelCommand(
             command=np.uint8(3),
             return_code=np.uint8(0),
@@ -862,6 +816,16 @@ class MicroControllerInterface:  # pragma: no cover
         identify_modules_command = KernelCommand(
             command=np.uint8(4),
             return_code=np.uint8(0),
+        )
+
+        # Constructs Kernel-addressed commands used to ensure that the PC and the microcontroller are 'alive' during
+        # runtime. During most runtimes, if the microcontroller does not receive the command for a long period of time,
+        # it resets itself to the default state. Similarly, if the PC does not receive the response message from the
+        # microcontroller over a long period of time, it raises a runtime error. This mechanism ensures that both
+        # devices are functioning correctly during runtime.
+        keepalive_command = KernelCommand(
+            command=np.uint8(5),
+            return_code=np.uint8(123),
         )
 
         # Initializes the timer used during initialization to abort stale initialization attempts.

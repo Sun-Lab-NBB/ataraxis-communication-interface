@@ -379,11 +379,11 @@ def test_module_data_init(transport_layer) -> None:
 
 
 def test_module_data_update(transport_layer) -> None:
-    """Verifies the functioning of ModuleData update_message_data() method."""
+    """Verifies the functioning of the ModuleData's update_message_data() method."""
     data = ModuleData(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
-    message = np.array([7, 1, 2, 3, 4, 2, 42], dtype=np.uint8)  # 2 is prototype for ONE_UNSIGNED_BYTE
+    # Sets up the mock message in the transport layer's reception buffer
+    message = np.array([7, 1, 2, 3, 4, 2, 42], dtype=np.uint8)  # 2 is the prototype for ONE_UNSIGNED_BYTE
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
 
@@ -398,7 +398,7 @@ def test_module_data_update(transport_layer) -> None:
 
 
 def test_module_data_update_error(transport_layer) -> None:
-    """Verifies the error handling of ModuleData update_message_data() method."""
+    """Verifies the error handling of the ModuleData's update_message_data() method."""
     data = ModuleData(transport_layer)
 
     # Setup mock message with invalid prototype (255)
@@ -429,11 +429,11 @@ def test_kernel_data_init(transport_layer) -> None:
 
 
 def test_kernel_data_update(transport_layer) -> None:
-    """Verifies the functioning of KernelData update_message_data() method."""
+    """Verifies the functioning of the KernelData's update_message_data() method."""
     data = KernelData(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
-    message = np.array([8, 1, 2, 2, 42], dtype=np.uint8)  # 2 is prototype for ONE_UNSIGNED_BYTE
+    # Sets up the mock message in the transport layer's reception buffer
+    message = np.array([8, 1, 2, 2, 42], dtype=np.uint8)  # 2 is the prototype for ONE_UNSIGNED_BYTE
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
 
@@ -478,10 +478,10 @@ def test_module_state_init(transport_layer) -> None:
 
 
 def test_module_state_update(transport_layer) -> None:
-    """Verifies the functioning of ModuleState update_message_data() method."""
+    """Verifies the functioning of the ModuleState's update_message_data() method."""
     state = ModuleState(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
+    # Sets up the mock message in the transport layer's reception buffer
     message = np.array([9, 1, 2, 3, 4], dtype=np.uint8)
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
@@ -507,10 +507,10 @@ def test_kernel_state_init(transport_layer) -> None:
 
 
 def test_kernel_state_update(transport_layer) -> None:
-    """Verifies the functioning of KernelState update_message_data() method."""
+    """Verifies the functioning of the KernelState's update_message_data() method."""
     state = KernelState(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
+    # Sets up the mock message in the transport layer's reception buffer
     message = np.array([10, 1, 2], dtype=np.uint8)
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
@@ -533,10 +533,10 @@ def test_reception_code_init(transport_layer) -> None:
 
 
 def test_reception_code_update(transport_layer) -> None:
-    """Verifies the functioning of ReceptionCode update_message_data() method."""
+    """Verifies the functioning of the ReceptionCode's update_message_data() method."""
     code = ReceptionCode(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
+    # Sets up the mock message in the transport layer's reception buffer
     message = np.array([11, 42], dtype=np.uint8)
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
@@ -558,10 +558,10 @@ def test_controller_identification_init(transport_layer) -> None:
 
 
 def test_controller_identification_update(transport_layer) -> None:
-    """Verifies the functioning of ControllerIdentification update_message_data() method."""
+    """Verifies the functioning of the ControllerIdentification's update_message_data() method."""
     ident = ControllerIdentification(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
+    # Sets up the mock message in the transport layer's reception buffer
     message = np.array([12, 42], dtype=np.uint8)
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
@@ -583,10 +583,10 @@ def test_module_identification_init(transport_layer) -> None:
 
 
 def test_module_identification_update(transport_layer) -> None:
-    """Verifies the functioning of ModuleIdentification update_message_data() method."""
+    """Verifies the functioning of the ModuleIdentification's update_message_data() method."""
     ident = ModuleIdentification(transport_layer)
 
-    # Setup mock message in transport layer's reception buffer
+    # Sets up the mock message in the transport layer's reception buffer
     message = np.array([13, 255, 255], dtype=np.uint8)
     transport_layer._reception_buffer[: len(message)] = message
     transport_layer._bytes_in_reception_buffer = len(message)
@@ -650,7 +650,7 @@ def test_message_repr(transport_layer, message_class, expected_repr, init_data, 
 def test_serial_communication_init_and_repr(logger_queue) -> None:
     """Verifies SerialCommunication initialization and string representation."""
     comm = SerialCommunication(
-        usb_port="TEST",
+        port="TEST",
         logger_queue=logger_queue,
         source_id=np.uint8(1),
         microcontroller_serial_buffer_size=300,
@@ -677,7 +677,7 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
 def test_serial_communication_send_message(logger_queue) -> None:
     """Verifies the functionality of the SerialCommunication send_message() method."""
     comm = SerialCommunication(
-        usb_port="TEST",
+        port="TEST",
         logger_queue=logger_queue,
         source_id=np.uint8(1),
         test_mode=True,
@@ -770,7 +770,7 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
     """Verifies the functioning of SerialCommunication receive_message(0 method."""
     # Initialize communication
     comm = SerialCommunication(
-        usb_port="TEST",
+        port="TEST",
         logger_queue=logger_queue,
         source_id=np.uint8(1),
         test_mode=True,
@@ -799,7 +799,7 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
 def test_serial_communication_receive_message_error(logger_queue) -> None:
     """Verifies the error handling of the SerialCommunication receive_data() method."""
     comm = SerialCommunication(
-        usb_port="TEST",
+        port="TEST",
         logger_queue=logger_queue,
         source_id=np.uint8(1),
         test_mode=True,
@@ -836,7 +836,7 @@ TEST_TOPICS = ("test/topic1", "test/topic2")
 def broker_available() -> bool:
     """Checks if MQTT broker is available at test IP/port.
 
-    This fixture should be used with pytest.mark.skipif to skip tests when broker is not available.
+    This fixture should be used with pytest.mark.skipif to skip tests when the broker is not available.
     """
     try:
         MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT)
@@ -863,12 +863,7 @@ def test_unity_communication_init_and_repr() -> None:
 
 def test_unity_communication_init_error() -> None:
     """Verifies the error handling behavior of MQTTCommunication __init__() method."""
-    message = (
-        f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
-        f"broker at {BROKER_IP}:{1880}. This likely indicates that the broker is not running or that "
-        f"there is an issue with the provided IP and socket port."
-    )
-    with pytest.raises(RuntimeError, match=error_format(message)):
+    with pytest.raises(ConnectionRefusedError):
         # Invalid port
         comm = MQTTCommunication(ip=BROKER_IP, port=1880, monitored_topics=TEST_TOPICS)
         comm.connect()
@@ -876,7 +871,7 @@ def test_unity_communication_init_error() -> None:
 
 @pytest.mark.xdist_group(name="group1")
 def test_unity_communication_send_receive() -> None:
-    """Verifies bidirectional communication between MQTTCommunication and simulated Unity client."""
+    """Verifies bidirectional communication between MQTTCommunication and a simulated Unity client."""
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
@@ -912,7 +907,7 @@ def test_unity_communication_send_receive() -> None:
         unity_comm.send_data(test_topic, data)
         time.sleep(0.1)  # Allows the message to be received
 
-        # Verifies Unity client received the message
+        # Verifies that the 'Unity' client has received the message
         assert len(received_messages) > 0
         topic, payload = received_messages[-1]
         assert topic == test_topic
