@@ -64,7 +64,7 @@ _PROCESS_INITIALIZATION_TIMEOUT = 30  # seconds
 # microcontroller or hardware module ID message during communication process initialization.
 _MICROCONTROLLER_ID_TIMEOUT = 2000  # milliseconds
 
-# The maximum number of microcontroller ID information requests the communication process can carry out during
+# The maximum count of microcontroller ID information requests the communication process can carry out during
 # initialization before raising an error.
 _MAXIMUM_COMMUNICATION_ATTEMPTS = 3
 
@@ -472,7 +472,7 @@ class MicroControllerInterface:  # pragma: no cover
         data_logger: DataLogger,
         module_interfaces: tuple[ModuleInterface, ...],
         baudrate: int = 115200,
-        keepalive_interval: int = 1000,
+        keepalive_interval: int = 0,
     ) -> None:
         # Initializes the started tracker first to avoid issues during __del__ runtime if the class is not able to
         # initialize.
@@ -652,7 +652,7 @@ class MicroControllerInterface:  # pragma: no cover
     def start(self) -> None:
         """Initializes the communication with the target microcontroller.
 
-        Until this method is called, the instance is not able to communicated with the microcontroller.
+        Until this method is called, the instance is not able to communicate with the microcontroller.
 
         Notes:
             After this method finishes its runtime, a watchdog thread is used to monitor the status of the process
@@ -989,7 +989,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 11. "
                 f"The microcontroller did not receive a keepalive Kernel-addressed command message (command code 5) "
-                f"over the period of {in_data.data_object[0]} milliseconds and performed an emergency reset sequence."
+                f"over the period of {in_data.data_object} milliseconds and performed an emergency reset sequence."
             )
             raise console.error(message=message, error=RuntimeError)
 
@@ -1131,7 +1131,7 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Keepalive messaging. Sends a keepalive message every keepalive_interval milliseconds to ensure that
                 # the microcontroller-PC communication is functional. Each time a keepalive message is sent, the
-                # keepalive response tracker and the timer is reset to ensure that the microcontroller responds before
+                # keepalive response tracker and the timer are reset to ensure that the microcontroller responds before
                 # the next keepalive cycle iteration.
                 if 0 < keepalive_interval <= timeout_timer.elapsed:
                     # If the microcontroller does not respond to the keepalive message, it is likely that the
@@ -1160,7 +1160,7 @@ class MicroControllerInterface:  # pragma: no cover
                     continue
 
                 # Currently, the only explicitly supported type of reception feedback messaging is the keepalive
-                # communication cycle. All keepalive messages use the response code 255.
+                # communication cycle. All keepalive messages use response code 255.
                 if isinstance(in_data, ReceptionCode) and in_data.reception_code == _KEEPALIVE_RETURN_CODE:
                     keepalive_response_received = True  # Indicates that the response code was received
 
@@ -1237,7 +1237,7 @@ class MicroControllerInterface:  # pragma: no cover
         instance during runtime.
 
         Returns:
-            The path to the .npz log archive, if it exists. None, if the archive does not exist.
+            The path to the .npz log archive if it exists. None, if the archive does not exist.
         """
         log_path = self._log_directory.joinpath(f"{self._controller_id}_log.npz")
         if not log_path.exists():

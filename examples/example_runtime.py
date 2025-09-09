@@ -20,13 +20,13 @@ from ataraxis_time import PrecisionTimer
 from example_interface import TestModuleInterface
 from ataraxis_data_structures import DataLogger
 
-from ataraxis_communication_interface import MicroControllerInterface
+from ataraxis_communication_interface import MicroControllerInterface, extract_logged_hardware_module_data
 
 # Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
 if __name__ == "__main__":
     # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
     # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
-    output_directory = Path("/home/cybermouse/Desktop/Demos/AXCI")  # Change this to your desired output directory
+    output_directory = Path("/home/cyberaxolotl/Desktop/Demos/AXCI")  # Change this to your desired output directory
     data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
 
     # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
@@ -49,11 +49,12 @@ if __name__ == "__main__":
     # issuing controller-wide commands and parameters.
     mc_interface = MicroControllerInterface(
         controller_id=controller_id,
+        buffer_size=microcontroller_serial_buffer_size,
+        port=port,
         data_logger=data_logger,
         module_interfaces=interfaces,
-        microcontroller_serial_buffer_size=microcontroller_serial_buffer_size,
-        microcontroller_usb_port=port,
         baudrate=baudrate,
+        keepalive_interval=500,
     )
 
     # Initialization can take some time. Notifies the user that the process is initializing.
@@ -74,7 +75,8 @@ if __name__ == "__main__":
     # microcontroller from changing the states of output pins, but does not interfere with reading input pins or
     # setting runtime parameters. Since this demonstration manipulates an output pin, we need to unlock the
     # microcontroller before proceeding further.
-    mc_interface.unlock_controller()
+    mc_interface.toggle_action_lock(toggle=False)
+    mc_interface.toggle_ttl_lock(toggle=False)
 
     # You have to manually generate and submit each module-addressed command (or parameter message) to the
     # microcontroller. This is in contrast to MicroControllerInterface commands, which are sent to the microcontroller
@@ -171,5 +173,7 @@ if __name__ == "__main__":
 
     # Log compression generates an '.npz' archive for each unique source. For MicroControllerInterface class, its
     # controlled_id is used as the source_id. In our case, the log is saved under '222_data_log.npz'.
-    log_data = interface_1.extract_logged_data()
+    log_data = extract_logged_hardware_module_data(
+        log_path=mc_interface.log_path,
+        module_type_id=((int(interface_1.module_type), int(interface_1.module_id)), ))
     print(f"Extracted event data: {log_data}")

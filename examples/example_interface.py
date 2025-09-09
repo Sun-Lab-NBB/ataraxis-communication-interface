@@ -37,7 +37,7 @@ from ataraxis_communication_interface import (
 # microcontroller.
 class TestModuleInterface(ModuleInterface):
     # As a minimum, the initialization method has to take in the module type and instance ID. Each user manually
-    # assigns these values in microcontroller's main .cpp file and python script, the values are not inherently
+    # assigns these values in the microcontroller's main .cpp file and python script, the values are not inherently
     # meaningful. The values used on the PC and microcontroller have to match.
     def __init__(self, module_type: np.uint8, module_id: np.uint8) -> None:
         # Defines the set of event-codes that the interface will interpret as runtime error events. If the module sends
@@ -54,16 +54,10 @@ class TestModuleInterface(ModuleInterface):
         # Messages with event-codes above 50 that are not in either of the sets above will be saved (logged) to disk,
         # but will not be processed further during runtime.
 
-        # The base interface class also allows direct communication between the module and other clients over the MQTT
-        # protocol. This example does not demonstrate this functionality, so sets to None to disable.
-        mqtt_command_topics = None
-
         # Initializes the parent class, using the sets defined above
         super().__init__(
             module_type=module_type,
             module_id=module_id,
-            mqtt_communication=False,  # Since this example does not work with other MQTT clients, sets to False.
-            mqtt_command_topics=mqtt_command_topics,
             data_codes=data_codes,
             error_codes=error_codes,
         )
@@ -94,7 +88,7 @@ class TestModuleInterface(ModuleInterface):
         # Event codes 52 and 53 are used to communicate the current state of the output pin managed by the example
         # module.
         if message.event == 52 or message.event == 53:
-            # These event-codes are transmitted by State messages, so there is no additional data to parse other than
+            # State messages transmit these event-codes, so there is no additional data to parse other than
             # event codes. The codes are transformed into boolean values and are exported via the multiprocessing queue.
             message_type = "pin state"
             state = True if message.event == 52 else False
