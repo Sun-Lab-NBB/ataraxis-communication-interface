@@ -1480,7 +1480,7 @@ class SerialCommunication:
         source_id: np.uint8,
         microcontroller_serial_buffer_size: int,
         port: str,
-        logger_queue: MPQueue,
+        logger_queue: MPQueue,  # type: ignore[type-arg]
         baudrate: int = 115200,
         *,
         test_mode: bool = False,
@@ -1518,7 +1518,7 @@ class SerialCommunication:
 
         # Constructs a timezone-aware stamp using UTC time. This creates a reference point for all later delta time
         # readouts. The time is returned as an array of bytes.
-        onset: NDArray[np.uint8] = get_timestamp(as_bytes=True)
+        onset: NDArray[np.uint8] = get_timestamp(as_bytes=True)  # type: ignore[assignment]
         self._timestamp_timer.reset()  # Immediately resets the timer to make it as close as possible to the onset time
 
         # Logs the onset timestamp. All further timestamps will be treated as integer time deltas (in microseconds)
@@ -1559,7 +1559,7 @@ class SerialCommunication:
         stamp = self._timestamp_timer.elapsed  # Stamps transmission time.
 
         # Logs the transmitted message data
-        self._log_data(stamp, message.packed_data)
+        self._log_data(stamp, message.packed_data)  # type: ignore[arg-type]
 
     def receive_message(
         self,
@@ -1707,14 +1707,14 @@ class MQTTCommunication:
 
         # Initializes the queue to buffer incoming data. The queue may not be used if the class is not configured to
         # receive any data, but this is a fairly minor inefficiency.
-        self._output_queue: Queue = Queue()
+        self._output_queue: Queue = Queue()  # type: ignore[type-arg]
 
         # Initializes the MQTT client. Note, it needs to be connected before it can send and receive messages!
         # noinspection PyArgumentList,PyUnresolvedReferences
-        self._client: mqtt.Client = mqtt.Client(
+        self._client: mqtt.Client = mqtt.Client(  # type: ignore[call-arg]
             protocol=mqtt.MQTTv5,
             transport="tcp",
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,  # type: ignore[attr-defined]
         )
 
     def __repr__(self) -> str:

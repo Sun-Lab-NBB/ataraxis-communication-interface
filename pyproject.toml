@@ -51,6 +51,7 @@ dependencies = [
     "ataraxis-data-structures>=3,<4",
     "ataraxis-transport-layer-pc>=2,<3",
     "paho-mqtt>=2,<3",
+    "tqdm>=4,<5",
 ]
 
 [project.urls]
@@ -72,6 +73,7 @@ dev = [
 
     # Types:
     "types-paho-mqtt>=1,<2",
+    "types-tqdm>=4,<5",
 ]
 
 # Future support for CLI interface(s) can be realizied through this section.

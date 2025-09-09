@@ -42,7 +42,7 @@ if __name__ == "__main__":
     controller_id = np.uint8(222)  # Matches the microcontroller ID defined in the microcontroller's main.cpp file
     microcontroller_serial_buffer_size = 8192
     baudrate = 115200
-    port = "/dev/ttyACM0"
+    port = "/dev/ttyACM2"
 
     # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
     # ataraxis-micro-controller library and abstracts most inner-workings of the library. This interface also allows
@@ -174,6 +174,6 @@ if __name__ == "__main__":
     # Log compression generates an '.npz' archive for each unique source. For MicroControllerInterface class, its
     # controlled_id is used as the source_id. In our case, the log is saved under '222_data_log.npz'.
     log_data = extract_logged_hardware_module_data(
-        log_path=mc_interface.log_path,
-        module_type_id=((int(interface_1.module_type), int(interface_1.module_id)), ))
+        log_path=mc_interface.log_path, module_type_id=((int(interface_1.module_type), int(interface_1.module_id)),)
+    )
     print(f"Extracted event data: {log_data}")

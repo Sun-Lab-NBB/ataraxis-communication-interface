@@ -5,21 +5,24 @@ microcontroller.
 
 from abc import ABC, abstractmethod
 import sys
+from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from functools import partial
 from threading import Thread
-from enum import IntEnum
 from dataclasses import dataclass
 from multiprocessing import (
     Queue as MPQueue,
     Manager,
     Process,
+    cpu_count,
 )
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
+from tqdm import tqdm
 import numpy as np
 from ataraxis_time import PrecisionTimer
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import LogLevel, console, chunk_iterable
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
 
 from .communication import (
@@ -46,7 +49,6 @@ if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
 
     from numpy.typing import NDArray
-    from numpy.lib.npyio import NpzFile
 
 # Defines static constants used in this module
 _MAXIMUM_BYTE_VALUE = 255
@@ -76,12 +78,20 @@ _PROCES_TERMINATION_TIMEOUT = 60  # seconds
 # communication process.
 _WATCHDOG_INTERVAL = 20  # milliseconds
 
+# The minimum number of logged messages that warrants parallel log processing.
+_PARALLEL_PROCESSING_THRESHOLD = 2000
 
-class _KernelErrorCodes(IntEnum):
-    """Stores Kernel message codes used to indicate runtime error messages.
+# The smallest non-service data payload size currently used by hardware module instances to communicate with the PC.
+_MINIMUM_MODULE_DATA_SIZE = 5
 
-    This enumeration is used during 'online' Kernel data processing.
+
+class _KernelStatusCodes(IntEnum):
+    """Stores Kernel message codes that require 'online' processing in addition to saving the message data to disk.
+
+    Notes:
+        Primarily, this includes the error message codes used during runtime.
     """
+
     MODULE_SETUP_ERROR = 2
     RECEPTION_ERROR = 3
     TRANSMISSION_ERROR = 4
@@ -92,12 +102,18 @@ class _KernelErrorCodes(IntEnum):
     KEEPALIVE_TIMEOUT = 11
 
 
-class _ModuleErrorCodes(IntEnum):
-    """Stores service Module message codes used to indicate runtime errors.
+class _ModuleStatusCodes(IntEnum):
+    """Stores Module message service codes that require 'online' processing in addition to saving the message data to
+    disk.
 
-    This enumeration is used during 'online' Module data processing.
+    Notes:
+        Primarily, this includes the error message codes used during runtime.
+
+        Service codes range from 0 to 50 and are reserved for system messages.
     """
+
     TRANSMISSION_ERROR = 1
+    COMMAND_COMPLETE = 2
     COMMAND_NOT_RECOGNIZED = 3
 
 
@@ -162,14 +178,14 @@ class ModuleInterface(ABC):  # pragma: no cover
         # Ensures that input byte-codes use valid value ranges
         if not isinstance(module_type, np.uint8) or not 1 <= module_type <= _MAXIMUM_BYTE_VALUE:
             message = (
-                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_type' argument, but encountered "
                 f"{module_type} of type {type(module_type).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(module_id, np.uint8) or not 1 <= module_id <= _MAXIMUM_BYTE_VALUE:
             message = (
-                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected an unsigned integer value between 1 and 255 for 'module_id' argument, but encountered "
                 f"{module_id} of type {type(module_id).__name__}."
             )
@@ -178,7 +194,7 @@ class ModuleInterface(ABC):  # pragma: no cover
             isinstance(error_codes, set) and not all(isinstance(code, np.uint8) for code in error_codes)
         ):
             message = (
-                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected a set of numpy uint8 values or None for 'error_codes' argument, but encountered "
                 f"{error_codes} of type {type(error_codes).__name__} and / or at least one non-uint8 item."
             )
@@ -187,7 +203,7 @@ class ModuleInterface(ABC):  # pragma: no cover
             isinstance(data_codes, set) and not all(isinstance(code, np.uint8) for code in data_codes)
         ):
             message = (
-                f"Unable to initialize the {self.__name__} instance for module {module_id} of type {module_type}. "
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
                 f"Expected a set of numpy uint8 values or None for 'data_codes' argument, but encountered "
                 f"{data_codes} of type {type(data_codes).__name__} and / or at least one non-uint8 item."
             )
@@ -214,13 +230,13 @@ class ModuleInterface(ABC):  # pragma: no cover
         # These attributes are initialized to placeholder values. The actual values are assigned by the
         # MicroControllerInterface class that manages this ModuleInterface. During MicroControllerInterface
         # initialization, it updates these attributes for all managed interfaces via referencing.
-        self._input_queue: MPQueue | None = None
+        self._input_queue: MPQueue | None = None  # type: ignore[type-arg]
 
     def __repr__(self) -> str:
         """Returns the string representation of the instance."""
         return (
-            f"{self.__name__}(module_type={self._module_type}, module_id={self._module_id}, "
-            f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
+            f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
+            f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "  # type: ignore[type-var]
             f"error_codes={sorted(self._error_codes)})"
         )
 
@@ -282,12 +298,14 @@ class ModuleInterface(ABC):  # pragma: no cover
         if self._input_queue is None:
             message = (
                 f"Unable to submit the command {command} to module {self._module_id} of type {self._module_type}. The "
-                f"{self.__name__} interface instance has to be used to initialize a MicroControllerInterface instance "
+                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
                 f"before calling this method."
             )
             console.error(message=message, error=RuntimeError)
+            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
         # If repetition delay is 0, the command is non-cyclic (one-off)
+        command_message: OneOffModuleCommand | RepeatedModuleCommand
         if repetition_delay == _ZERO_LONG:
             command_message = OneOffModuleCommand(
                 module_type=self._module_type,
@@ -327,10 +345,11 @@ class ModuleInterface(ABC):  # pragma: no cover
         if self._input_queue is None:
             message = (
                 f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"{self.__name__} interface instance has to be used to initialize a MicroControllerInterface instance "
+                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
                 f"before calling this method."
             )
             console.error(message=message, error=RuntimeError)
+            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
         # Packages the data into a parameters' message and submits it to the microcontroller.
         self._input_queue.put(
@@ -348,17 +367,18 @@ class ModuleInterface(ABC):  # pragma: no cover
         if self._input_queue is None:
             message = (
                 f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"{self.__name__} interface instance has to be used to initialize a MicroControllerInterface instance "
+                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
                 f"before calling this method."
             )
             console.error(message=message, error=RuntimeError)
+            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
         # Packages the data into a dequeue command message and submits it for execution.
         self._input_queue.put(
             DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
         )
 
-    def set_input_queue(self, input_queue: MPQueue) -> None:
+    def set_input_queue(self, input_queue: MPQueue) -> None:  # type: ignore[type-arg]
         """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object.
 
         This service method is automatically used during MicroControllerInterface initialization to finalize module
@@ -525,12 +545,12 @@ class MicroControllerInterface:  # pragma: no cover
         self._modules: tuple[ModuleInterface, ...] = module_interfaces
 
         # Extracts the queue and log path from the logger instance.
-        self._logger_queue: MPQueue = data_logger.input_queue
+        self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]
         self._log_directory: Path = data_logger.output_directory
 
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
         # data between the communication process and the main process managing the overall runtime.
-        self._input_queue: MPQueue = self._mp_manager.Queue()
+        self._input_queue: MPQueue = self._mp_manager.Queue()  # type: ignore[assignment, type-arg]
         self._terminator_array: None | SharedMemoryArray = None
         self._communication_process: None | Process = None
         self._watchdog_thread: None | Thread = None
@@ -590,7 +610,7 @@ class MicroControllerInterface:  # pragma: no cover
         """
         if toggle != self._ttl_lock:
             self._ttl_lock = toggle
-            message = KernelParameters(action_lock=self._action_lock, ttl_lock=self._ttl_lock)
+            message = KernelParameters(action_lock=np.bool(self._action_lock), ttl_lock=np.bool(self._ttl_lock))
             self._input_queue.put(message)
 
     def toggle_action_lock(self, toggle: bool) -> None:
@@ -601,7 +621,7 @@ class MicroControllerInterface:  # pragma: no cover
         """
         if toggle != self._action_lock:
             self._action_lock = toggle
-            message = KernelParameters(action_lock=self._action_lock, ttl_lock=self._ttl_lock)
+            message = KernelParameters(action_lock=np.bool(self._action_lock), ttl_lock=np.bool(self._ttl_lock))
             self._input_queue.put(message)
 
     def _watchdog(self) -> None:
@@ -617,7 +637,7 @@ class MicroControllerInterface:  # pragma: no cover
         timer = PrecisionTimer(precision="ms")
 
         # The watchdog function will run until the global shutdown command is issued.
-        while not self._terminator_array.read_data(index=0):
+        while not self._terminator_array.read_data(index=0):  # type: ignore[union-attr]
             # Checks process state every _WATCHDOG_INTERVAL ms. Releases the GIL while waiting.
             timer.delay_noblock(delay=_WATCHDOG_INTERVAL, allow_sleep=True)
 
@@ -827,7 +847,8 @@ class MicroControllerInterface:  # pragma: no cover
                 f"microcontroller did not respond to the identification request after "
                 f"{_MAXIMUM_COMMUNICATION_ATTEMPTS} attempts."
             )
-            console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=TypeError)
+            raise TypeError(message)  # Fallback to appease mypy, should not be reachable
 
         # If a response is received, but the ID contained in the received message does not match the expected ID,
         # raises an error
@@ -908,90 +929,92 @@ class MicroControllerInterface:  # pragma: no cover
         # Note, event codes are taken directly from the microcontroller's Kernel class.
 
         # kModuleSetupError
-        if in_data.event == 2:
+        if in_data.event == _KernelStatusCodes.MODULE_SETUP_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 2. The hardware module with type {in_data.data_object[0]} "
-                f"and id {in_data.data_object[1]} has failed its setup sequence. Firmware re-upload is "
-                f"required to restart the controller."
+                f"{in_data.command}. Error code: 2. The hardware module with type "
+                f"{in_data.data_object[0]} and id {in_data.data_object[1]} has failed its setup "  # type: ignore[index]
+                f"sequence. Firmware re-upload is required to restart the controller."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kReceptionError
-        if in_data.event == 3:
+        if in_data.event == _KernelStatusCodes.RECEPTION_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 3. "
                 f"The microcontroller was not able to receive (parse) the PC-sent data and had to "
-                f"abort the reception. Last Communication status code was {in_data.data_object[0]} and "
-                f"last TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates "
-                f"broader issues with the microcontroller-PC communication."
+                f"abort the reception. Last Communication status code was "
+                f"{in_data.data_object[0]} and last TransportLayer status code was "  # type: ignore[index]
+                f"{in_data.data_object[1]}. Overall, this indicates broader issues with the "
+                f"microcontroller-PC communication."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kTransmissionError
-        if in_data.event == 4:
+        if in_data.event == _KernelStatusCodes.TRANSMISSION_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 4. "
                 f"The microcontroller's Kernel class was not able to send data to the PC and had to abort "
-                f"the transmission. Last Communication status code was {in_data.data_object[0]} and "
-                f"last TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates "
+                f"the transmission. Last Communication status code was {in_data.data_object[0]} "  # type: ignore[index]
+                f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates "
                 f"broader issues with the microcontroller-PC communication."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kInvalidMessageProtocol
-        if in_data.event == 5:
+        if in_data.event == _KernelStatusCodes.INVALID_MESSAGE_PROTOCOL and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 5. "
                 f"The microcontroller received a message with an invalid (unsupported) message protocol "
-                f"code {in_data.data_object[0]}."
+                f"code {in_data.data_object[0]}."  # type: ignore[index]
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kModuleParametersError
-        if in_data.event == 8:
+        if in_data.event == _KernelStatusCodes.MODULE_PARAMETERS_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 8. "
                 f"The microcontroller was not able to apply new runtime parameters received from the PC to "
-                f"the target hardware module with type {in_data.data_object[0]} and id "
+                f"the target hardware module with type {in_data.data_object[0]} and id "  # type: ignore[index]
                 f"{in_data.data_object[1]}."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kCommandNotRecognized
-        if in_data.event == 9:
+        if in_data.event == _KernelStatusCodes.COMMAND_NOT_RECOGNIZED:
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 9. "
                 f"The microcontroller has received an invalid (unrecognized) command code "
                 f"{in_data.command}."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kTargetModuleNotFound
-        if in_data.event == 10:
+        if in_data.event == _KernelStatusCodes.TARGET_MODULE_NOT_FOUND and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 10. "
                 f"The microcontroller was not able to find the module addressed by the incoming command or "
-                f"parameters message. The target hardware module with type {in_data.data_object[0]} and id "
-                f"{in_data.data_object[1]} does not exist for that microcontroller."
+                f"parameters message. The target hardware module with type "
+                f"{in_data.data_object[0]} and id {in_data.data_object[1]} "  # type: ignore[index]
+                f"does not exist for that microcontroller."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kKeepaliveTimeout
-        if in_data.event == 11:
+        if in_data.event == _KernelStatusCodes.KEEPALIVE_TIMEOUT and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: 11. "
                 f"The microcontroller did not receive a keepalive Kernel-addressed command message (command code 5) "
                 f"over the period of {in_data.data_object} milliseconds and performed an emergency reset sequence."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
     @staticmethod
     def _parse_service_module_data(controller_id: np.uint8, in_data: ModuleState | ModuleData) -> None:
@@ -1009,33 +1032,33 @@ class MicroControllerInterface:  # pragma: no cover
         # Note, event codes are taken directly from the microcontroller's (base) Module class.
 
         # kTransmissionError
-        if in_data.event == 1:
+        if in_data.event == _ModuleStatusCodes.TRANSMISSION_ERROR and isinstance(in_data, ModuleData):
             message = (
                 f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {in_data.command}. "
                 f"Error code: 1. The module was not able to send data to the PC and had to abort the "
-                f"transmission. Last Communication status code was {in_data.data_object[0]} and last "
-                f"TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates broader "
-                f"issues with the microcontroller-PC communication."
+                f"transmission. Last Communication status code was {in_data.data_object[0]} "  # type: ignore[index]
+                f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, "
+                f"this indicates broader issues with the microcontroller-PC communication."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
         # kCommandNotRecognized
-        if in_data.event == 3:
+        if in_data.event == _ModuleStatusCodes.COMMAND_NOT_RECOGNIZED and isinstance(in_data, ModuleData):
             message = (
                 f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {in_data.command}. "
                 f"Error code: 3. The module has received an invalid (unrecognized) command code "
                 f"{in_data.command}."
             )
-            raise console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=RuntimeError)
 
     @staticmethod
     def _runtime_cycle(
         controller_id: np.uint8,
         module_interfaces: tuple[ModuleInterface, ...],
-        input_queue: MPQueue,
-        logger_queue: MPQueue,
+        input_queue: MPQueue,  # type: ignore[type-arg]
+        logger_queue: MPQueue,  # type: ignore[type-arg]
         terminator_array: SharedMemoryArray,
         port: str,
         baudrate: int,
@@ -1221,7 +1244,7 @@ class MicroControllerInterface:  # pragma: no cover
         except Exception as e:
             sys.stderr.write(str(e))
             sys.stderr.flush()
-            raise e
+            raise
 
         # Ensures that local assets are always properly terminated
         finally:
@@ -1272,48 +1295,122 @@ class ExtractedModuleData:
     the PC."""
 
 
+def _process_module_message_batch(
+    log_path: Path,
+    file_names: list[str],
+    onset_us: np.uint64,
+    module_type_id: tuple[tuple[int, int], ...],
+) -> dict[tuple[int, int], list[dict[str, Any]]]:
+    """Processes the target batch of MicroControllerInterface-generated messages stored in the .npz log file.
+
+    This worker function is used by the extract_logged_hardware_module_data() function to process multiple message
+    batches in parallel to speed up the hardware module data extraction.
+
+    Args:
+        log_path: The path to the processed log file.
+        file_names: The names of the individual message .npy files stored in the target archive.
+        onset_us: The onset of the data acquisition, in microseconds elapsed since UTC epoch onset.
+        module_type_id: The module type and ID codes to extract.
+
+    Returns:
+        A dictionary mapping module (type, id) tuples to lists of extracted data dictionaries. Each data dictionary
+        contains 'event', 'timestamp', 'data', and 'command' keys.
+    """
+    # Precreates the dictionary to store the extracted data for this batch
+    batch_data: dict[tuple[int, int], list[dict[str, Any]]] = {module: [] for module in module_type_id}
+
+    # Opens the processed log archive using memory mapping. If module data processing is performed in parallel, all
+    # processes interact with the archive concurrently.
+    with np.load(log_path, allow_pickle=False, fix_imports=False, mmap_mode="r") as archive:
+        # Loops over the batch of messages and extracts module data
+        for item in file_names:
+            message = archive[item]
+
+            # Extracts the payload from each logged message.
+            payload = message[9:]
+
+            # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
+            # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
+            # '2'. In the future, if enough interest is shown, this list may be extended to also include outgoing
+            # messages. For now, these messages need to be parsed manually by users that need this data.
+            if (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA) or (
+                payload[4] != _ModuleStatusCodes.COMMAND_COMPLETE and payload[4] <= _SERVICE_CODE_THRESHOLD
+            ):
+                continue
+
+            # Checks if this message comes from one of the processed modules
+            current_module = None
+            for module in module_type_id:
+                if payload[1] == module[0] and payload[2] == module[1]:
+                    current_module = module
+                    break
+
+            if current_module is None:
+                continue
+
+            # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
+            # message, in microseconds since epoch onset.
+            elapsed_microseconds = np.uint64(message[1:9].view(np.uint64).item())
+            timestamp = onset_us + elapsed_microseconds
+
+            # Extracts command, event, and, if supported, data object from the message payload.
+            command_code = np.uint8(payload[3])
+            event = np.uint8(payload[4])
+
+            # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
+            # in size. Extracts and formats the data object, included with the logged payload.
+            data: Any = None
+            if len(payload) > _MINIMUM_MODULE_DATA_SIZE:
+                # noinspection PyTypeChecker
+                prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
+
+                # Depending on the prototype, reads the data object as an array or scalar
+                if isinstance(prototype, np.ndarray):
+                    data = payload[6:].view(prototype.dtype)[:].copy()
+                elif prototype is not None:
+                    data = payload[6:].view(prototype.dtype)[0].copy()
+                else:
+                    data = None  # Marks as an error case
+
+            # Adds the extracted data to the batch results
+            batch_data[current_module].append(
+                {"event": event, "timestamp": timestamp, "data": data, "command": command_code}
+            )
+
+    return batch_data
+
+
 def extract_logged_hardware_module_data(
-    log_path: Path, module_type_id: tuple[tuple[int, int], ...]
+    log_path: Path,
+    module_type_id: tuple[tuple[int, int], ...],
+    n_workers: int = -1,
 ) -> tuple[ExtractedModuleData, ...]:
     """Extracts the data for the requested hardware module instances running on an Ataraxis Micro Controller (AMC)
     device from the .npz log file generated by a DataLogger instance during runtime.
 
-    This function reads the '.npz' archive generated by the DataLogger 'compress_logs' method for requested
-    ModuleInterface and MicroControllerInterface combinations and extracts all custom event-codes and data objects
-    transmitted by the target hardware module instances from the microcontroller to the PC. At this time, the extraction
-    specifically looks for the data sent by the hardware modules to the PC but, in the future, it may be updated to also
-    parse the data sent by the PC to the hardware modules.
-
-    This function is process- and thread-safe and can be pickled. It is specifically designed to be executed in-parallel
-    for many concurrently used ModuleInterface and MicroControllerInterface instances, but it can also be used to work
-    with a single hardware module's data. If you have an initialized ModuleInterface instance, it is recommended to use
-    its 'extract_logged_data' method instead, as it automatically resolves the log_path argument and the module type
-    and ID codes.
+    This function reads the '.npz' archive generated by the DataLogger's 'compress_logs' method and extracts all
+    custom event-codes and data objects transmitted by the requested hardware module instances from the microcontroller
+    to the PC.
 
     Notes:
-        The extracted data will NOT contain library-reserved events and messages. This includes all Kernel messages
+        At this time, the function exclusively works with the data sent by the microcontroller to the PC.
+
+        The extracted data does not contain library-reserved events and messages. This includes all Kernel messages
         and module messages with event codes 0 through 50. The only exceptions to this rule are messages with event
-        code 2, which report completion of commands. These messages are parsed in addition to custom messages
-        sent by each hardware module.
+        code 2, which report command completion. These messages are parsed in addition to custom messages sent by each
+        hardware module.
 
-        This function should be used as a convenience abstraction for the inner workings of the DataLogger class.
-        For each ModuleInterface, it will decode and return the logged runtime data sent to the PC by the specific
-        hardware module instance controlled by the interface. You need to manually implement further data
-        processing steps as necessary for your specific use case and module implementation.
-
-        The function assumes that it is given an .npz archive generated for a MicroControllerInterface instance and WILL
-        behave unexpectedly if it is instead given an archive generated by another Ataraxis class, such as
-        VideoSystem. Also, it expects that the archive contains the data for the target hardware module, identified by
-        its type and instance ID codes. The function may behave unexpectedly if the archive does not contain the data
-        for the module.
+    Notes:
+        If the target .npz archive contains fewer than 2000 messages, the processing is carried out sequentially
+        regardless of the specified worker-count.
 
     Args:
         log_path: The path to the .npz archive file that stores the logged data generated by the
-            MicroControllerInterface and all NModuleInterfaces managed by that microcontroller interface instance during
-            runtime.
+            MicroControllerInterface instance during runtime.
         module_type_id: A tuple of tuples, where each inner tuple stores the type and ID codes of a specific hardware
-            module, whose data should be extracted from the archive (if it is present in the archive). This allows
-            extracting data for multiple modules at the same time, optimizing the typically rate-limiting I/O operation.
+            module, whose data should be extracted from the archive, e.g.: ((3, 1)).
+        n_workers: The number of parallel worker processes (CPU cores) to use for processing. Setting this to a value
+            below 1 uses all available CPU cores. Setting this to a value of 1 conducts the processing sequentially.
 
     Returns:
         A tuple of ExtractedModuleData instances. Each instance stores all data extracted from the log archive for one
@@ -1323,109 +1420,139 @@ def extract_logged_hardware_module_data(
         ValueError: If the input path is not valid or does not point to an existing .npz archive. If the function is
             unable to properly extract a logged data object for the target hardware module.
     """
-    # If a compressed log archive does not exist, raises an error
+    # If the specified compressed log archive does not exist, raises an error
     if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
         error_message = (
-            f"Unable to extract module data from the log file {log_path}. This likely indicates that the logs have not "
-            f"been compressed via DataLogger's compress_logs() method and are not available for processing. Call log "
-            f"compression method before calling this method. Valid 'log_path' arguments must point to an .npz archive "
-            f"file."
+            f"Unable to extract hardware module data from the log file {log_path}, as it does not exist or does "
+            f"not point to a valid .npz archive."
         )
         console.error(message=error_message, error=ValueError)
 
-    # Loads the archive into RAM
-    archive: NpzFile = np.load(file=log_path)
+    # Memory-maps the processed archive to conserve RAM. The first processing pass is designed to find the onset
+    # timestamp value and count the total number of messages.
+    with np.load(log_path, allow_pickle=False, fix_imports=False, mmap_mode="r") as archive:
+        # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
+        # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
+        # microseconds relative to the onset timestamp.
+        timestamp_offset = 0
+        onset_us = np.uint64(0)
+        message_list = list(archive.files)
 
-    # Precreates the dictionary to store the extracted data.
-    module_event_data: dict[tuple[int, int], dict[Any, Any]] = {module: {} for module in module_type_id}
+        for number, item in enumerate(message_list):
+            message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
 
-    # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
-    # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
-    # microseconds relative to the onset timestamp.
-    timestamp_offset = 0
-    onset_us = np.uint64(0)
-    timestamp: np.uint64
-    for number, item in enumerate(archive.files):
-        message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
+            # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
+            # message starting at index 1. If the timestamp value is 0, the message contains the onset timestamp value
+            # stored as an 8-byte payload. Index 0 stores the source ID (uint8 value)
+            timestamp_value = message[1:9].view(np.uint64).item()
+            if timestamp_value == 0:
+                # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
+                onset_us = np.uint64(message[9:].view(np.int64).item())
 
-        # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
-        # message starting at index 1. If the timestamp value is 0, the message contains the onset timestamp value
-        # stored as an 8-byte payload. Index 0 stores the source ID (uint8 value)
-        if np.uint64(message[1:9].view(np.uint64)[0]) == 0:
-            # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
-            onset_us = np.uint64(message[9:].view("<i8")[0].copy())
-
-            # Breaks the loop onc the onset is found. Generally, the onset is expected to be found very early into
-            # the loop
-            timestamp_offset = number  # Records the item number at which the onset value was found.
-            break
-
-    # Once the onset has been discovered, processes the rest of the module instance data. Continues searching from
-    # the position where the offset is found.
-    for item in archive.files[timestamp_offset + 1 :]:
-        message = archive[item]
-
-        # Extracts the payload from each logged message.
-        payload = message[9:]
-
-        # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
-        # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
-        # '2'. In the future, if enough interest is shown, we may extend this list to also include outgoing
-        # messages. For now, these messages need to be parsed manually by users that need this data.
-        if (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA) or (
-            payload[4] != 2 and payload[4] < 51
-        ):
-            continue
-
-        # Checks if this message comes from one of the processed modules
-        current_module = None
-        for module in module_type_id:
-            if payload[1] == module[0] and payload[2] == module[1]:
-                current_module = module
+                # Breaks the loop once the onset is found. Generally, the onset is expected to be found very early into
+                # the loop
+                timestamp_offset = number  # Records the item number at which the onset value was found.
                 break
 
-        if current_module is None:
-            continue
+    # Builds the list of files to process after discovering the timestamp (the list of remaining messages)
+    messages_to_process = message_list[timestamp_offset + 1 :]
 
-        # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
-        # message, in microseconds since epoch onset.
-        elapsed_microseconds = np.uint64(message[1:9].view(np.uint64)[0].copy())
-        timestamp = onset_us + elapsed_microseconds
+    # If there are no leftover messages to process, return an empty tuple
+    if not messages_to_process:
+        return ()
 
-        # Extracts command, event, and, if supported, data object from the message payload.
-        command_code = np.uint8(payload[3])
-        event = np.uint8(payload[4])
+    # Small archives are processed sequentially to avoid the unnecessary overhead of setting up the multiprocessing
+    # runtime. This is also done for large files if the user explicitly requests to use a single worker process.
+    if n_workers == 1 or len(messages_to_process) < _PARALLEL_PROCESSING_THRESHOLD:
+        # Processes all messages in a single batch sequentially
+        batch_results = _process_module_message_batch(log_path, messages_to_process, onset_us, module_type_id)
 
-        # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
-        # in size. Extracts and formats the data object, included with the logged payload.
-        data: Any = None
-        if len(payload) > 5:
-            # noinspection PyTypeChecker
-            prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
+        # Converts the batch results into the expected format
+        module_event_data: dict[tuple[int, int], dict[Any, Any]] = {module: {} for module in module_type_id}
 
-            # Depending on the prototype, reads the data object as an array or scalar
-            if isinstance(prototype, np.ndarray):
-                data = payload[6:].view(prototype.dtype)[:]
-            elif prototype is not None:
-                data = payload[6:].view(prototype.dtype)[0]
-            else:
-                error_message = (
-                    f"Unable to extract data for module {payload[2]} of type {payload[1]} from the log "
-                    f"file. Failed to obtain the prototype to read the data object for message with "
-                    f"event code {event} and command code {command_code}. No matching prototype was found for "
-                    f"prototype code {payload[5]}."
-                )
-                console.error(message=error_message, error=ValueError)
+        for module, data_list in batch_results.items():
+            for data_item in data_list:
+                event = data_item["event"]
+                # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event
+                # code, creates a list of tuples. Each tuple inside the list contains the timestamp, data object
+                # (or None) and the active command code.
+                if event not in module_event_data[module]:
+                    module_event_data[module][event] = [
+                        {
+                            "timestamp": data_item["timestamp"],
+                            "data": data_item["data"],
+                            "command": data_item["command"],
+                        }
+                    ]
+                else:
+                    module_event_data[module][event].append(
+                        {
+                            "timestamp": data_item["timestamp"],
+                            "data": data_item["data"],
+                            "command": data_item["command"],
+                        }
+                    )
+    else:
+        # If the user enabled using all available cores, configures the runtime to use all available CPUs
+        if n_workers < 0:
+            n_workers = cpu_count()
 
-        # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event code,
-        # creates a list of tuples. Each tuple inside the list contains the timestamp, data object (or None) and
-        # the active command code.
-        if event not in module_event_data[current_module]:
-            module_event_data[current_module][event] = [{"timestamp": timestamp, "data": data, "command": command_code}]
-        else:
-            module_event_data[current_module][event].append(
-                {"timestamp": timestamp, "data": data, "command": command_code}
-            )
+        # Creates batches of messages to process during runtime. Uses a fairly high batch multiplier to create many
+        # smaller batches, which leads to a measurable increase in the processing speed, especially for large archives.
+        # The optimal multiplier value (4) was determined experimentally.
+        batches = []
+        batch_indices = []  # Keeps track of batch order
+        for i, batch in enumerate(chunk_iterable(messages_to_process, n_workers * 4)):
+            if batch:
+                batches.append((log_path, list(batch), onset_us, module_type_id))
+                batch_indices.append(i)
+
+        # Processes batches using ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            # Submits all tasks
+            future_to_index = {
+                executor.submit(_process_module_message_batch, *batch_args): idx
+                for idx, batch_args in zip(batch_indices, batches, strict=False)
+            }
+
+            # Collects results while maintaining message order. This also propagates processing errors to the caller
+            # process.
+            results: list[dict[tuple[int, int], list[dict[str, Any]]] | None] = [None] * len(batches)
+
+            # Creates a progress bar for batch processing
+            with tqdm(total=len(batches), desc="Extracting microcontroller hardware module data", unit="batch") as pbar:
+                for future in as_completed(future_to_index):
+                    results[future_to_index[future]] = future.result()
+                    pbar.update(1)  # Updates the progress bar after each batch completes
+
+        # Combines processing results from all batches
+        module_event_data = {module: {} for module in module_type_id}
+
+        # Processes results from each batch to maintain chronological ordering
+        for batch_result in results:
+            if batch_result is not None:  # Skips None results
+                for module, data_list in batch_result.items():
+                    for data_item in data_list:
+                        event = data_item["event"]
+                        # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each
+                        # event code, creates a list of tuples. Each tuple inside the list contains the timestamp, data
+                        # object (or None) and the active command code.
+                        if event not in module_event_data[module]:
+                            module_event_data[module][event] = [
+                                {
+                                    "timestamp": data_item["timestamp"],
+                                    "data": data_item["data"],
+                                    "command": data_item["command"],
+                                }
+                            ]
+                        else:
+                            module_event_data[module][event].append(
+                                {
+                                    "timestamp": data_item["timestamp"],
+                                    "data": data_item["data"],
+                                    "command": data_item["command"],
+                                }
+                            )
 
     # Creates ExtractedModuleData instances for each module and returns the tuple of created instances to caller
     return tuple(
