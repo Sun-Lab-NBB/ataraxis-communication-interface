@@ -44,8 +44,6 @@ classifiers = [
 # Runtime project dependencies.
 dependencies = [
     "numpy>=2,<3",
-    "numba>=0,<1",
-    "intel-cmplr-lib-rt>=2025,<2026; platform_machine == 'x86_64'",
     "ataraxis-time>=3,<4",
     "ataraxis-base-utilities>=3,<4",
     "ataraxis-data-structures>=3,<4",
