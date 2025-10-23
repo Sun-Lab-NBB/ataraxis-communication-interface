@@ -1,6 +1,6 @@
 """This module provides the ModuleInterface and MicroControllerInterface classes. They aggregate the methods that allow
-Python PC clients to bidirectionally interface with custom hardware modules managed by an Arduino or Teensy
-microcontroller.
+Python PC clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy
+microcontrollers.
 """
 
 from abc import ABC, abstractmethod
@@ -21,7 +21,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console, chunk_iterable
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
 
@@ -33,7 +33,6 @@ from .communication import (
     KernelCommand,
     ReceptionCode,
     SerialProtocols,
-    KernelParameters,
     ModuleParameters,
     SerialPrototypes,
     OneOffModuleCommand,
@@ -55,61 +54,54 @@ _MAXIMUM_BYTE_VALUE = 255
 _ZERO_BYTE = np.uint8(0)
 _ZERO_BOOL = np.bool(False)
 _ZERO_LONG = np.uint32(0)
-_KEEPALIVE_RETURN_CODE = 255  # Return code used in keepalive command messages
-_SERVICE_CODE_THRESHOLD = 50  # The highest code-value used by 'service' Module messages.
 
-# The maximum period of time that the MicroControllerInterface class can take to fully initialize the communication
-# process.
-_PROCESS_INITIALIZATION_TIMEOUT = 30  # seconds
 
-# The maximum period of time that the MicroControllerInterface class can take to request and receive a single
-# microcontroller or hardware module ID message during communication process initialization.
-_MICROCONTROLLER_ID_TIMEOUT = 2000  # milliseconds
+class _RuntimeParameters(IntEnum):
+    """Defines various hardcoded runtime parameter constants used throughout this module."""
 
-# The maximum count of microcontroller ID information requests the communication process can carry out during
-# initialization before raising an error.
-_MAXIMUM_COMMUNICATION_ATTEMPTS = 3
-
-# The maximum period of time to wait for the communication process to terminate gracefully before sending a SIGKILL
-# signal to terminate it forcibly. This prevents being stuck in a graceful process termination loop.
-_PROCES_TERMINATION_TIMEOUT = 60  # seconds
-
-# The period of time at which the MicroControllerInterface's watchdog thread checks the state of the remote
-# communication process.
-_WATCHDOG_INTERVAL = 20  # milliseconds
-
-# The minimum number of logged messages that warrants parallel log processing.
-_PARALLEL_PROCESSING_THRESHOLD = 2000
-
-# The smallest non-service data payload size currently used by hardware module instances to communicate with the PC.
-_MINIMUM_MODULE_DATA_SIZE = 5
+    KEEPALIVE_RETURN_CODE = 255
+    """The Return code used in keepalive command messages."""
+    SERVICE_CODE_THRESHOLD = 50
+    """The highest code-value used by 'service' Module messages."""
+    PROCESS_INITIALIZATION_TIMEOUT = 30
+    """The maximum period of time, in seconds, that the MicroControllerInterface class can take to fully initialize the 
+    communication process."""
+    MICROCONTROLLER_ID_TIMEOUT = 2000
+    """The maximum period of time, in milliseconds, that the MicroControllerInterface class can take to request and 
+    receive a single microcontroller or hardware module ID message during communication process initialization."""
+    MAXIMUM_COMMUNICATION_ATTEMPTS = 3
+    """The maximum number of microcontroller ID information request attempts the communication process can carry out 
+    during the initialization before raising an error."""
+    PROCES_TERMINATION_TIMEOUT = 60
+    """The maximum period of time, in seconds, to wait for the communication process to terminate gracefully before 
+    sending a SIGKILL signal to terminate it forcibly. This prevents being stuck in a graceful process termination 
+    loop."""
+    WATCHDOG_INTERVAL = 20
+    """The frequency, in milliseconds, at which the MicroControllerInterface's watchdog thread checks the state 
+    of the remote communication process."""
+    PARALLEL_PROCESSING_THRESHOLD = 2000
+    """The minimum number of logged messages that warrants parallel log processing."""
+    MINIMUM_MODULE_DATA_SIZE = 5
+    """The smallest non-service data payload size currently used by hardware module instances to communicate with the 
+    PC."""
 
 
 class _KernelStatusCodes(IntEnum):
-    """Stores Kernel message codes that require 'online' processing in addition to saving the message data to disk.
-
-    Notes:
-        Primarily, this includes the error message codes used during runtime.
-    """
+    """Defines the codes used by the Kernel class to communicate runtime errors to the PC."""
 
     MODULE_SETUP_ERROR = 2
     RECEPTION_ERROR = 3
     TRANSMISSION_ERROR = 4
     INVALID_MESSAGE_PROTOCOL = 5
-    MODULE_PARAMETERS_ERROR = 8
-    COMMAND_NOT_RECOGNIZED = 9
-    TARGET_MODULE_NOT_FOUND = 10
-    KEEPALIVE_TIMEOUT = 11
+    MODULE_PARAMETERS_ERROR = 7
+    COMMAND_NOT_RECOGNIZED = 8
+    TARGET_MODULE_NOT_FOUND = 9
+    KEEPALIVE_TIMEOUT = 10
 
 
 class _ModuleStatusCodes(IntEnum):
-    """Stores Module message service codes that require 'online' processing in addition to saving the message data to
-    disk.
-
-    Notes:
-        Primarily, this includes the error message codes used during runtime.
-
-        Service codes range from 0 to 50 and are reserved for system messages.
+    """Defines the status codes used to communicate the states and errors encountered during the shared API method
+    runtimes.
     """
 
     TRANSMISSION_ERROR = 1
@@ -118,14 +110,16 @@ class _ModuleStatusCodes(IntEnum):
 
 
 class ModuleInterface(ABC):  # pragma: no cover
-    """The base class from which all custom module interface implementations should inherit.
+    """Provides the API used by other library components to integrate any custom hardware module interface with the
+    hardware management module running on the companion microcontroller.
 
     Inheriting from this class achieves two goals. First, it grants all subclasses the static API used by the
     MicroControllerInterface class to interact with module interfaces during PC-microcontroller communication. Second,
     it provides the user-facing API for sending commands and parameters to the managed hardware module.
 
     Notes:
-        The interface class has to be implemented separately for each custom hardware module.
+        Every custom hardware module interface has to inherit from this base class. Each type (family) of custom
+        hardware modules requires a specialized interface class.
 
         When inheriting from this class, initialize the superclass by calling the 'super().__init__()' during the
         subclass initialization.
@@ -133,9 +127,9 @@ class ModuleInterface(ABC):  # pragma: no cover
         All data received from or sent to the microcontroller is automatically logged to disk. Only provide additional
         data and error codes if the interface must carry out 'online' error detection and / or data processing.
 
-        Some attributes of this class are assigned by the managing MicroControllerInterface during its initialization.
-        Each ModuleInterface subclass has to be bound to an initialized MicroControllerInterface instance to be fully
-        functional.
+        Some attributes of this (base) class are assigned by the managing MicroControllerInterface during its
+        initialization. Each module interface that inherits from the base ModuleInterface class has to be bound to an
+        initialized MicroControllerInterface instance to be fully functional.
 
     Args:
         module_type: The id-code that describes the broad type (family) of custom hardware modules managed by this
@@ -236,7 +230,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         """Returns the string representation of the instance."""
         return (
             f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
-            f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "  # type: ignore[type-var]
+            f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
             f"error_codes={sorted(self._error_codes)})"
         )
 
@@ -601,29 +595,6 @@ class MicroControllerInterface:  # pragma: no cover
         """Resets the connected managed microcontroller to use the default hardware and software parameters."""
         self._input_queue.put(self._reset_command)
 
-    def toggle_ttl_lock(self, toggle: bool) -> None:
-        """Locks or unlocks the managed microcontroller's Transistor-to-Transistor (TTL) logic pins to match the desired
-        state.
-
-        Locking the TTL pins prevents the microcontroller from changing the state of any pin connected to TTL
-        communication hardware.
-        """
-        if toggle != self._ttl_lock:
-            self._ttl_lock = toggle
-            message = KernelParameters(action_lock=np.bool(self._action_lock), ttl_lock=np.bool(self._ttl_lock))
-            self._input_queue.put(message)
-
-    def toggle_action_lock(self, toggle: bool) -> None:
-        """Locks or unlocks the managed microcontroller's actor pins to match the desired state.
-
-        Locking the actor pins prevents the microcontroller from changing the state of any pin connected to non-sensor
-        and non-communication (TTL) physical hardware.
-        """
-        if toggle != self._action_lock:
-            self._action_lock = toggle
-            message = KernelParameters(action_lock=np.bool(self._action_lock), ttl_lock=np.bool(self._ttl_lock))
-            self._input_queue.put(message)
-
     def _watchdog(self) -> None:
         """This method is used by the watchdog thread to ensure the communication process is alive during runtime.
 
@@ -634,12 +605,12 @@ class MicroControllerInterface:  # pragma: no cover
             If the method detects that the communication process has terminated prematurely, it carries out the
             necessary resource cleanup steps before raising the error and terminating the overall runtime.
         """
-        timer = PrecisionTimer(precision="ms")
+        timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
         # The watchdog function will run until the global shutdown command is issued.
         while not self._terminator_array.read_data(index=0):  # type: ignore[union-attr]
             # Checks process state every _WATCHDOG_INTERVAL ms. Releases the GIL while waiting.
-            timer.delay_noblock(delay=_WATCHDOG_INTERVAL, allow_sleep=True)
+            timer.delay(delay=_RuntimeParameters.WATCHDOG_INTERVAL.value, allow_sleep=True, block=False)
 
             # Only monitors the Process state after the communication is initialized via the start() method.
             if not self._started:
@@ -651,10 +622,10 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Activates the shutdown flag
                 if self._terminator_array is not None:
-                    self._terminator_array.write_data(0, np.uint8(1))
+                    self._terminator_array[0] = np.uint8(1)
 
                 # The process should already be terminated, but there are no downsides to making sure it is dead.
-                self._communication_process.join(_PROCES_TERMINATION_TIMEOUT)
+                self._communication_process.join(_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.
                 if self._terminator_array is not None:
@@ -697,7 +668,7 @@ class MicroControllerInterface:  # pragma: no cover
         self._terminator_array = SharedMemoryArray.create_array(
             name=f"{self._controller_id}_terminator_array",
             prototype=np.zeros(shape=2, dtype=np.uint8),
-            exist_ok=True,  # Automatically deals with already existing shared memory buffers
+            exists_ok=True,  # Automatically deals with already existing shared memory buffers
         )
 
         # Binds runtime arguments to the communication cycle function before passing it to the Process instance.
@@ -727,17 +698,26 @@ class MicroControllerInterface:  # pragma: no cover
         # Initializes the communication process.
         self._communication_process.start()
 
-        start_timer = PrecisionTimer("s")
+        # Connects to the shared memory array to send control signals. This has to be done after initializing the
+        # communication process
+        self._terminator_array.connect()
+        # Ensures the buffer is destroyed if the instance is garbage-collected to prevent memory leaks.
+        self._terminator_array.enable_buffer_destruction()
+
+        start_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
         start_timer.reset()
         # Blocks until the microcontroller has finished all initialization steps or encounters an initialization error.
-        while self._terminator_array.read_data(1) != 1:
-            if not self._communication_process.is_alive() or start_timer.elapsed > _PROCESS_INITIALIZATION_TIMEOUT:
+        while self._terminator_array[1] != 1:
+            if (
+                not self._communication_process.is_alive()
+                or start_timer.elapsed > _RuntimeParameters.PROCESS_INITIALIZATION_TIMEOUT.value
+            ):
                 # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
-                self._terminator_array.write_data(0, np.uint8(1))
+                self._terminator_array[0] = np.uint8(1)
 
                 # Waits for at most _PROCES_TERMINATION_TIMEOUT seconds before forcibly terminating the communication
                 # process to prevent deadlocks
-                self._communication_process.join(_PROCES_TERMINATION_TIMEOUT)
+                self._communication_process.join(_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.
                 self._terminator_array.disconnect()
@@ -774,15 +754,15 @@ class MicroControllerInterface:  # pragma: no cover
         # Sets the terminator trigger to 1, which triggers the communication process shutdown. This also shuts down the
         # watchdog thread.
         if self._terminator_array is not None:
-            self._terminator_array.write_data(0, np.uint8(1))
+            self._terminator_array[0] = np.uint8(1)
 
         # Waits until the communication process terminates
         if self._communication_process is not None:
-            self._communication_process.join(timeout=_PROCES_TERMINATION_TIMEOUT)
+            self._communication_process.join(timeout=_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
 
         # Waits for the watchdog thread to terminate.
         if self._watchdog_thread is not None:
-            self._watchdog_thread.join(timeout=_PROCES_TERMINATION_TIMEOUT)
+            self._watchdog_thread.join(timeout=_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
 
         # Disconnects from the shared memory array and destroys its shared buffer.
         if self._terminator_array is not None:
@@ -827,7 +807,9 @@ class MicroControllerInterface:  # pragma: no cover
         # Blocks until the microcontroller responds with its identification code.
         attempt = 0
         response = None
-        while attempt < _MAXIMUM_COMMUNICATION_ATTEMPTS and not isinstance(response, ControllerIdentification):
+        while attempt < _RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value and not isinstance(
+            response, ControllerIdentification
+        ):
             # Sends microcontroller identification command. This command requests the microcontroller to return its
             # id code.
             serial_communication.send_message(message=identify_controller_command)
@@ -835,7 +817,7 @@ class MicroControllerInterface:  # pragma: no cover
 
             # Waits for response with timeout
             timeout_timer.reset()
-            while timeout_timer.elapsed < _MICROCONTROLLER_ID_TIMEOUT:
+            while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
                 response = serial_communication.receive_message()
                 if isinstance(response, ControllerIdentification):
                     break
@@ -845,7 +827,7 @@ class MicroControllerInterface:  # pragma: no cover
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The "
                 f"microcontroller did not respond to the identification request after "
-                f"{_MAXIMUM_COMMUNICATION_ATTEMPTS} attempts."
+                f"{_RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value} attempts."
             )
             console.error(message=message, error=TypeError)
             raise TypeError(message)  # Fallback to appease mypy, should not be reachable
@@ -865,7 +847,7 @@ class MicroControllerInterface:  # pragma: no cover
         serial_communication.send_message(message=identify_modules_command)
         timeout_timer.reset()
         module_type_ids = []
-        while timeout_timer.elapsed < _MICROCONTROLLER_ID_TIMEOUT:
+        while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
             # Receives the message. If the message is a module type+id code, adds it to the storage list
             response = serial_communication.receive_message()
             if isinstance(response, ModuleIdentification):
@@ -912,7 +894,7 @@ class MicroControllerInterface:  # pragma: no cover
                 console.error(message=message, error=ValueError)
 
         # Reports that the communication class has been successfully initialized.
-        terminator_array.write_data(index=1, data=np.uint8(1))
+        terminator_array[1] = np.uint8(1)
 
     @staticmethod
     def _parse_kernel_data(controller_id: np.uint8, in_data: KernelState | KernelData) -> None:
@@ -946,7 +928,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The microcontroller was not able to receive (parse) the PC-sent data and had to "
                 f"abort the reception. Last Communication status code was "
                 f"{in_data.data_object[0]} and last TransportLayer status code was "  # type: ignore[index]
-                f"{in_data.data_object[1]}. Overall, this indicates broader issues with the "
+                f"{in_data.data_object[1]}. Overall, this indicates broader issues with the "  # type: ignore[index]
                 f"microcontroller-PC communication."
             )
             console.error(message=message, error=RuntimeError)
@@ -958,8 +940,8 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{in_data.command}. Error code: 4. "
                 f"The microcontroller's Kernel class was not able to send data to the PC and had to abort "
                 f"the transmission. Last Communication status code was {in_data.data_object[0]} "  # type: ignore[index]
-                f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, this indicates "
-                f"broader issues with the microcontroller-PC communication."
+                f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, "  # type: ignore[index]
+                f"this indicates broader issues with the microcontroller-PC communication."
             )
             console.error(message=message, error=RuntimeError)
 
@@ -980,7 +962,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{in_data.command}. Error code: 8. "
                 f"The microcontroller was not able to apply new runtime parameters received from the PC to "
                 f"the target hardware module with type {in_data.data_object[0]} and id "  # type: ignore[index]
-                f"{in_data.data_object[1]}."
+                f"{in_data.data_object[1]}."  # type: ignore[index]
             )
             console.error(message=message, error=RuntimeError)
 
@@ -1038,7 +1020,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{controller_id} encountered an error when executing command {in_data.command}. "
                 f"Error code: 1. The module was not able to send data to the PC and had to abort the "
                 f"transmission. Last Communication status code was {in_data.data_object[0]} "  # type: ignore[index]
-                f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, "
+                f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, "  # type: ignore[index]
                 f"this indicates broader issues with the microcontroller-PC communication."
             )
             console.error(message=message, error=RuntimeError)
@@ -1095,11 +1077,11 @@ class MicroControllerInterface:  # pragma: no cover
         # runtime. THis is used to detect communication issues and problems with the microcontroller during runtime).
         keepalive_command = KernelCommand(
             command=np.uint8(5),
-            return_code=np.uint8(_KEEPALIVE_RETURN_CODE),
+            return_code=np.uint8(_RuntimeParameters.KEEPALIVE_RETURN_CODE.value),
         )
 
         # Initializes the timer used during initialization to abort stale initialization attempts.
-        timeout_timer = PrecisionTimer("ms")
+        timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
         # Connects to the terminator array. This is done early, as the terminator_array is used to track the
         # initialization and runtime status of the process.
@@ -1121,7 +1103,7 @@ class MicroControllerInterface:  # pragma: no cover
         # Initializes the serial communication class and connects to the target microcontroller.
         serial_communication = SerialCommunication(
             port=port,
-            source_id=controller_id,
+            controller_id=controller_id,
             logger_queue=logger_queue,
             baudrate=baudrate,
             microcontroller_serial_buffer_size=buffer_size,
@@ -1145,7 +1127,7 @@ class MicroControllerInterface:  # pragma: no cover
             # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
             # the central process are fully carried out before the communication is terminated.
             timeout_timer.reset()
-            while not terminator_array.read_data(index=0, convert_output=True) or not input_queue.empty():
+            while not terminator_array[0] or not input_queue.empty():
                 # Main data sending loop. The method sequentially retrieves the queued messages and sends them to the
                 # microcontroller.
                 while not input_queue.empty():
@@ -1184,7 +1166,10 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Currently, the only explicitly supported type of reception feedback messaging is the keepalive
                 # communication cycle. All keepalive messages use response code 255.
-                if isinstance(in_data, ReceptionCode) and in_data.reception_code == _KEEPALIVE_RETURN_CODE:
+                if (
+                    isinstance(in_data, ReceptionCode)
+                    and in_data.reception_code == _RuntimeParameters.KEEPALIVE_RETURN_CODE.value
+                ):
                     keepalive_response_received = True  # Indicates that the response code was received
 
                 # Converts valid KernelData and State messages into errors. This is used to raise runtime errors when
@@ -1196,11 +1181,17 @@ class MicroControllerInterface:  # pragma: no cover
                 # Event codes from 0 through 50 are reserved for system use. These codes are handled by this clause,
                 # which translates error messages sent by the base Module class into error codes, similar as to
                 # how it is done by the Kernel.
-                if isinstance(in_data, (ModuleState, ModuleData)) and in_data.event <= _SERVICE_CODE_THRESHOLD:
+                if (
+                    isinstance(in_data, (ModuleState, ModuleData))
+                    and in_data.event <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
+                ):
                     MicroControllerInterface._parse_service_module_data(in_data=in_data, controller_id=controller_id)
 
                 # Event codes 51 or above are used by the module developers to communicate states and errors.
-                if isinstance(in_data, (ModuleState, ModuleData)) and in_data.event > _SERVICE_CODE_THRESHOLD:
+                if (
+                    isinstance(in_data, (ModuleState, ModuleData))
+                    and in_data.event > _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
+                ):
                     # Computes the combined type and id code for the incoming data. This is used to find the specific
                     # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
                     # additional processing methods.
@@ -1334,7 +1325,8 @@ def _process_module_message_batch(
             # '2'. In the future, if enough interest is shown, this list may be extended to also include outgoing
             # messages. For now, these messages need to be parsed manually by users that need this data.
             if (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA) or (
-                payload[4] != _ModuleStatusCodes.COMMAND_COMPLETE and payload[4] <= _SERVICE_CODE_THRESHOLD
+                payload[4] != _ModuleStatusCodes.COMMAND_COMPLETE
+                and payload[4] <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
             ):
                 continue
 
@@ -1360,7 +1352,7 @@ def _process_module_message_batch(
             # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
             # in size. Extracts and formats the data object, included with the logged payload.
             data: Any = None
-            if len(payload) > _MINIMUM_MODULE_DATA_SIZE:
+            if len(payload) > _RuntimeParameters.MINIMUM_MODULE_DATA_SIZE.value:
                 # noinspection PyTypeChecker
                 prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
 
@@ -1463,7 +1455,7 @@ def extract_logged_hardware_module_data(
 
     # Small archives are processed sequentially to avoid the unnecessary overhead of setting up the multiprocessing
     # runtime. This is also done for large files if the user explicitly requests to use a single worker process.
-    if n_workers == 1 or len(messages_to_process) < _PARALLEL_PROCESSING_THRESHOLD:
+    if n_workers == 1 or len(messages_to_process) < _RuntimeParameters.PARALLEL_PROCESSING_THRESHOLD.value:
         # Processes all messages in a single batch sequentially
         batch_results = _process_module_message_batch(log_path, messages_to_process, onset_us, module_type_id)
 
