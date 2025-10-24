@@ -22,7 +22,6 @@ from ataraxis_communication_interface.communication import (
     KernelCommand,
     ReceptionCode,
     SerialProtocols,
-    KernelParameters,
     ModuleParameters,
     SerialPrototypes,
     MQTTCommunication,
@@ -47,7 +46,7 @@ def logger_queue(tmp_path_factory) -> Generator[Queue, Any, None]:
     # Creates a unique temp directory for this test
     tmp_dir = tmp_path_factory.mktemp("logger_data")
 
-    logger = DataLogger(output_directory=tmp_dir, instance_name=f"{tmp_dir}_logger", exist_ok=True)
+    logger = DataLogger(output_directory=tmp_dir, instance_name=f"{tmp_dir}_logger")
     yield logger.input_queue
 
 
@@ -59,14 +58,13 @@ def test_serial_protocols_members() -> None:
     assert SerialProtocols.DEQUEUE_MODULE_COMMAND.value == 3
     assert SerialProtocols.KERNEL_COMMAND.value == 4
     assert SerialProtocols.MODULE_PARAMETERS.value == 5
-    assert SerialProtocols.KERNEL_PARAMETERS.value == 6
-    assert SerialProtocols.MODULE_DATA.value == 7
-    assert SerialProtocols.KERNEL_DATA.value == 8
-    assert SerialProtocols.MODULE_STATE.value == 9
-    assert SerialProtocols.KERNEL_STATE.value == 10
-    assert SerialProtocols.RECEPTION_CODE.value == 11
-    assert SerialProtocols.CONTROLLER_IDENTIFICATION.value == 12
-    assert SerialProtocols.MODULE_IDENTIFICATION.value == 13
+    assert SerialProtocols.MODULE_DATA.value == 6
+    assert SerialProtocols.KERNEL_DATA.value == 7
+    assert SerialProtocols.MODULE_STATE.value == 8
+    assert SerialProtocols.KERNEL_STATE.value == 9
+    assert SerialProtocols.RECEPTION_CODE.value == 10
+    assert SerialProtocols.CONTROLLER_IDENTIFICATION.value == 11
+    assert SerialProtocols.MODULE_IDENTIFICATION.value == 12
 
 
 @pytest.mark.parametrize(
@@ -304,30 +302,6 @@ def test_module_parameters() -> None:
     assert repr(params) == expected_repr
 
 
-def test_kernel_parameters() -> None:
-    """Verifies KernelParameters initialization and data packing."""
-    params = KernelParameters(action_lock=np.bool_(True), ttl_lock=np.bool_(False), return_code=np.uint8(1))
-
-    # Test attributes
-    assert params.action_lock
-    assert not params.ttl_lock
-    assert params.return_code == 1
-    assert params.protocol_code == SerialProtocols.KERNEL_PARAMETERS.as_uint8()
-
-    # Test packed data
-    assert isinstance(params.packed_data, np.ndarray)
-    assert params.packed_data.dtype == np.uint8
-    assert params.packed_data.size == 4
-    assert np.array_equal(params.packed_data, [params.protocol_code, 1, True, False])
-
-    # Test repr
-    expected_repr = (
-        f"KernelParameters(protocol_code={params.protocol_code}, return_code=1, "
-        f"parameter_object_size={params.parameters_size} bytes)."
-    )
-    assert repr(params) == expected_repr
-
-
 @pytest.mark.parametrize(
     "command_class,kwargs,expected_size",
     [
@@ -351,7 +325,6 @@ def test_command_packed_data_sizes(command_class, kwargs, expected_size) -> None
             ModuleParameters,
             {"module_type": np.uint8(1), "module_id": np.uint8(2), "parameter_data": (np.uint8(3), np.uint16(4))},
         ),
-        (KernelParameters, {"action_lock": np.bool_(True), "ttl_lock": np.bool_(False)}),
     ],
 )
 def test_parameters_packed_data_validation(parameter_class, kwargs) -> None:
@@ -597,62 +570,12 @@ def test_module_identification_update(transport_layer) -> None:
     assert np.array_equal(ident.message, message)
 
 
-@pytest.mark.parametrize(
-    "message_class,expected_repr,init_data,message_data",
-    [
-        (
-            ModuleData,
-            "ModuleData(protocol_code=7, module_type=1, module_id=2, command=3, event=4, data_object=42).",
-            {},
-            np.array([7, 1, 2, 3, 4, 2, 42], dtype=np.uint8),
-        ),
-        (
-            KernelData,
-            "KernelData(protocol_code=8, command=1, event=2, data_object=42).",
-            {},
-            np.array([8, 1, 2, 2, 42], dtype=np.uint8),
-        ),
-        (
-            ModuleState,
-            "ModuleState(module_type=1, module_id=2, command=3, event=4).",
-            {},
-            np.array([9, 1, 2, 3, 4], dtype=np.uint8),
-        ),
-        (KernelState, "KernelState(command=1, event=2).", {}, np.array([10, 1, 2], dtype=np.uint8)),
-        (ReceptionCode, "ReceptionCode(reception_code=42).", {}, np.array([11, 42], dtype=np.uint8)),
-        (
-            ControllerIdentification,
-            "ControllerIdentification(controller_id=42).",
-            {},
-            np.array([12, 42], dtype=np.uint8),
-        ),
-        (
-            ModuleIdentification,
-            "ModuleIdentification(module_type_id=65535).",
-            {},
-            np.array([12, 255, 255], dtype=np.uint8),
-        ),
-    ],
-)
-def test_message_repr(transport_layer, message_class, expected_repr, init_data, message_data) -> None:
-    """Verifies string representation of message classes."""
-    # noinspection PyArgumentList
-    message = message_class(transport_layer, **init_data)
-
-    # Setup mock data and update message
-    transport_layer._reception_buffer[: len(message_data)] = message_data
-    transport_layer._bytes_in_reception_buffer = len(message_data)
-    message.update_message_data()
-
-    assert repr(message) == expected_repr
-
-
 def test_serial_communication_init_and_repr(logger_queue) -> None:
     """Verifies SerialCommunication initialization and string representation."""
     comm = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
-        source_id=np.uint8(1),
+        controller_id=np.uint8(1),
         microcontroller_serial_buffer_size=300,
         test_mode=True,
     )
@@ -679,7 +602,7 @@ def test_serial_communication_send_message(logger_queue) -> None:
     comm = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
-        source_id=np.uint8(1),
+        controller_id=np.uint8(1),
         test_mode=True,
         microcontroller_serial_buffer_size=300,
     )
@@ -772,7 +695,7 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
     comm = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
-        source_id=np.uint8(1),
+        controller_id=np.uint8(1),
         test_mode=True,
         microcontroller_serial_buffer_size=300,
     )
@@ -801,7 +724,7 @@ def test_serial_communication_receive_message_error(logger_queue) -> None:
     comm = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
-        source_id=np.uint8(1),
+        controller_id=np.uint8(1),
         test_mode=True,
         microcontroller_serial_buffer_size=300,
     )

@@ -1153,8 +1153,8 @@ class ModuleIdentification:
 
 
 class SerialCommunication:
-    """Provides methods for communicating with a microcontroller running the ataraxis-micro-controller library over the
-    USB or UART serial interface.
+    """Provides methods for bidirectionally communicating with a microcontroller running the ataraxis-micro-controller
+    library over the USB or UART serial interface.
 
     Notes:
         This class is explicitly designed to be used by other library assets and should not be used directly by end
@@ -1309,7 +1309,7 @@ class SerialCommunication:
             # Parses the static header data from the extracted message
             self._module_data.message = self._transport_layer.read_data(data_object=self._module_data.message)
 
-            # Parses the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
+            # Resolves the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
             # instance
             prototype = SerialPrototypes.get_prototype_for_code(code=self._module_data.prototype_code)
 
@@ -1318,8 +1318,8 @@ class SerialCommunication:
                 message = (
                     f"Invalid prototype code {self._module_data.prototype_code} encountered when extracting the data "
                     f"object from the received ModuleData message sent my module {self._module_data.module_id} of type "
-                    f"{self._module_data.module_type}. All data prototype codes have to be available from the "
-                    f"SerialPrototypes class to be resolved."
+                    f"{self._module_data.module_type}. All messages must use one of the valid prototype "
+                    f"codes available from the SerialPrototypes enumeration."
                 )
                 console.error(message, ValueError)
             else:
@@ -1332,7 +1332,7 @@ class SerialCommunication:
             # Parses the static header data from the extracted message
             self._kernel_data.message = self._transport_layer.read_data(data_object=self._kernel_data.message)
 
-            # Parses the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
+            # Resolves the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
             # instance
             prototype = SerialPrototypes.get_prototype_for_code(code=self._kernel_data.prototype_code)
 
@@ -1340,8 +1340,8 @@ class SerialCommunication:
             if prototype is None:
                 message = (
                     f"Invalid prototype code {self._kernel_data.prototype_code} encountered when extracting the data "
-                    f"object from the received KernelData message. All data prototype codes have to be available from "
-                    f"the SerialPrototypes class to be resolved."
+                    f"object from the received KernelData message. All messages must use one of the valid prototype "
+                    f"codes available from the SerialPrototypes enumeration."
                 )
                 console.error(message, ValueError)
 
@@ -1390,9 +1390,9 @@ class SerialCommunication:
         """Packages and sends the input data to the DataLogger instance that writes it to disk.
 
         Args:
-            timestamp: The value of the timestamp timer 'elapsed' property that communicates the number of elapsed
-                microseconds relative to the 'onset' timestamp.
-            data: The byte-serialized message payload that was sent or received.
+            timestamp: The value of the timestamp timer's 'elapsed' property that communicates the number of elapsed
+                microseconds relative to the 'onset' timestamp at the time of data acquisition.
+            data: The serialized message payload to be logged.
         """
         # Packages the data to be logged into the appropriate tuple format (with ID variables)
         package = LogPackage(self._source_id, np.uint64(timestamp), data)
@@ -1402,13 +1402,13 @@ class SerialCommunication:
 
 
 class MQTTCommunication:
-    """Provides methods for bidirectionally communicating with other MQTT clients connected to the same MQTT broker.
-
-    This class leverages the MQTT protocol to establish bidirectional communication between the local Python process
-    and other MQTT clients. Primarily, the class is intended to be used alongside the SerialCommunication class to
-    transfer the data between microcontrollers and the rest of the runtime infrastructure.
+    """Provides methods for bidirectionally communicating with other clients connected to the same MQTT broker using the
+    MQTT protocol over the TCP interface.
 
     Notes:
+        Primarily, the class is intended to be used alongside the SerialCommunication class to transfer the data between
+        microcontrollers and the rest of the runtime infrastructure.
+
         The MQTT protocol requires a broker that facilitates the communication, which has to be available to this class
         at initialization. See https://mqtt.org/ for more details.
 
@@ -1422,9 +1422,9 @@ class MQTTCommunication:
         _port: Stores the port used by the broker's TCP socket.
         _connected: Tracks whether the class instance is currently connected to the MQTT broker.
         _monitored_topics: Stores the topics monitored by the instance for incoming messages.
-        _output_queue: A multithreading queue used to buffer incoming messages received from other MQTT clients before
-            their data is accessed via class methods.
-        _client: Stores the initialized MQTT client instance that carries out the communication.
+        _output_queue: Buffers incoming messages received from other MQTT clients before their data is accessed via
+            class methods.
+        _client: The initialized MQTT client instance that carries out the communication.
     """
 
     def __init__(
@@ -1464,8 +1464,7 @@ class MQTTCommunication:
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:  # pragma: no cover
         """The custom callback method used to receive data from the MQTT broker.
 
-        This method records the topic and payload of each received message and puts them into the output_queue for
-        the data to be consumed by external callers.
+        This method records the topic and payload of each received message and puts them into the output_queue.
 
         Args:
             _client: The MQTT client that received the message. Currently not used.
@@ -1478,15 +1477,15 @@ class MQTTCommunication:
     def connect(self) -> None:
         """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
-        This method has to be called after class initialization to start the communication process. Any message
-        sent to the MQTT broker from other clients before this method is called may not reach this instance.
-
         Notes:
+            This method has to be called after class initialization to start the communication process. Any message
+            sent to the MQTT broker from other clients before this method is called may not reach this instance.
+
             If this instance is configured to subscribe (listen) to any topics, it starts a perpetually active thread
             with a listener callback to monitor the incoming traffic.
 
         Raises:
-            RuntimeError: If the MQTT broker cannot be connected using the provided IP and Port.
+            ConnectionError: If the MQTT broker cannot be connected using the provided IP and Port.
         """
         # Guards against re-connecting an already connected client.
         if self._connected:
@@ -1501,7 +1500,7 @@ class MQTTCommunication:
                 f"broker at {self._ip}:{self._port}. This likely indicates that the broker is not running or that "
                 f"there is an issue with the provided IP and socket port."
             )
-            console.error(message, error=RuntimeError)
+            console.error(message, error=ConnectionError)
 
         # If the class is configured to connect to any topics, enables the connection callback and starts the monitoring
         # thread.
@@ -1526,7 +1525,7 @@ class MQTTCommunication:
             payload: The data to be published. Setting this to None sends an empty message.
 
         Raises:
-            RuntimeError: If the instance is not connected to the MQTT broker.
+            ConnectionError: If the instance is not connected to the MQTT broker.
         """
         if not self._connected:
             message = (
@@ -1534,7 +1533,7 @@ class MQTTCommunication:
                 f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
                 f"sending data."
             )
-            console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=ConnectionError)
         self._client.publish(topic=topic, payload=payload, qos=0)
 
     @property
@@ -1552,7 +1551,7 @@ class MQTTCommunication:
             message. The second element is the payload of the message. If there is no data to retrieve, returns None.
 
         Raises:
-            RuntimeError: If the instance is not connected to the MQTT broker.
+            ConnectionError: If the instance is not connected to the MQTT broker.
         """
         if not self._connected:
             message = (
@@ -1560,7 +1559,7 @@ class MQTTCommunication:
                 f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
                 f"sending data."
             )
-            console.error(message=message, error=RuntimeError)
+            console.error(message=message, error=ConnectionError)
 
         if not self.has_data:
             return None
