@@ -22,14 +22,7 @@ from multiprocessing.managers import SyncManager
 import numpy as np
 from ataraxis_time import PrecisionTimer
 
-from ataraxis_communication_interface import (
-    ModuleData,
-    ModuleState,
-    ModuleInterface,
-    ModuleParameters,
-    OneOffModuleCommand,
-    RepeatedModuleCommand,
-)
+from ataraxis_communication_interface import ModuleData, ModuleState, ModuleInterface
 
 
 # Defines the TestModuleInterface class by subclassing the base ModuleInterface class. This class is designed to
@@ -140,25 +133,7 @@ class TestModuleInterface(ModuleInterface):
         off_duration: np.uint32,  # The time the pin stays LOW during pulses, in microseconds.
         echo_value: np.uint16,  # The value to be echoed back to the PC during echo() command runtimes.
     ) -> None:
-        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-        # prevents this command from running unless the MicroControllerInterface is initialized.
-        if self._input_queue is None:
-            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
-
-        # Parameters have to be arranged in the exact order expected by the receiving structure. Additionally,
-        # each parameter has to use the appropriate numpy type.
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-            parameter_data=(on_duration, off_duration, echo_value),
-        )
-
-        # Directly submits the message to the communication process. The process is initialized and managed by the
-        # MicroControllerInterface class that also manages the runtime of this specific interface. Once both
-        # TestModuleInterface AND MicroControllerInterface are initialized, TestModuleInterface will have access to some
-        # MicroControllerInterface assets via private attributes inherited from the base ModuleInterface class.
-        self._input_queue.put(message)
+        self.send_parameters(parameter_data=(on_duration, off_duration, echo_value))
 
     # Instructs the managed TestModule to emit a pulse via the manged output pin. The pulse will use the on_duration
     # and off_duration TestModule parameters to determine the duration of High and Low phases. The arguments to this
@@ -166,65 +141,21 @@ class TestModuleInterface(ModuleInterface):
     # Additionally, they determine whether the microcontroller will block while executing the pulse or allow concurrent
     # execution of other commands.
     def pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = True) -> None:
-        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-        # prevents this command from running unless the MicroControllerInterface is initialized.
-        if self._input_queue is None:
-            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
-
-        # Repetition delay of 0 is interpreted as a one-time command (only runs once).
-        command: RepeatedModuleCommand | OneOffModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-                cycle_delay=repetition_delay,
-            )
-
-        # Directly submits the command to the communication process.
-        self._input_queue.put(command)
+        self.send_command(
+            command=np.uint8(1),
+            noblock=np.bool(noblock),
+            repetition_delay=repetition_delay,
+        )
 
     # This method returns a message that instructs the TestModule to respond with the current value of its echo_value
     # parameter. Unlike the pulse() command, echo() command does not require blocking, so the method does not have the
     # noblock argument. However, the command still supports recurrent execution.
     def echo(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-        # prevents this command from running unless the MicroControllerInterface is initialized.
-        if self._input_queue is None:
-            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
-
-        command: RepeatedModuleCommand | OneOffModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(2),
-                noblock=np.bool(False),
-            )
-
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(2),
-                noblock=np.bool(False),
-                cycle_delay=repetition_delay,
-            )
-
-        # Directly submits the command to the communication process.
-        self._input_queue.put(command)
+        self.send_command(
+            command=np.uint8(2),
+            noblock=np.bool(False),
+            repetition_delay=repetition_delay,
+        )
 
     @property
     def output_queue(self) -> MPQueue:  # type: ignore

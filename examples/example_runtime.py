@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from ataraxis_time import PrecisionTimer
 from example_interface import TestModuleInterface
-from ataraxis_data_structures import DataLogger
+from ataraxis_data_structures import DataLogger, assemble_log_archives
 
 from ataraxis_communication_interface import MicroControllerInterface, extract_logged_hardware_module_data
 
@@ -71,13 +71,6 @@ if __name__ == "__main__":
     # Also, this method JIT-compiles some assets as it runs, which speeds up all future communication.
     mc_interface.start()
 
-    # As a safety feature, the microcontroller is locked when the communication starts. This prevents the
-    # microcontroller from changing the states of output pins, but does not interfere with reading input pins or
-    # setting runtime parameters. Since this demonstration manipulates an output pin, we need to unlock the
-    # microcontroller before proceeding further.
-    mc_interface.toggle_action_lock(toggle=False)
-    mc_interface.toggle_ttl_lock(toggle=False)
-
     # You have to manually generate and submit each module-addressed command (or parameter message) to the
     # microcontroller. This is in contrast to MicroControllerInterface commands, which are sent to the microcontroller
     # automatically (see unlock_controller above).
@@ -121,7 +114,7 @@ if __name__ == "__main__":
     # 1. Uses the PrecisionTimer class to delay the main process thread for 10 seconds, without blocking other
     # concurrent threads.
     delay_timer = PrecisionTimer("s")
-    delay_timer.delay_noblock(10)
+    delay_timer.delay(delay=10, block=False)
 
     # Cancels both recurrent commands by issuing a dequeue command. Note, the dequeue command does not interrupt already
     # running commands, it only prevents further command repetitions.
@@ -163,7 +156,7 @@ if __name__ == "__main__":
 
     # Compresses all logged data into a single .npz archive. This is a prerequisite for reading the logged data via the
     # ModuleInterface default methods!
-    data_logger.compress_logs(remove_sources=True)  # Removes intermediate .npy log entries to save space.
+    assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # If you want to process the data logged during runtime, you first need to extract it from the archive. To help
     # with this, the base ModuleInterface exposes a method that reads the data logged during runtime. The method
@@ -174,6 +167,7 @@ if __name__ == "__main__":
     # Log compression generates an '.npz' archive for each unique source. For MicroControllerInterface class, its
     # controlled_id is used as the source_id. In our case, the log is saved under '222_data_log.npz'.
     log_data = extract_logged_hardware_module_data(
-        log_path=mc_interface.log_path, module_type_id=((int(interface_1.module_type), int(interface_1.module_id)),)
+        log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
+        module_type_id=((int(interface_1.module_type), int(interface_1.module_id)),),
     )
     print(f"Extracted event data: {log_data}")

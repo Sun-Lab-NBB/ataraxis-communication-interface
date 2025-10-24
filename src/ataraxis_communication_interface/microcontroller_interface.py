@@ -4,12 +4,11 @@ microcontrollers.
 """
 
 from abc import ABC, abstractmethod
-from functools import lru_cache
 import sys
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from functools import partial
+from functools import partial, lru_cache
 from threading import Thread
 from dataclasses import dataclass
 from multiprocessing import (
@@ -22,8 +21,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from tqdm import tqdm
 import numpy as np
+from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from ataraxis_base_utilities import LogLevel, console, chunk_iterable
+from ataraxis_base_utilities import console, chunk_iterable
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
 
 from .communication import (
@@ -48,8 +48,6 @@ from .communication import (
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
 
-    from numpy.typing import NDArray
-
 # Defines static constants used in this module
 _MAXIMUM_BYTE_VALUE = 255
 _ZERO_BYTE = np.uint8(0)
@@ -73,7 +71,7 @@ class _RuntimeParameters(IntEnum):
     MAXIMUM_COMMUNICATION_ATTEMPTS = 3
     """The maximum number of microcontroller ID information request attempts the communication process can carry out 
     during the initialization before raising an error."""
-    PROCES_TERMINATION_TIMEOUT = 60
+    PROCESS_TERMINATION_TIMEOUT = 60
     """The maximum period of time, in seconds, to wait for the communication process to terminate gracefully before 
     sending a SIGKILL signal to terminate it forcibly. This prevents being stuck in a graceful process termination 
     loop."""
@@ -129,7 +127,7 @@ class ModuleInterface(ABC):  # pragma: no cover
     interface to the managed hardware module instance running on the companion microcontroller. Also, inheriting from
     this class provides the user-facing API for sending commands and parameters to the managed hardware module.
 
-    Note:
+    Notes:
         Every custom hardware module interface has to inherit from this base class. When inheriting from this class,
         initialize the superclass by calling the 'super().__init__()' during the subclass initialization.
 
@@ -167,6 +165,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         _create_parameters_message: LRU-cached method (maxsize=16) for creating parameter message objects. Caches up
             to 16 unique parameter configurations to avoid redundant object creation and serialization when repeatedly
             sending the same parameter presets.
+
     Raises:
         TypeError: If input arguments are not of the expected type.
     """
@@ -261,7 +260,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         This method is called during the initial setup sequence of the remote microcontroller communication process,
         before the PC-microcontroller communication cycle.
 
-        Note:
+        Notes:
             This method should instantiate all interface assets that do not support pickling, such as PrecisionTimer
             or SharedMemoryArray instances. All assets initialized by this method must be destroyed by the
             terminate_remote_assets() method.
@@ -285,7 +284,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         This method is called during the communication cycle's runtime when the interface instance receives a message
         from the microcontroller that uses an event code provided at class initialization as 'data_codes' argument.
 
-        Note:
+        Notes:
             This method should implement the custom online data-processing logic associated with each message whose
             event code is specified in the 'data_codes' argument.
 
@@ -302,10 +301,10 @@ class ModuleInterface(ABC):  # pragma: no cover
         raise NotImplementedError
 
     def _create_command_message_implementation(
-            self,
-            command: np.uint8,
-            noblock: np.bool_,
-            cycle_delay: np.uint32,
+        self,
+        command: np.uint8,
+        noblock: np.bool_,
+        cycle_delay: np.uint32,
     ) -> OneOffModuleCommand | RepeatedModuleCommand:
         """Creates the command message object using the input parameters.
 
@@ -326,19 +325,18 @@ class ModuleInterface(ABC):  # pragma: no cover
                 command=command,
                 noblock=noblock,
             )
-        else:
-            return RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=_ZERO_BYTE,
-                command=command,
-                noblock=noblock,
-                cycle_delay=cycle_delay,
-            )
+        return RepeatedModuleCommand(
+            module_type=self._module_type,
+            module_id=self._module_id,
+            return_code=_ZERO_BYTE,
+            command=command,
+            noblock=noblock,
+            cycle_delay=cycle_delay,
+        )
 
     def _create_parameters_message_implementation(
-            self,
-            parameter_data: tuple[np.number[Any] | np.bool_, ...],
+        self,
+        parameter_data: tuple[np.number[Any] | np.bool_, ...],
     ) -> ModuleParameters:
         """Creates the parameter message object using the input parameters.
 
@@ -359,8 +357,8 @@ class ModuleInterface(ABC):  # pragma: no cover
     def send_command(self, command: np.uint8, noblock: np.bool, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
         """Packages the input command data into the appropriate message structure and sends it to the managed hardware
         module.
-        
-        Note:
+
+        Notes:
             This method caches up to 32 unique command messages in the instance-specific LRU cache to speed up sending
             previously created command messages.
 
@@ -394,7 +392,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
         hardware module.
 
-        Note:
+        Notes:
             This method caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending
             previously created command messages.
 
@@ -461,8 +459,7 @@ class ModuleInterface(ABC):  # pragma: no cover
 
     @property
     def data_codes(self) -> set[np.uint8]:
-        """Returns the set of message event-codes that require online processing during runtime.
-        """
+        """Returns the set of message event-codes that require online processing during runtime."""
         return self._data_codes
 
     @property
@@ -472,54 +469,55 @@ class ModuleInterface(ABC):  # pragma: no cover
 
 
 class MicroControllerInterface:  # pragma: no cover
-    """Interfaces with an Arduino or Teensy microcontroller running the ataraxis-micro-controller library.
+    """Interfaces with the hardware module instances managed by the Arduino or Teensy microcontroller running the
+    ataraxis-micro-controller library.
 
-    This class creates and manages a remote daemon process that facilitates bidirectional communication and data
-    logging between the target microcontroller and the host-machine (PC). Additionally, it exposes methods that send
-    runtime parameters and commands to the Kernel instance that manages the runtime behavior of the microcontroller.
+    This class binds each hardware module managed by the microcontroller to its user-facing interface implemented via
+    this library. It abstracts all necessary steps to bidirectionally communicate with the microcontroller and log the
+    incoming and outgoing message data to disk.
 
-    Note:
+    Notes:
         An instance of this class has to be instantiated for each microcontroller active at the same time.
 
         Initializing this class does not automatically start the communication. Call the start() method of an
         initialized class instance to start the communication with the microcontroller.
 
-        This class uses SharedMemoryArray to manage the remote process. Due to the SharedMemoryArray implementation,
-        this ensures that only a single class instance with the same controlled_id can exist at the same time.
-
         Initializing MicroControllerInterface also completes the configuration of all ModuleInterface instances passed
-        to the class constructor.
+        to the instance during initialization.
 
     Args:
-        controller_id: The unique identifier code of the managed microcontroller.
-        buffer_size: The microcontroller's serial interface (UART or USB) buffer size, in bytes. This information
-            is typically available from the microcontroller's vendor.
-        port: The serial USB port to which the microcontroller is connected.
-        data_logger: An initialized DataLogger instance to use for logging the communication data.
-        module_interfaces: A tuple of ModuleInterface-derived instances that interface with specific hardware modules
-            managed by the microcontroller.
-        baudrate: The baudrate to use during communication if the managed microcontroller uses the UART serial
-            interface. The value used here must match the value used by the microcontroller. This argument is ignored
-            if the managed microcontroller uses the USB serial interface.
-        keepalive_interval: The interval, in milliseconds, at which the interface sends keepalive messages to the
-            microcontroller. Setting this argument to 0 disables keepalive messages.
+        controller_id: The unique identifier code of the managed microcontroller. This value is used to identify the
+            microcontroller in all output streams (e.g., log files and terminal messages).
+        data_logger: An initialized DataLogger instance used to log all incoming and outgoing messages handled by
+            this MicroControllerInterface instance.
+        module_interfaces: The custom hardware module interfaces for the hardware module instance managed by the
+            microcontroller. Note, each module instance requires a unique interface instance.
+        buffer_size: The size, in bytes, of the buffer used by the microcontroller's serial communication interface.
+            Usually, this information is available from the microcontroller's manufacturer (UART / USB controller
+            specification).
+        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci-id' CLI
+            command to discover the available microcontrollers and their respective communication port names.
+        baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
+            the value used by the microcontroller. This parameter is ignored when using the USB interface.
+        keepalive_interval: The interval, in milliseconds, at which to send the keepalive messages to the
+            microcontroller. Setting this argument to 0 disables keepalive messaging functionality.
 
     Raises:
         TypeError: If any of the input arguments are not of the expected type.
 
     Attributes:
         _started: Tracks whether the communication process has been started.
-        _controller_id: Stores the id-code of the managed microcontroller.
+        _controller_id: Stores the id of the managed microcontroller.
         _port: Stores the USB port used for microcontroller communication.
         _baudrate: Stores the baudrate used during communication over the UART serial interface.
         _buffer_size: Stores the microcontroller's serial buffer size, in bytes.
         _modules: Stores ModuleInterface instances managed by this MicroControllerInterface.
-        _logger_queue: Stores the Multiprocessing Queue object used to pipe log data to the DataLogger core(s).
+        _logger_queue: The Multiprocessing Queue object used to pipe log data to the DataLogger core(s).
         _log_directory: Stores the output directory used by the DataLogger to save temporary log entries and the final
             .npz log archive.
-        _mp_manager: Stores the multiprocessing Manager used to initialize and manage the Queue instance that pipes
+        _mp_manager: The multiprocessing Manager used to initialize and manage the Queue instance that pipes
             command and parameter messages to the communication process.
-        _input_queue: Stores the multiprocessing Queue used to pipe the data to be sent to the microcontroller to
+        _input_queue: The multiprocessing Queue used to pipe the data to be sent to the microcontroller to
             the remote communication process.
         _terminator_array: Stores the SharedMemoryArray instance used to control the remote communication process.
         _communication_process: Stores the Process instance that runs the communication cycle.
@@ -527,8 +525,6 @@ class MicroControllerInterface:  # pragma: no cover
         _reset_command: Stores the pre-packaged Kernel-addressed command that resets the managed microcontroller to the
             default state.
         _keepalive_interval: Stores the keepalive interval in milliseconds.
-        _action_lock: Tracks whether the microcontroller's actor pins are locked.
-        _ttl_lock = Tracks whether the microcontroller's TTL pins are locked.
     """
 
     # Pre-packages user-addressable Kernel commands into attributes. Since Kernel commands are known and fixed at class
@@ -541,22 +537,20 @@ class MicroControllerInterface:  # pragma: no cover
     def __init__(
         self,
         controller_id: np.uint8,
-        buffer_size: int,
-        port: str,
         data_logger: DataLogger,
         module_interfaces: tuple[ModuleInterface, ...],
+        buffer_size: int,
+        port: str,
         baudrate: int = 115200,
         keepalive_interval: int = 0,
     ) -> None:
         # Initializes the started tracker first to avoid issues during __del__ runtime if the class is not able to
         # initialize.
         self._started: bool = False
+        self._mp_manager: SyncManager = Manager()  # The managed is terminated by __del__ method.
 
-        # Since the manager is now terminated via __del__ method, it makes sense to have it high in the initialization
-        # order.
-        self._mp_manager: SyncManager = Manager()
-
-        # Ensures that input arguments have valid types. Only checks the arguments that are not passed to other classes.
+        # Ensures that input arguments have valid types. Only checks the arguments that are not verified by downstream
+        # classes.
         if not isinstance(controller_id, np.uint8) or not 1 <= controller_id <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the MicroControllerInterface instance. Expected an unsigned integer value "
@@ -584,6 +578,13 @@ class MicroControllerInterface:  # pragma: no cover
                 f"encountered {data_logger} of type {type(data_logger).__name__}."
             )
             console.error(message=message, error=TypeError)
+        if not isinstance(keepalive_interval, int) or keepalive_interval < 0:
+            message = (
+                f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
+                f"{controller_id}. Expected a non-negative integer value for the 'keepalive_interval' argument, but "
+                f"encountered {keepalive_interval} of type {type(keepalive_interval).__name__}."
+            )
+            console.error(message=message, error=TypeError)
 
         # Controller (kernel) ID information.
         self._controller_id: np.uint8 = controller_id
@@ -593,9 +594,7 @@ class MicroControllerInterface:  # pragma: no cover
         self._baudrate: int = baudrate
         self._buffer_size: int = buffer_size
 
-        # Managed modules and data logger queue. Modules will be pre-processes as part of this initialization runtime.
-        # Logger queue is fed directly into the SerialCommunication, which automatically logs all incoming and outgoing
-        # data to disk.
+        # Managed modules and data logger queue.
         self._modules: tuple[ModuleInterface, ...] = module_interfaces
 
         # Extracts the queue and log path from the logger instance.
@@ -612,8 +611,6 @@ class MicroControllerInterface:  # pragma: no cover
         # Initializes class attributes used to track the current microcontroller configuration and communication
         # runtime parameters.
         self._keepalive_interval = keepalive_interval
-        self._action_lock = True
-        self._ttl_lock = True
 
         # Verifies that all input ModuleInterface instances have a unique type+id combination and configures each
         # module to use the input queue instantiated above to submit command and parameter messages to the
@@ -625,9 +622,9 @@ class MicroControllerInterface:  # pragma: no cover
             if module.type_id in processed_type_ids:
                 message = (
                     f"Unable to initialize the MicroControllerInterface instance for the microcontroller with "
-                    f"id {controller_id}. Encountered two ModuleInterface instances with the same type-code "
-                    f"({module.module_type}) and id-code ({module.module_id}), which is not allowed. Make sure each "
-                    f"type and id combination is only used by a single ModuleInterface class instance."
+                    f"id {controller_id}. Encountered two module interface instances with the same type-code "
+                    f"({module.module_type}) and id-code ({module.module_id}), which is not allowed. Each type and id "
+                    f"combination can only used by a single module interface instance."
                 )
                 console.error(message=message, error=ValueError)
 
@@ -643,7 +640,7 @@ class MicroControllerInterface:  # pragma: no cover
         """Returns the string representation of the class instance."""
         return (
             f"MicroControllerInterface(controller_id={self._controller_id}, usb_port={self._port}, "
-            f"baudrate={self._baudrate}, started={self._started})"
+            f"baudrate={self._baudrate}, started={self._started}, keepalive_interval={self._keepalive_interval} ms)"
         )
 
     def __del__(self) -> None:
@@ -652,24 +649,24 @@ class MicroControllerInterface:  # pragma: no cover
         self._mp_manager.shutdown()
 
     def reset_controller(self) -> None:
-        """Resets the connected managed microcontroller to use the default hardware and software parameters."""
+        """Resets the managed microcontroller to use the default hardware and software parameters."""
         self._input_queue.put(self._reset_command)
 
     def _watchdog(self) -> None:
-        """This method is used by the watchdog thread to ensure the communication process is alive during runtime.
+        """This method is used by the watchdog thread to ensure that the communication process is alive during runtime.
 
-        This method raises RuntimeErrors if it detects that a process has prematurely shut down. It verifies
-        the process state in 20-millisecond cycles and releases the GIL between state verifications.
+        This method raises RuntimeErrors if it detects that the communication process has prematurely shut down. It
+        verifies the process state in 20-millisecond cycles and releases the GIL between state verifications.
 
-        Note:
+        Notes:
             If the method detects that the communication process has terminated prematurely, it carries out the
             necessary resource cleanup steps before raising the error and terminating the overall runtime.
         """
         timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-        # The watchdog function will run until the global shutdown command is issued.
-        while not self._terminator_array.read_data(index=0):  # type: ignore[union-attr]
-            # Checks process state every _WATCHDOG_INTERVAL ms. Releases the GIL while waiting.
+        # The watchdog function runs until the global shutdown signal is emitted.
+        while self._terminator_array is not None and not self._terminator_array[0]:
+            # Checks process state every 20 ms. Releases the GIL while waiting.
             timer.delay(delay=_RuntimeParameters.WATCHDOG_INTERVAL.value, allow_sleep=True, block=False)
 
             # Only monitors the Process state after the communication is initialized via the start() method.
@@ -682,10 +679,10 @@ class MicroControllerInterface:  # pragma: no cover
 
                 # Activates the shutdown flag
                 if self._terminator_array is not None:
-                    self._terminator_array[0] = np.uint8(1)
+                    self._terminator_array[0] = 1
 
                 # The process should already be terminated, but there are no downsides to making sure it is dead.
-                self._communication_process.join(_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
+                self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.
                 if self._terminator_array is not None:
@@ -701,34 +698,28 @@ class MicroControllerInterface:  # pragma: no cover
                 console.error(message=message, error=RuntimeError)
 
     def start(self) -> None:
-        """Initializes the communication with the target microcontroller.
+        """Strats the instance's communication process and begins interfacing with the microcontroller.
 
-        Until this method is called, the instance is not able to communicate with the microcontroller.
-
-        Note:
-            After this method finishes its runtime, a watchdog thread is used to monitor the status of the process
-            until the stop() method is called, notifying the user if the process terminates prematurely.
-
-            If send_message() is called before calling this method, the method transmits all queued messages to the
-            microcontroller in one step immediately after communication process initialization. Multiple commands
-            addressed to the same module sent in this fashion are likely to interfere with each-other.
-
+        Notes:
             As part of this method runtime, the interface verifies the target microcontroller's configuration to
-            ensure compatibility with the interface instance.
+            ensure it matches the interface's configuration.
 
         Raises:
-            RuntimeError: If the instance fails to initialize the communication runtime.
+            RuntimeError: If the instance fails to initialize the communication process.
         """
         # Prevents restarting an already running communication process
         if self._started:
             return
 
+        # This timer is used to forcibly terminate processes that stall at initialization.
+        initialization_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
         # Instantiates the shared memory array used to control the runtime of the communication Process.
-        # Index 0 = terminator, index 1 = initialization status
+        # Index 0 = terminator, index 1 = initialization status tracker
         self._terminator_array = SharedMemoryArray.create_array(
-            name=f"{self._controller_id}_terminator_array",
+            name=f"{self._controller_id}_terminator_array",  # Uses class id with an additional specifier
             prototype=np.zeros(shape=2, dtype=np.uint8),
-            exists_ok=True,  # Automatically deals with already existing shared memory buffers
+            exists_ok=True,  # Automatically recreates the buffer if it already exists
         )
 
         # Binds runtime arguments to the communication cycle function before passing it to the Process instance.
@@ -751,83 +742,77 @@ class MicroControllerInterface:  # pragma: no cover
             target=runtime_cycle_with_args,
             daemon=True,
         )
-
-        # Creates the watchdog thread.
-        self._watchdog_thread = Thread(target=self._watchdog, daemon=True)
-
-        # Initializes the communication process.
         self._communication_process.start()
 
-        # Connects to the shared memory array to send control signals. This has to be done after initializing the
-        # communication process
+        # Connects to the shared memory array to send and receive control signals. This has to be done after
+        # initializing the communication process
         self._terminator_array.connect()
         # Ensures the buffer is destroyed if the instance is garbage-collected to prevent memory leaks.
         self._terminator_array.enable_buffer_destruction()
 
-        start_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-        start_timer.reset()
+        initialization_timer.reset()
         # Blocks until the microcontroller has finished all initialization steps or encounters an initialization error.
-        while self._terminator_array[1] != 1:
+        while self._terminator_array[1] != 1:  # pragma: no cover
             if (
                 not self._communication_process.is_alive()
-                or start_timer.elapsed > _RuntimeParameters.PROCESS_INITIALIZATION_TIMEOUT.value
+                or initialization_timer.elapsed > _RuntimeParameters.PROCESS_INITIALIZATION_TIMEOUT.value
             ):
                 # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
-                self._terminator_array[0] = np.uint8(1)
+                self._terminator_array[0] = 1
 
                 # Waits for at most _PROCES_TERMINATION_TIMEOUT seconds before forcibly terminating the communication
                 # process to prevent deadlocks
-                self._communication_process.join(_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
+                self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.
                 self._terminator_array.disconnect()
                 self._terminator_array.destroy()
 
                 message = (
-                    f"MicroControllerInterface with id {self._controller_id} has failed to initialize the "
-                    f"communication with the microcontroller."
+                    f"Unable to start the MicroControllerInterface with id {self._controller_id}. The microcontroller "
+                    f"communication process has unexpectedly shut down or stalled for more than "
+                    f"{_RuntimeParameters.PROCESS_INITIALIZATION_TIMEOUT.value} seconds during initialization. "
+                    f"This likely indicates a problem with the SerialCommunication instance managed by this process."
                 )
                 console.error(error=RuntimeError, message=message)
 
-        # Starts the process watchdog thread once the initialization is complete
+        # Creates and starts the watchdog thread.
+        self._watchdog_thread = Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
 
-        # Issues the global reset command. This ensures that the controller always starts with 'default' parameters.
+        # Issues the global reset command. This ensures that the controller always starts with 'default' parameters for
+        # Teensy microcontroller boards that do not reset upon communication interface connection cycling.
         self.reset_controller()
 
         # Sets the started flag
         self._started = True
 
     def stop(self) -> None:
-        """Shuts down the communication process and frees all reserved resources."""
-        # If the process has not been started, returns without doing anything.
-        if not self._started:
+        """Stops the instance's communication process and releases all reserved resources."""
+        # Prevents stopping an already stopped MicroControllerInterface instance.
+        if not self._started or self._terminator_array is None:
             return
 
-        # Resets the microcontroller. This automatically prevents all modules from changing pin states (locks the
-        # microcontroller) and resets command queues and hardware state trackers.
+        # Resets the microcontroller to ensure all hardware is set to default states that are assumed to be safe.
         self.reset_controller()
 
-        # Changes the started tracker value. Amongst other things this soft-inactivates the watchdog thread.
+        # This inactivates the watchdog thread monitoring, ensuring it does not err when the processes are terminated.
         self._started = False
 
-        # Sets the terminator trigger to 1, which triggers the communication process shutdown. This also shuts down the
-        # watchdog thread.
-        if self._terminator_array is not None:
-            self._terminator_array[0] = np.uint8(1)
+        # Emits the process shutdown signal.
+        self._terminator_array[0] = 1
 
         # Waits until the communication process terminates
         if self._communication_process is not None:
-            self._communication_process.join(timeout=_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
+            self._communication_process.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
         # Waits for the watchdog thread to terminate.
         if self._watchdog_thread is not None:
-            self._watchdog_thread.join(timeout=_RuntimeParameters.PROCES_TERMINATION_TIMEOUT.value)
+            self._watchdog_thread.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
         # Disconnects from the shared memory array and destroys its shared buffer.
-        if self._terminator_array is not None:
-            self._terminator_array.disconnect()
-            self._terminator_array.destroy()
+        self._terminator_array.disconnect()
+        self._terminator_array.destroy()
 
     @staticmethod
     def _verify_microcontroller_communication(
@@ -839,15 +824,12 @@ class MicroControllerInterface:  # pragma: no cover
     ) -> None:
         """Verifies that the managed microcontroller and the interface instance have a matching configuration.
 
-        This service method is used as part of the communication process initialization process to ensure that the
-        interface and the microcontroller are configured to support bidirectional communication.
-
         Args:
             serial_communication: The SerialCommunication instance used to communicate with the microcontroller.
-            timeout_timer: The PrecisionTimer instance used to time verification steps.
+            timeout_timer: The PrecisionTimer instance used to prevent verification from stalling.
             controller_id: The expected ID code of the microcontroller.
-            module_interfaces: The interface instances for all hardware modules connected to the microcontroller.
-            terminator_array: The SharedMemoryArray instance used to control the runtime of the communication Process.
+            module_interfaces: The interface instances for all managed hardware modules.
+            terminator_array: The SharedMemoryArray instance used to control the runtime of the communication process.
 
         Raises:
             RuntimeError: If the method is unable to communicate with the microcontroller.
@@ -929,8 +911,8 @@ class MicroControllerInterface:  # pragma: no cover
         if len(module_type_ids) < len(module_interfaces):
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The microcontroller "
-                f"does not manage all of the hardware modules expected by the ModuleInterface instances passed to the "
-                f"communication process."
+                f"does not manage all of the hardware modules expected by the interfaces passed to the "
+                f"MicroControllerInterface instance."
             )
             console.error(message=message, error=ValueError)
 
@@ -939,7 +921,7 @@ class MicroControllerInterface:  # pragma: no cover
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The microcontroller "
                 f"contains multiple module instances with the same type + id code combination. All modules must use "
-                f"a unique combination of type + id codes."
+                f"a unique combination of type and id codes."
             )
             console.error(message=message, error=ValueError)
 
@@ -948,33 +930,29 @@ class MicroControllerInterface:  # pragma: no cover
             if module.type_id not in module_type_ids:
                 message = (
                     f"Unable to initialize the communication with the microcontroller {controller_id}. "
-                    f"The ModuleInterface class for module with type {module.module_type} and id {module.module_id}"
-                    f"codes does not have a matching hardware module instance managed by the microcontroller."
+                    f"The interface instance for the module with type {module.module_type} and id "
+                    f"{module.module_id} codes does not have a matching hardware module instance managed by the "
+                    f"microcontroller."
                 )
                 console.error(message=message, error=ValueError)
 
         # Reports that the communication class has been successfully initialized.
-        terminator_array[1] = np.uint8(1)
+        terminator_array[1] = 1
 
     @staticmethod
     def _parse_kernel_data(controller_id: np.uint8, in_data: KernelState | KernelData) -> None:
         """Parses incoming KernelState and KernelData messages and, if necessary, raises runtime errors.
 
-        This service method is used to parse all Kernel messages that require 'online' processing. If the
-        incoming message is an error message, this method raises an appropriate RuntimeError. Otherwise, it does
-        nothing.
-
         Args:
-            controller_id: The ID of the managed microcontroller.
+            controller_id: The ID of the interfaced microcontroller.
             in_data: The KernelState or KernelData message to be parsed.
         """
         # Note, event codes are taken directly from the microcontroller's Kernel class.
-
         # kModuleSetupError
         if in_data.event == _KernelStatusCodes.MODULE_SETUP_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 2. The hardware module with type "
+                f"{in_data.command}. Error code: {in_data.event}. The hardware module with type "
                 f"{in_data.data_object[0]} and id {in_data.data_object[1]} has failed its setup "  # type: ignore[index]
                 f"sequence. Firmware re-upload is required to restart the controller."
             )
@@ -984,7 +962,7 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.RECEPTION_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 3. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller was not able to receive (parse) the PC-sent data and had to "
                 f"abort the reception. Last Communication status code was "
                 f"{in_data.data_object[0]} and last TransportLayer status code was "  # type: ignore[index]
@@ -997,7 +975,7 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.TRANSMISSION_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 4. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller's Kernel class was not able to send data to the PC and had to abort "
                 f"the transmission. Last Communication status code was {in_data.data_object[0]} "  # type: ignore[index]
                 f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, "  # type: ignore[index]
@@ -1009,7 +987,7 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.INVALID_MESSAGE_PROTOCOL and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 5. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller received a message with an invalid (unsupported) message protocol "
                 f"code {in_data.data_object[0]}."  # type: ignore[index]
             )
@@ -1019,7 +997,7 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.MODULE_PARAMETERS_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 8. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller was not able to apply new runtime parameters received from the PC to "
                 f"the target hardware module with type {in_data.data_object[0]} and id "  # type: ignore[index]
                 f"{in_data.data_object[1]}."  # type: ignore[index]
@@ -1030,7 +1008,7 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.COMMAND_NOT_RECOGNIZED:
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 9. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller has received an invalid (unrecognized) command code "
                 f"{in_data.command}."
             )
@@ -1040,7 +1018,7 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.TARGET_MODULE_NOT_FOUND and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 10. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller was not able to find the module addressed by the incoming command or "
                 f"parameters message. The target hardware module with type "
                 f"{in_data.data_object[0]} and id {in_data.data_object[1]} "  # type: ignore[index]
@@ -1052,9 +1030,9 @@ class MicroControllerInterface:  # pragma: no cover
         if in_data.event == _KernelStatusCodes.KEEPALIVE_TIMEOUT and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
-                f"{in_data.command}. Error code: 11. "
+                f"{in_data.command}. Error code: {in_data.event}. "
                 f"The microcontroller did not receive a keepalive Kernel-addressed command message (command code 5) "
-                f"over the period of {in_data.data_object} milliseconds and performed an emergency reset sequence."
+                f"over the period of {in_data.data_object} milliseconds and performed an emergency reset procedure."
             )
             console.error(message=message, error=RuntimeError)
 
@@ -1062,23 +1040,20 @@ class MicroControllerInterface:  # pragma: no cover
     def _parse_service_module_data(controller_id: np.uint8, in_data: ModuleState | ModuleData) -> None:
         """Parses incoming service ModuleState and ModuleData messages and, if necessary, raises runtime errors.
 
-        This service method behaves similarly to the _parse_kernel_data() method, but works with the messages sent by
-        Module instances running on the microcontroller. It is specifically designed to handle the 'service'
-        (non-user-defined) messages inherited from the base Module class. All service messages use event codes at or
-        below 50.
+        Notes:
+            Service messages use the system-reserved event code range 0 to 50.
 
         Args:
-            controller_id: The ID of the managed microcontroller.
+            controller_id: The ID of the interfaced microcontroller.
             in_data: The ModuleState or ModuleData message to be parsed.
         """
         # Note, event codes are taken directly from the microcontroller's (base) Module class.
-
         # kTransmissionError
         if in_data.event == _ModuleStatusCodes.TRANSMISSION_ERROR and isinstance(in_data, ModuleData):
             message = (
                 f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {in_data.command}. "
-                f"Error code: 1. The module was not able to send data to the PC and had to abort the "
+                f"Error code: {in_data.event}. The module was not able to send data to the PC and had to abort the "
                 f"transmission. Last Communication status code was {in_data.data_object[0]} "  # type: ignore[index]
                 f"and last TransportLayer status code was {in_data.data_object[1]}. Overall, "  # type: ignore[index]
                 f"this indicates broader issues with the microcontroller-PC communication."
@@ -1090,7 +1065,7 @@ class MicroControllerInterface:  # pragma: no cover
             message = (
                 f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {in_data.command}. "
-                f"Error code: 3. The module has received an invalid (unrecognized) command code "
+                f"Error code: {in_data.event}. The module has received an invalid (unrecognized) command code "
                 f"{in_data.command}."
             )
             console.error(message=message, error=RuntimeError)
@@ -1107,40 +1082,34 @@ class MicroControllerInterface:  # pragma: no cover
         buffer_size: int,
         keepalive_interval: int,
     ) -> None:
-        """This method aggregates the communication runtime logic and is used as the target for the communication
-        Process instance.
+        """Aggregates the logic for bidirectionally communicating with the interfaced microcontroller during runtime.
 
         This method is designed to run in a remote Process. It encapsulates the steps for sending and receiving the
-        data from the connected microcontroller. Primarily, the method routes the data between the microcontroller and
-        the multiprocessing queues (inpout and output) managed by the Interface instance. Additionally, it manages
-        data logging by interfacing with the DataLogger class via the logger_queue.
-
-        Note:
-            Each managed ModuleInterface may contain custom logic for processing and routing the data associated with
-            its hardware module instance. This method calls the custom logic bindings for each interface as necessary.
+        data from the connected microcontroller.
 
         Args:
-            controller_id: The byte-code identifier of the target microcontroller.
-            module_interfaces: A tuple that stores ModuleInterface-derived instances managed by this
-                MicroControllerInterface instance.
+            controller_id: The unique identifier of the interfaced microcontroller.
+            module_interfaces: The custom hardware module interfaces for the hardware module instance managed by the
+                microcontroller.
             input_queue: The multiprocessing queue used to issue commands to the microcontroller.
-            logger_queue: The queue exposed by the DataLogger class that is used to buffer and pipe received and
-                outgoing messages to be logged (saved) to disk.
+            logger_queue: The multiprocessing queue used to buffer and pipe received and outgoing messages to be
+                logged (saved) to disk to the logger process.
             terminator_array: The shared memory array used to control the communication process runtime.
-            port: The serial port to which the target microcontroller is connected.
+            port: The serial port to use for communicating with the microcontroller.
             baudrate: The baudrate to use when communicating with microcontrollers using the UART serial interface.
             buffer_size: The size of the microcontroller's serial buffer.
             keepalive_interval: The interval (in milliseconds) at which to send the keepalive messages to the
                 microcontroller.
         """
         # Constructs Kernel-addressed command used to verify that the microcontroller-PC communication is active during
-        # runtime. THis is used to detect communication issues and problems with the microcontroller during runtime).
+        # runtime. This is used to detect communication issues and problems with the microcontroller during runtime.
         keepalive_command = KernelCommand(
             command=np.uint8(5),
             return_code=np.uint8(_RuntimeParameters.KEEPALIVE_RETURN_CODE.value),
         )
 
-        # Initializes the timer used during initialization to abort stale initialization attempts.
+        # Initializes the timer used during initialization to abort stale initialization attempts and during runtime to
+        # support the keepalive functionality.
         timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
         # Connects to the terminator array. This is done early, as the terminator_array is used to track the
@@ -1148,13 +1117,13 @@ class MicroControllerInterface:  # pragma: no cover
         terminator_array.connect()
 
         # Pre-creates the assets used to optimize the communication runtime cycling. These assets are filled below to
-        # support efficient interaction between the Communication class and the ModuleInterface classes.
+        # support efficient interaction between the SerialCommunication instance and the module interface instances.
         processing_map: dict[np.uint16, ModuleInterface] = {}
         for module in module_interfaces:
             # For each module, initializes the assets that need to be configured / created inside the remote Process.
             module.initialize_remote_assets()
 
-            # If the module is configured to process incoming data or raise runtime errors, maps its type+id combined
+            # If the interface is configured to process incoming data or raise runtime errors, maps its type+id combined
             # code to the interface instance. This is used to quickly find the module interface instance addressed by
             # incoming data, so that it can handle the data or error message.
             if len(module.data_codes) != 0 or len(module.error_codes) != 0:
@@ -1181,17 +1150,17 @@ class MicroControllerInterface:  # pragma: no cover
         # Tracks whether the microcontroller has responded to the last keepalive command sent from the PC.
         keepalive_response_received = True  # Must be initialized to True
 
+        # Initializes the main communication loop. This loop runs until the exit conditions are encountered.
+        # The exit conditions for the loop require the first variable in the terminator_array to be set to True
+        # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
+        # the central process are fully carried out before the communication is terminated.
         try:
-            # Initializes the main communication loop. This loop runs until the exit conditions are encountered.
-            # The exit conditions for the loop require the first variable in the terminator_array to be set to True
-            # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
-            # the central process are fully carried out before the communication is terminated.
             timeout_timer.reset()
             while not terminator_array[0] or not input_queue.empty():
                 # Main data sending loop. The method sequentially retrieves the queued messages and sends them to the
                 # microcontroller.
                 while not input_queue.empty():
-                    # Transmits the data to the microcontroller. Expects that the queue ONLY yields valid messages.
+                    # Transmits the data to the microcontroller. Expects that the queue always yields valid messages.
                     serial_communication.send_message(input_queue.get())
 
                 # Keepalive messaging. Sends a keepalive message every keepalive_interval milliseconds to ensure that
@@ -1305,45 +1274,33 @@ class MicroControllerInterface:  # pragma: no cover
             for module in module_interfaces:
                 module.terminate_remote_assets()
 
-    @property
-    def log_path(self) -> Path | None:
-        """Returns the path to the .npz log archive that stores the communication data (messages) generated by the
-        instance during runtime.
 
-        Returns:
-            The path to the .npz log archive if it exists. None, if the archive does not exist.
-        """
-        log_path = self._log_directory.joinpath(f"{self._controller_id}_log.npz")
-        if not log_path.exists():
-            message = (
-                f"The log archive for the microcontroller with id {self._controller_id} does not exist. This likely "
-                f"indicates that the DataLogger's compress_logs() method that generates the archive has not been "
-                f"called or is still processing the data."
-            )
-            console.echo(message=message, level=LogLevel.WARNING)
-            return None
-        return log_path
+@dataclass()
+class ExtractedMessageData:
+    """Stores the data parsed from the message sent to the PC by a hardware module instance during runtime."""
+
+    timestamp: np.uint64
+    """The number of microseconds elapsed since the UTC epoch onset when the message was received by the PC."""
+    command: np.uint8
+    """The code of the command that the module was executing when it sent the message to the PC."""
+    data: None | np.number | NDArray[np.number]
+    """The parsed data object transmitted with the message (or None, for state-only messages)."""
 
 
 @dataclass()
 class ExtractedModuleData:
-    """Stores the data extracted from the log archive for a single hardware module instance.
-
-    This class is used by the extract_logged_hardware_module_data() function to output the extracted data.
+    """Stores the data parsed from all non-service messages sent to the PC by a hardware module instance during
+    runtime.
     """
 
     module_type: int
-    """Stores the type (family) code of the hardware module whose data is stored in the 'data' attribute."""
+    """Stores the type (family) code of the hardware module instance whose data is stored in the 'data' attribute."""
     module_id: int
     """Stores the unique identifier code of the hardware module instance whose data is stored in the 'data' 
     attribute."""
     # noinspection PyTypeHints
-    data: dict[Any, list[dict[str, np.uint64 | Any]]]
-    """A tuple of dictionaries that uses numpy uint8 event codes as keys and stores lists of dictionaries under each 
-    key. Each inner dictionary contains three elements. First, an uint64 timestamp, representing the number of
-    microseconds since the UTC epoch onset. Second, the data object transmitted with the message (or None, for 
-    state-only events). Third, the uint8 code of the command that the module was executing when it sent the message to 
-    the PC."""
+    event_data: dict[np.uint8, tuple[ExtractedMessageData, ...]]
+    """A dictionary that uses message event codes as keys and tuples of ExtractedMessageData instances as values."""
 
 
 def _process_module_message_batch(
@@ -1351,24 +1308,26 @@ def _process_module_message_batch(
     file_names: list[str],
     onset_us: np.uint64,
     module_type_id: tuple[tuple[int, int], ...],
-) -> dict[tuple[int, int], list[dict[str, Any]]]:
+) -> dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]]:
     """Processes the target batch of MicroControllerInterface-generated messages stored in the .npz log file.
 
     This worker function is used by the extract_logged_hardware_module_data() function to process multiple message
     batches in parallel to speed up the hardware module data extraction.
 
     Args:
-        log_path: The path to the processed log file.
+        log_path: The path to the processed .npz log file.
         file_names: The names of the individual message .npy files stored in the target archive.
         onset_us: The onset of the data acquisition, in microseconds elapsed since UTC epoch onset.
         module_type_id: The module type and ID codes to extract.
 
     Returns:
         A dictionary mapping module (type, id) tuples to lists of extracted data dictionaries. Each data dictionary
-        contains 'event', 'timestamp', 'data', and 'command' keys.
+        contains a list of ExtractedMessageData instances for each processed event code.
     """
     # Pre-creates the dictionary to store the extracted data for this batch
-    batch_data: dict[tuple[int, int], list[dict[str, Any]]] = {module: [] for module in module_type_id}
+    batch_data: dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] = {
+        module: {} for module in module_type_id
+    }
 
     # Opens the processed log archive using memory mapping. If module data processing is performed in parallel, all
     # processes interact with the archive concurrently.
@@ -1411,7 +1370,7 @@ def _process_module_message_batch(
 
             # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
             # in size. Extracts and formats the data object, included with the logged payload.
-            data: Any = None
+            data: None | np.number | NDArray[np.number] = None
             if len(payload) > _RuntimeParameters.MINIMUM_MODULE_DATA_SIZE.value:
                 # noinspection PyTypeChecker
                 prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
@@ -1424,10 +1383,18 @@ def _process_module_message_batch(
                 else:
                     data = None  # Marks as an error case
 
-            # Adds the extracted data to the batch results
-            batch_data[current_module].append(
-                {"event": event, "timestamp": timestamp, "data": data, "command": command_code}
+            # Creates an ExtractedMessageData instance with the extracted information
+            message_data = ExtractedMessageData(
+                timestamp=timestamp,
+                command=command_code,
+                data=data,
             )
+
+            # Adds the extracted message data to the batch results, grouped by event code
+            if event not in batch_data[current_module]:
+                batch_data[current_module][event] = [message_data]
+            else:
+                batch_data[current_module][event].append(message_data)
 
     return batch_data
 
@@ -1437,14 +1404,14 @@ def extract_logged_hardware_module_data(
     module_type_id: tuple[tuple[int, int], ...],
     n_workers: int = -1,
 ) -> tuple[ExtractedModuleData, ...]:
-    """Extracts the data for the requested hardware module instances running on an Ataraxis Micro Controller (AMC)
-    device from the .npz log file generated by a DataLogger instance during runtime.
+    """Extracts the received message data for the requested hardware module instances from the .npz log file generated
+    by a MicroControllerInterface instance during runtime.
 
-    This function reads the '.npz' archive generated by the DataLogger's 'compress_logs' method and extracts all
-    custom event-codes and data objects transmitted by the requested hardware module instances from the microcontroller
-    to the PC.
+    This function reads the '.npz' archive generated by the DataLogger's assemble_log_archives() method for a
+    MicroControllerInterface instance and extracts the data for all non-system messages transmitted by the requested
+    hardware module instances from the microcontroller to the PC.
 
-    Note:
+    Notes:
         At this time, the function exclusively works with the data sent by the microcontroller to the PC.
 
         The extracted data does not contain library-reserved events and messages. This includes all Kernel messages
@@ -1452,7 +1419,6 @@ def extract_logged_hardware_module_data(
         code 2, which report command completion. These messages are parsed in addition to custom messages sent by each
         hardware module.
 
-    Note:
         If the target .npz archive contains fewer than 2000 messages, the processing is carried out sequentially
         regardless of the specified worker-count.
 
@@ -1460,7 +1426,7 @@ def extract_logged_hardware_module_data(
         log_path: The path to the .npz archive file that stores the logged data generated by the
             MicroControllerInterface instance during runtime.
         module_type_id: A tuple of tuples, where each inner tuple stores the type and ID codes of a specific hardware
-            module, whose data should be extracted from the archive, e.g.: ((3, 1)).
+            module, whose data should be extracted from the archive, e.g.: ((3, 1), (4, 2)).
         n_workers: The number of parallel worker processes (CPU cores) to use for processing. Setting this to a value
             below 1 uses all available CPU cores. Setting this to a value of 1 conducts the processing sequentially.
 
@@ -1469,8 +1435,7 @@ def extract_logged_hardware_module_data(
         specific hardware module instance.
 
     Raises:
-        ValueError: If the input path is not valid or does not point to an existing .npz archive. If the function is
-            unable to properly extract a logged data object for the target hardware module.
+        ValueError: If the target .npz archive does not exist.
     """
     # If the specified compressed log archive does not exist, raises an error
     if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
@@ -1515,35 +1480,16 @@ def extract_logged_hardware_module_data(
 
     # Small archives are processed sequentially to avoid the unnecessary overhead of setting up the multiprocessing
     # runtime. This is also done for large files if the user explicitly requests to use a single worker process.
+    module_event_data: dict[tuple[int, int], dict[np.uint8, tuple[ExtractedMessageData, ...]]]
     if n_workers == 1 or len(messages_to_process) < _RuntimeParameters.PARALLEL_PROCESSING_THRESHOLD.value:
         # Processes all messages in a single batch sequentially
         batch_results = _process_module_message_batch(log_path, messages_to_process, onset_us, module_type_id)
 
-        # Converts the batch results into the expected format
-        module_event_data: dict[tuple[int, int], dict[Any, Any]] = {module: {} for module in module_type_id}
-
-        for module, data_list in batch_results.items():
-            for data_item in data_list:
-                event = data_item["event"]
-                # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each event
-                # code, creates a list of tuples. Each tuple inside the list contains the timestamp, data object
-                # (or None) and the active command code.
-                if event not in module_event_data[module]:
-                    module_event_data[module][event] = [
-                        {
-                            "timestamp": data_item["timestamp"],
-                            "data": data_item["data"],
-                            "command": data_item["command"],
-                        }
-                    ]
-                else:
-                    module_event_data[module][event].append(
-                        {
-                            "timestamp": data_item["timestamp"],
-                            "data": data_item["data"],
-                            "command": data_item["command"],
-                        }
-                    )
+        # Convert the lists of ExtractedMessageData instances to tuples for the final data structure
+        module_event_data = {
+            module: {event: tuple(message_list) for event, message_list in event_dict.items()}
+            for module, event_dict in batch_results.items()
+        }
     else:
         # If the user enabled using all available cores, configures the runtime to use all available CPUs
         if n_workers < 0:
@@ -1569,7 +1515,9 @@ def extract_logged_hardware_module_data(
 
             # Collects results while maintaining message order. This also propagates processing errors to the caller
             # process.
-            results: list[dict[tuple[int, int], list[dict[str, Any]]] | None] = [None] * len(batches)
+            results: list[dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] | None] = [None] * len(
+                batches
+            )
 
             # Creates a progress bar for batch processing
             with tqdm(total=len(batches), desc="Extracting microcontroller hardware module data", unit="batch") as pbar:
@@ -1578,37 +1526,34 @@ def extract_logged_hardware_module_data(
                     pbar.update(1)  # Updates the progress bar after each batch completes
 
         # Combines processing results from all batches
-        module_event_data = {module: {} for module in module_type_id}
+        combined_module_data: dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] = {
+            module: {} for module in module_type_id
+        }
 
         # Processes results from each batch to maintain chronological ordering
         for batch_result in results:
             if batch_result is not None:  # Skips None results
-                for module, data_list in batch_result.items():
-                    for data_item in data_list:
-                        event = data_item["event"]
-                        # Iteratively fills the dictionary with extracted data. Uses event byte-codes as keys. For each
-                        # event code, creates a list of tuples. Each tuple inside the list contains the timestamp, data
-                        # object (or None) and the active command code.
-                        if event not in module_event_data[module]:
-                            module_event_data[module][event] = [
-                                {
-                                    "timestamp": data_item["timestamp"],
-                                    "data": data_item["data"],
-                                    "command": data_item["command"],
-                                }
-                            ]
+                for module, event_dict in batch_result.items():
+                    for event, message_list in event_dict.items():
+                        # Iteratively fills the dictionary with ExtractedMessageData instances from each batch
+                        if event not in combined_module_data[module]:
+                            combined_module_data[module][event] = message_list
                         else:
-                            module_event_data[module][event].append(
-                                {
-                                    "timestamp": data_item["timestamp"],
-                                    "data": data_item["data"],
-                                    "command": data_item["command"],
-                                }
-                            )
+                            combined_module_data[module][event].extend(message_list)
+
+        # Convert all lists to tuples for the final data structure
+        module_event_data = {
+            module: {event: tuple(message_list) for event, message_list in event_dict.items()}
+            for module, event_dict in combined_module_data.items()
+        }
 
     # Creates ExtractedModuleData instances for each module and returns the tuple of created instances to caller
     return tuple(
-        ExtractedModuleData(module_type=module[0], module_id=module[1], data=module_event_data[module])
+        ExtractedModuleData(
+            module_type=module[0],
+            module_id=module[1],
+            event_data=module_event_data[module],
+        )
         for module in module_type_id
         if module_event_data[module]  # Only includes modules that have data
     )

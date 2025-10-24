@@ -29,7 +29,7 @@ class SerialProtocols(IntEnum):
     """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
     communication.
 
-    Note:
+    Notes:
         The elements in this enumeration should be accessed through their 'as_uint8' property to enforce
         the type expected by other classes from this library.
     """
@@ -1154,7 +1154,7 @@ class SerialCommunication:
     """Provides methods for bidirectionally communicating with a microcontroller running the ataraxis-micro-controller
     library over the USB or UART serial interface.
 
-    Note:
+    Notes:
         This class is explicitly designed to be used by other library assets and should not be used directly by end
         users. An instance of this class is initialized and managed by the MicrocontrollerInterface class.
 
@@ -1163,8 +1163,7 @@ class SerialCommunication:
         microcontroller_serial_buffer_size: The size, in bytes, of the buffer used by the communicated microcontroller's
             serial communication interface. Usually, this information is available from the microcontroller's
             manufacturer (UART / USB controller specification).
-        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci-id' CLI
-            command to discover the available microcontrollers and their respective communication port names.
+        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'.
         logger_queue: The multiprocessing Queue object exposed by the DataLogger instance used to pipe the data to be
             logged to the logger process.
         baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
@@ -1274,7 +1273,7 @@ class SerialCommunication:
         """Receives a message sent by the microcontroller and parses its contents into the appropriate instance
         attribute.
 
-        Note:
+        Notes:
             Each call to this method overwrites the previously received message data stored in the instance's
             attributes. It is advised to finish working with the received message data before receiving another message.
 
@@ -1405,7 +1404,7 @@ class MQTTCommunication:
     """Provides methods for bidirectionally communicating with other clients connected to the same MQTT broker using the
     MQTT protocol over the TCP interface.
 
-    Note:
+    Notes:
         Primarily, the class is intended to be used alongside the SerialCommunication class to transfer the data between
         microcontrollers and the rest of the runtime infrastructure.
 
@@ -1477,7 +1476,7 @@ class MQTTCommunication:
     def connect(self) -> None:
         """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
-        Note:
+        Notes:
             This method has to be called after class initialization to start the communication process. Any message
             sent to the MQTT broker from other clients before this method is called may not reach this instance.
 
