@@ -57,12 +57,12 @@ _ZERO_LONG = np.uint32(0)
 
 
 class _RuntimeParameters(IntEnum):
-    """Defines various hardcoded runtime parameter constants used throughout this module."""
+    """Defines hardcoded runtime parameter constants used throughout this module."""
 
     KEEPALIVE_RETURN_CODE = 255
     """The Return code used in keepalive command messages."""
     SERVICE_CODE_THRESHOLD = 50
-    """The highest code-value used by 'service' Module messages."""
+    """The highest code-value used by 'service' (system-reserved) Module messages."""
     PROCESS_INITIALIZATION_TIMEOUT = 30
     """The maximum period of time, in seconds, that the MicroControllerInterface class can take to fully initialize the 
     communication process."""
@@ -90,13 +90,21 @@ class _KernelStatusCodes(IntEnum):
     """Defines the codes used by the Kernel class to communicate runtime errors to the PC."""
 
     MODULE_SETUP_ERROR = 2
+    """Setup() method runtime failed due to a module setup error."""
     RECEPTION_ERROR = 3
+    """Encountered a communication error when receiving data from the PC."""
     TRANSMISSION_ERROR = 4
+    """Encountered a communication error when sending data to the PC."""
     INVALID_MESSAGE_PROTOCOL = 5
+    """Received a message that uses an unsupported (unknown) protocol."""
     MODULE_PARAMETERS_ERROR = 7
+    """Unable to apply the received parameters to the module instance."""
     COMMAND_NOT_RECOGNIZED = 8
+    """Received an unsupported (unknown) Kernel command."""
     TARGET_MODULE_NOT_FOUND = 9
+    """Unable to find the module with the requested combined type and ID code."""
     KEEPALIVE_TIMEOUT = 10
+    """The Kernel did not receive a keepalive message within the expected time."""
 
 
 class _ModuleStatusCodes(IntEnum):
@@ -105,49 +113,43 @@ class _ModuleStatusCodes(IntEnum):
     """
 
     TRANSMISSION_ERROR = 1
+    """Encountered an error when sending data to the PC."""
     COMMAND_COMPLETE = 2
+    """The last active command has been completed and removed from the queue."""
     COMMAND_NOT_RECOGNIZED = 3
+    """The RunActiveCommand() method did not recognize the requested command."""
 
 
 class ModuleInterface(ABC):  # pragma: no cover
-    """Provides the API used by other library components to integrate any custom hardware module interface with the
-    hardware management module running on the companion microcontroller.
+    """Provides the API used by other library components to interface with the custom hardware module controlled by
+    the companion Arduino or Teensy microcontroller.
 
-    Inheriting from this class achieves two goals. First, it grants all subclasses the static API used by the
-    MicroControllerInterface class to interact with module interfaces during PC-microcontroller communication. Second,
-    it provides the user-facing API for sending commands and parameters to the managed hardware module.
+    Any class that inherits from this class gains the API used by the MicroControllerInterface class to bind the
+    interface to the managed hardware module instance running on the companion microcontroller. Also, inheriting from
+    this class provides the user-facing API for sending commands and parameters to the managed hardware module.
 
     Notes:
-        Every custom hardware module interface has to inherit from this base class. Each type (family) of custom
-        hardware modules requires a specialized interface class.
-
-        When inheriting from this class, initialize the superclass by calling the 'super().__init__()' during the
-        subclass initialization.
+        Every custom hardware module interface has to inherit from this base class. When inheriting from this class,
+        initialize the superclass by calling the 'super().__init__()' during the subclass initialization.
 
         All data received from or sent to the microcontroller is automatically logged to disk. Only provide additional
-        data and error codes if the interface must carry out 'online' error detection and / or data processing.
+        data and error codes if the interface must carry out 'online' error detection or data processing.
 
         Some attributes of this (base) class are assigned by the managing MicroControllerInterface during its
         initialization. Each module interface that inherits from the base ModuleInterface class has to be bound to an
         initialized MicroControllerInterface instance to be fully functional.
 
+        Use the utility methods inherited from the base ModuleInterface to send command and parameter messages to the
+        managed hardware module instance. These methods are heavily optimized for runtime efficiency and performance.
+
     Args:
-        module_type: The id-code that describes the broad type (family) of custom hardware modules managed by this
-            interface class. This value has to match the code used by the custom module implementation on the
-            microcontroller. Valid byte-codes range from 1 to 255.
-        module_id: The code that identifies the specific custom hardware module instance managed by the interface class
-            instance. This is used to identify unique modules in a broader module family, such as different rotary
-            encoders if more than one is used at the same time. Valid byte-codes range from 1 to 255.
-        error_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate runtime
-            errors. This set will be used during runtime to identify and raise error messages in response to the managed
-            module sending error State and Data messages to the PC. Note, status codes 0 through 50 are reserved
-            for internal library use and should NOT be used as part of this set or custom hardware module class design.
-            If the class does not produce runtime errors, set to None.
-        data_codes: A set that stores the numpy uint8 (byte) codes used by the interface module to communicate states
-            and data that needs additional processing. All incoming messages from the module are automatically logged to
-            disk during communication runtime. Messages with event-codes from this set would also be passed to the
-            process_received_data() method for additional processing. If the class does not require additional
-            processing for any incoming data, set to None.
+        module_type: The code that identifies the type (family) of the interfaced module.
+        module_id: The code that identifies the specific interfaced module instance.
+        error_codes: An optional set of codes used by the module to communicate runtime errors. Receiving a message
+            with an event-code from this set raises a RuntimeError and aborts the runtime.
+        data_codes: An optional set of codes used by the module to communicate data messages that required online
+            processing. Received messages with an event-code from this set are passed to the interface instance's
+            process_received_data() method for further processing.
 
     Attributes:
         _module_type: Stores the id-code of the managed hardware module's type (family).
@@ -155,8 +157,8 @@ class ModuleInterface(ABC):  # pragma: no cover
         _type_id: Stores the type and id codes combined into a single uint16 value.
         _data_codes: Stores all message event-codes that require additional processing.
         _error_codes: Stores all message error-codes that warrant runtime interruption.
-        _input_queue: Stores the multiprocessing queue used to send command and parameter messages to the
-            microcontroller communication process, so that they can be transmitted to the managed hardware module.
+        _input_queue: The multiprocessing queue used to send command and parameter messages to the microcontroller
+            communication process.
 
     Raises:
         TypeError: If input arguments are not of the expected type.
@@ -1087,7 +1089,7 @@ class MicroControllerInterface:  # pragma: no cover
         # initialization and runtime status of the process.
         terminator_array.connect()
 
-        # Precreates the assets used to optimize the communication runtime cycling. These assets are filled below to
+        # Pre-creates the assets used to optimize the communication runtime cycling. These assets are filled below to
         # support efficient interaction between the Communication class and the ModuleInterface classes.
         processing_map: dict[np.uint16, ModuleInterface] = {}
         for module in module_interfaces:
@@ -1307,7 +1309,7 @@ def _process_module_message_batch(
         A dictionary mapping module (type, id) tuples to lists of extracted data dictionaries. Each data dictionary
         contains 'event', 'timestamp', 'data', and 'command' keys.
     """
-    # Precreates the dictionary to store the extracted data for this batch
+    # Pre-creates the dictionary to store the extracted data for this batch
     batch_data: dict[tuple[int, int], list[dict[str, Any]]] = {module: [] for module in module_type_id}
 
     # Opens the processed log archive using memory mapping. If module data processing is performed in parallel, all

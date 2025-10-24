@@ -978,7 +978,7 @@ class ModuleParameters:
 class ModuleData:
     """Communicates that the Module has encountered a notable event and includes an additional data object."""
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=5, dtype=np.uint8))
+    message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=5, dtype=np.uint8))
     """The parsed message header data."""
     data_object: np.number[Any] | NDArray[Any] = _ZERO_BYTE
     """The parsed data object transmitted with the message."""
@@ -1020,7 +1020,7 @@ class ModuleData:
 class KernelData:
     """Communicates that the Kernel has encountered a notable event and includes an additional data object."""
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=3, dtype=np.uint8))
+    message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=3, dtype=np.uint8))
     """The parsed message header data."""
     data_object: np.number[Any] | NDArray[Any] = _ZERO_BYTE
     """The parsed data object transmitted with the message."""
@@ -1049,7 +1049,7 @@ class KernelData:
 class ModuleState:
     """Communicates that the Module has encountered a notable event."""
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=4, dtype=np.uint8))
+    message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=4, dtype=np.uint8))
     """The parsed message header data."""
 
     def __repr__(self) -> str:
@@ -1084,7 +1084,7 @@ class ModuleState:
 class KernelState:
     """Communicates that the Kernel has encountered a notable event."""
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=2, dtype=np.uint8))
+    message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=2, dtype=np.uint8))
     """The parsed message header data."""
 
     def __repr__(self) -> str:
@@ -1108,7 +1108,7 @@ class ReceptionCode:
     was received and parsed by the microcontroller.
     """
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=1, dtype=np.uint8))
+    message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=1, dtype=np.uint8))
     """The parsed message header data."""
 
     def __repr__(self) -> str:
@@ -1125,7 +1125,7 @@ class ReceptionCode:
 class ControllerIdentification:
     """Communicates the unique identifier code of the microcontroller."""
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=1, dtype=np.uint8))
+    message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=1, dtype=np.uint8))
     """The parsed message header data."""
 
     def __repr__(self) -> str:
@@ -1142,8 +1142,6 @@ class ControllerIdentification:
 class ModuleIdentification:
     """Identifies a hardware module instance by communicating its combined type and id code."""
 
-    message: NDArray[np.uint8] = field(default_factory=lambda: np.empty(shape=2, dtype=np.uint8))
-    """The parsed message header data."""
     module_type_id: np.uint16 = _ZERO_SHORT
     """The unique uint16 code that results from combining the type and ID codes of the module instance."""
 
@@ -1370,8 +1368,10 @@ class SerialCommunication:
             return self._controller_identification
 
         if protocol == SerialProtocols.MODULE_IDENTIFICATION.as_uint8():
-            self._module_identification.message = self._transport_layer.read_data(
-                data_object=self._module_identification.message
+            # Since the entire message payload is the uint16 type-id value, read the value directly into the
+            # module_type_id attribute.
+            self._module_identification.module_type_id = self._transport_layer.read_data(
+                data_object=self._module_identification.module_type_id
             )
             return self._module_identification
 
@@ -1492,7 +1492,10 @@ class MQTTCommunication:
             return
 
         # Connects to the broker
-        result = self._client.connect(self._ip, self._port)
+        try:
+            result = self._client.connect(self._ip, self._port)
+        except TimeoutError:  # Fixed a minor regression in the newest MQTT version that raises Python errors
+            result = mqtt.MQTT_ERR_NO_CONN
         if result != mqtt.MQTT_ERR_SUCCESS:
             # If the result is not the expected code, raises an exception
             message = (
