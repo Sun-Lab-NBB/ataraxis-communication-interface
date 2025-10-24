@@ -29,7 +29,7 @@ class SerialProtocols(IntEnum):
     """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
     communication.
 
-    Notes:
+    Note:
         The elements in this enumeration should be accessed through their 'as_uint8' property to enforce
         the type expected by other classes from this library.
     """
@@ -1154,7 +1154,7 @@ class SerialCommunication:
     """Provides methods for bidirectionally communicating with a microcontroller running the ataraxis-micro-controller
     library over the USB or UART serial interface.
 
-    Notes:
+    Note:
         This class is explicitly designed to be used by other library assets and should not be used directly by end
         users. An instance of this class is initialized and managed by the MicrocontrollerInterface class.
 
@@ -1274,7 +1274,7 @@ class SerialCommunication:
         """Receives a message sent by the microcontroller and parses its contents into the appropriate instance
         attribute.
 
-        Notes:
+        Note:
             Each call to this method overwrites the previously received message data stored in the instance's
             attributes. It is advised to finish working with the received message data before receiving another message.
 
@@ -1405,7 +1405,7 @@ class MQTTCommunication:
     """Provides methods for bidirectionally communicating with other clients connected to the same MQTT broker using the
     MQTT protocol over the TCP interface.
 
-    Notes:
+    Note:
         Primarily, the class is intended to be used alongside the SerialCommunication class to transfer the data between
         microcontrollers and the rest of the runtime infrastructure.
 
@@ -1477,7 +1477,7 @@ class MQTTCommunication:
     def connect(self) -> None:
         """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
-        Notes:
+        Note:
             This method has to be called after class initialization to start the communication process. Any message
             sent to the MQTT broker from other clients before this method is called may not reach this instance.
 

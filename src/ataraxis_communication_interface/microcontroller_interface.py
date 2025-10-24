@@ -4,6 +4,7 @@ microcontrollers.
 """
 
 from abc import ABC, abstractmethod
+from functools import lru_cache
 import sys
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
@@ -128,7 +129,7 @@ class ModuleInterface(ABC):  # pragma: no cover
     interface to the managed hardware module instance running on the companion microcontroller. Also, inheriting from
     this class provides the user-facing API for sending commands and parameters to the managed hardware module.
 
-    Notes:
+    Note:
         Every custom hardware module interface has to inherit from this base class. When inheriting from this class,
         initialize the superclass by calling the 'super().__init__()' during the subclass initialization.
 
@@ -159,7 +160,13 @@ class ModuleInterface(ABC):  # pragma: no cover
         _error_codes: Stores all message error-codes that warrant runtime interruption.
         _input_queue: The multiprocessing queue used to send command and parameter messages to the microcontroller
             communication process.
-
+        _dequeue_command: Stores the instance's DequeueModuleCommand object.
+        _create_command_message: LRU-cached method (maxsize=32) for creating command message objects. Caches up to 32
+            unique command message configurations to avoid redundant object creation and serialization during repeated
+            command operations.
+        _create_parameters_message: LRU-cached method (maxsize=16) for creating parameter message objects. Caches up
+            to 16 unique parameter configurations to avoid redundant object creation and serialization when repeatedly
+            sending the same parameter presets.
     Raises:
         TypeError: If input arguments are not of the expected type.
     """
@@ -228,6 +235,17 @@ class ModuleInterface(ABC):  # pragma: no cover
         # initialization, it updates these attributes for all managed interfaces via referencing.
         self._input_queue: MPQueue | None = None  # type: ignore[type-arg]
 
+        #  Pre-creates the Dequeue command object, as it does not change throughout runtime.
+        self._dequeue_command = DequeueModuleCommand(
+            module_type=self._module_type,
+            module_id=self._module_id,
+            return_code=_ZERO_BYTE,
+        )
+
+        # Creates bound cached methods for creating command and parameter messages this instance
+        self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
+        self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
+
     def __repr__(self) -> str:
         """Returns the string representation of the instance."""
         return (
@@ -238,21 +256,21 @@ class ModuleInterface(ABC):  # pragma: no cover
 
     @abstractmethod
     def initialize_remote_assets(self) -> None:
-        """Initializes custom interface instance assets used in the remote microcontroller communication process.
+        """Initializes the interface instance assets used in the remote microcontroller communication process.
 
         This method is called during the initial setup sequence of the remote microcontroller communication process,
         before the PC-microcontroller communication cycle.
 
-        Notes:
-            This method should be used to instantiate all interface assets that do not support pickling, such as
-            PrecisionTimer instances or SharedMemory buffers. All assets initialized by this method must be destroyed
-            by the terminate_remote_assets() method.
+        Note:
+            This method should instantiate all interface assets that do not support pickling, such as PrecisionTimer
+            or SharedMemoryArray instances. All assets initialized by this method must be destroyed by the
+            terminate_remote_assets() method.
         """
         raise NotImplementedError
 
     @abstractmethod
     def terminate_remote_assets(self) -> None:
-        """Terminates custom interface instance assets used in the remote microcontroller communication process.
+        """Terminates the interface instance assets used in the remote microcontroller communication process.
 
         This method is the opposite of the initialize_remote_assets() method. It is called as part of the remote
         communication process shutdown routine to ensure any resources claimed by the interface are properly
@@ -262,26 +280,89 @@ class ModuleInterface(ABC):  # pragma: no cover
 
     @abstractmethod
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """Processes the input message and, if necessary, executes the user-defined logic.
+        """Processes the input message.
 
-        This method is called during communication when the interface receives a message from the microcontroller that
-        uses an event code provided at class initialization as 'data_codes' argument.
+        This method is called during the communication cycle's runtime when the interface instance receives a message
+        from the microcontroller that uses an event code provided at class initialization as 'data_codes' argument.
 
-        Notes:
-            All incoming message data is automatically cached (saved) to disk via the DataLogger class instance. This
-            method is primarily intended to support 'online' data processing and communication. For example, it can be
-            used to extract the data included in the message and transmit it to other processes via a
-            SharedMemory or multiprocessing Queue instance.
+        Note:
+            This method should implement the custom online data-processing logic associated with each message whose
+            event code is specified in the 'data_codes' argument.
+
+            All incoming message data is automatically cached (saved) to disk at runtime, so this method should NOT be
+            used for data saving purposes.
+
+            The data processing logic implemented via this method should be optimized for runtime speed, as processing
+            the data hogs the communication process, reducing its throughput.
 
         Args:
-            message: The ModuleState or ModuleData instance that stores the message data received from the managed
+            message: The ModuleState or ModuleData instance that stores the message data received from the interfaced
                 hardware module instance.
         """
         raise NotImplementedError
 
+    def _create_command_message_implementation(
+            self,
+            command: np.uint8,
+            noblock: np.bool_,
+            cycle_delay: np.uint32,
+    ) -> OneOffModuleCommand | RepeatedModuleCommand:
+        """Creates the command message object using the input parameters.
+
+        This worker method is passed to the LRU cache wrapper to prevent recreating repeatedly used command objects at
+        runtime.
+
+        Args:
+            command: The id-code of the command to execute.
+            noblock: Determines whether the microcontroller managing the hardware module is allowed to concurrently
+                execute other commands while executing the requested command.
+            cycle_delay: The time, in microseconds, to wait before repeating the command.
+        """
+        if cycle_delay == _ZERO_LONG:
+            return OneOffModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=_ZERO_BYTE,
+                command=command,
+                noblock=noblock,
+            )
+        else:
+            return RepeatedModuleCommand(
+                module_type=self._module_type,
+                module_id=self._module_id,
+                return_code=_ZERO_BYTE,
+                command=command,
+                noblock=noblock,
+                cycle_delay=cycle_delay,
+            )
+
+    def _create_parameters_message_implementation(
+            self,
+            parameter_data: tuple[np.number[Any] | np.bool_, ...],
+    ) -> ModuleParameters:
+        """Creates the parameter message object using the input parameters.
+
+        This worker method is passed to the LRU cache wrapper to prevent recreating repeatedly used parameter objects at
+        runtime.
+
+        Args:
+            parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
+                module.
+        """
+        return ModuleParameters(
+            module_type=self._module_type,
+            module_id=self._module_id,
+            return_code=_ZERO_BYTE,
+            parameter_data=parameter_data,
+        )
+
     def send_command(self, command: np.uint8, noblock: np.bool, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
         """Packages the input command data into the appropriate message structure and sends it to the managed hardware
         module.
+        
+        Note:
+            This method caches up to 32 unique command messages in the instance-specific LRU cache to speed up sending
+            previously created command messages.
 
         Args:
             command: The id-code of the command to execute.
@@ -300,27 +381,8 @@ class ModuleInterface(ABC):  # pragma: no cover
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
-        # If repetition delay is 0, the command is non-cyclic (one-off)
-        command_message: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == _ZERO_LONG:
-            command_message = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=_ZERO_BYTE,
-                command=command,
-                noblock=noblock,
-            )
-
-        # Otherwise, the command is cyclic
-        else:
-            command_message = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=_ZERO_BYTE,
-                command=command,
-                noblock=noblock,
-                cycle_delay=repetition_delay,
-            )
+        # Creates or queries the command message object from the instance-specific LRU cache.
+        command_message = self._create_command_message(command, noblock, repetition_delay)
 
         # Submits the packaged command for execution.
         self._input_queue.put(command_message)
@@ -331,6 +393,10 @@ class ModuleInterface(ABC):  # pragma: no cover
     ) -> None:
         """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
         hardware module.
+
+        Note:
+            This method caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending
+            previously created command messages.
 
         Args:
             parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
@@ -347,15 +413,9 @@ class ModuleInterface(ABC):  # pragma: no cover
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
-        # Packages the data into a parameters' message and submits it to the microcontroller.
-        self._input_queue.put(
-            ModuleParameters(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=_ZERO_BYTE,
-                parameter_data=parameter_data,
-            )
-        )
+        # Creates or queries the command message object from the instance-specific LRU cache and submits it to the
+        # microcontroller.
+        self._input_queue.put(self._create_parameters_message(parameter_data))
 
     def reset_command_queue(self) -> None:
         """Instructs the microcontroller to clear the managed hardware module's command queue."""
@@ -377,9 +437,8 @@ class ModuleInterface(ABC):  # pragma: no cover
     def set_input_queue(self, input_queue: MPQueue) -> None:  # type: ignore[type-arg]
         """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object.
 
-        This service method is automatically used during MicroControllerInterface initialization to finalize module
-        interface configuration. Calling this method is a prerequisite for allowing the module interface instance to
-        communicate with the managed hardware module.
+        This service method is used during the MicroControllerInterface initialization to finalize the instance's
+        configuration and should not be called directly by end users.
         """
         self._input_queue = input_queue
 
@@ -396,20 +455,19 @@ class ModuleInterface(ABC):  # pragma: no cover
     @property
     def type_id(self) -> np.uint16:
         """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
-        the id-code of the instance.
+        the id-code of the managed module instance.
         """
         return self._type_id
 
     @property
     def data_codes(self) -> set[np.uint8]:
-        """Returns the set of message event-codes that are processed during runtime ('online'), in addition to logging
-        them to disk.
+        """Returns the set of message event-codes that require online processing during runtime.
         """
         return self._data_codes
 
     @property
     def error_codes(self) -> set[np.uint8]:
-        """Returns the set of event-codes used by the module instance to communicate runtime errors."""
+        """Returns the set of message event-codes event codes that trigger runtime errors."""
         return self._error_codes
 
 
@@ -420,7 +478,7 @@ class MicroControllerInterface:  # pragma: no cover
     logging between the target microcontroller and the host-machine (PC). Additionally, it exposes methods that send
     runtime parameters and commands to the Kernel instance that manages the runtime behavior of the microcontroller.
 
-    Notes:
+    Note:
         An instance of this class has to be instantiated for each microcontroller active at the same time.
 
         Initializing this class does not automatically start the communication. Call the start() method of an
@@ -603,7 +661,7 @@ class MicroControllerInterface:  # pragma: no cover
         This method raises RuntimeErrors if it detects that a process has prematurely shut down. It verifies
         the process state in 20-millisecond cycles and releases the GIL between state verifications.
 
-        Notes:
+        Note:
             If the method detects that the communication process has terminated prematurely, it carries out the
             necessary resource cleanup steps before raising the error and terminating the overall runtime.
         """
@@ -647,7 +705,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         Until this method is called, the instance is not able to communicate with the microcontroller.
 
-        Notes:
+        Note:
             After this method finishes its runtime, a watchdog thread is used to monitor the status of the process
             until the stop() method is called, notifying the user if the process terminates prematurely.
 
@@ -1057,7 +1115,7 @@ class MicroControllerInterface:  # pragma: no cover
         the multiprocessing queues (inpout and output) managed by the Interface instance. Additionally, it manages
         data logging by interfacing with the DataLogger class via the logger_queue.
 
-        Notes:
+        Note:
             Each managed ModuleInterface may contain custom logic for processing and routing the data associated with
             its hardware module instance. This method calls the custom logic bindings for each interface as necessary.
 
@@ -1386,7 +1444,7 @@ def extract_logged_hardware_module_data(
     custom event-codes and data objects transmitted by the requested hardware module instances from the microcontroller
     to the PC.
 
-    Notes:
+    Note:
         At this time, the function exclusively works with the data sent by the microcontroller to the PC.
 
         The extracted data does not contain library-reserved events and messages. This includes all Kernel messages
@@ -1394,7 +1452,7 @@ def extract_logged_hardware_module_data(
         code 2, which report command completion. These messages are parsed in addition to custom messages sent by each
         hardware module.
 
-    Notes:
+    Note:
         If the target .npz archive contains fewer than 2000 messages, the processing is carried out sequentially
         regardless of the specified worker-count.
 
