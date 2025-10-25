@@ -42,7 +42,7 @@ if __name__ == "__main__":
     controller_id = np.uint8(222)  # Matches the microcontroller ID defined in the microcontroller's main.cpp file
     microcontroller_serial_buffer_size = 8192
     baudrate = 115200
-    port = "/dev/ttyACM2"
+    port = "/dev/ttyACM0"
 
     # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
     # ataraxis-micro-controller library and abstracts most inner-workings of the library. This interface also allows
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         data_logger=data_logger,
         module_interfaces=interfaces,
         baudrate=baudrate,
-        keepalive_interval=500,
+        keepalive_interval=5000,
     )
 
     # Initialization can take some time. Notifies the user that the process is initializing.
