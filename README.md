@@ -1,7 +1,7 @@
 # ataraxis-communication-interface
 
-A Python library that enables interfacing with custom hardware modules running on Arduino or Teensy microcontrollers 
-through Python interface clients.
+A Python library that provides the centralized interface for exchanging commands and data between Arduino and Teensy
+microcontrollers and host-computers.
 
 ![PyPI - Version](https://img.shields.io/pypi/v/ataraxis-communication-interface)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ataraxis-communication-interface)
@@ -11,28 +11,30 @@ through Python interface clients.
 ![PyPI - License](https://img.shields.io/pypi/l/ataraxis-communication-interface)
 ![PyPI - Status](https://img.shields.io/pypi/status/ataraxis-communication-interface)
 ![PyPI - Wheel](https://img.shields.io/pypi/wheel/ataraxis-communication-interface)
+
 ___
 
 ## Detailed Description
 
-This library allows interfacing with custom hardware modules controlled by Arduino or Teensy microcontrollers via a 
-local Python client or remote MQTT client. It is designed to work in tandem with the companion 
-[microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) and allows hardware module 
-developers to implement PC interfaces for their modules. To do so, the library exposes a shared API that can be 
-integrated into custom interface classes by subclassing the ModuleInterface class. Additionally, the library offers 
-the MicroControllerInterface class, which bridges microcontrollers managing custom hardware modules with local and 
-remote clients, enabling efficient multi-directional communication and data logging.
+This library allows interfacing with custom hardware modules controlled by Arduino or Teensy microcontrollers
+running the companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller). To do so, 
+the library defines a shared API that can be integrated into user-defined interfaces by subclassing the (base) 
+ModuleInterface class. It also provides the MicroControllerInterface class that manages the microcontroller-PC 
+communication and the MQTTCommunication class that allows exchanging data between local and remote clients over the 
+MQTT (TCP) protocol.
+
 ___
 
 ## Features
 
 - Supports Windows, Linux, and macOS.
-- Provides an easy-to-implement API that integrates any user-defined hardware managed by the companion 
-  [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) with local and remote PC clients.
+- Provides the framework for writing and deploying custom interfaces for the hardware module instances managed 
+  by the companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller).
 - Abstracts communication and microcontroller runtime management via the centralized microcontroller interface class.
+- Leverages MQTT protocol to support exchanging data between multiple local and remote clients.
+- Uses JIT compilation and LRU caching to optimize the runtime efficiency of all library assets.
 - Contains many sanity checks performed at initialization time to minimize the potential for unexpected
   behavior and data corruption.
-- Uses MQTT protocol to allow interfacing with microcontrollers over the internet or from non-Python processes.
 - GPL 3 License.
 
 ___
@@ -52,34 +54,33 @@ ___
 
 ## Dependencies
 
-- MQTT broker, if your interface needs to send or receive data over the MQTT protocol. This library was 
-  tested and is intended to be used with a locally running [mosquitto MQTT broker](https://mosquitto.org/). If you have
-  access to an external broker or want to use a different local broker implementation, this would also satisfy the 
-  dependency.
+- MQTT broker, if the library is intended to be used for sending or receiving data over the MQTT protocol. The library 
+  was tested with a locally running [mosquitto MQTT broker](https://mosquitto.org/) version **2.0.22**.
 
 For users, all other library dependencies are installed automatically by all supported installation methods 
 (see [Installation](#installation) section).
 
-For developers, see the [Developers](#developers) section for information on installing additional development 
-dependencies.
+***Note!*** Developers should see the [Developers](#developers) section for information on installing additional 
+development dependencies.
+
 ___
 
 ## Installation
 
 ### Source
 
-Note, installation from source is ***highly discouraged*** for everyone who is not an active project developer.
-Developers should see the [Developers](#Developers) section for more details on installing from source. The instructions
-below assume you are ***not*** a developer.
+Note, installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
-1. Download this repository to your local machine using your preferred method, such as Git-cloning. Use one
-   of the stable releases from [GitHub](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/releases).
-2. Unpack the downloaded zip and note the path to the binary wheel (`.whl`) file contained in the archive.
-3. Run ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file, to install the 
-   wheel into the active python environment.
+1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the 
+   [stable releases](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/releases).
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
+3. ```cd``` to the root directory of the prepared project distribution.
+4. Run ```python -m pip install .``` to install the project. Alternatively, if using a distribution with precompiled
+   binaries, use ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file.
 
 ### pip
 Use the following command to install the library using pip: ```pip install ataraxis-communication-interface```.
+
 ___
 
 ## Usage
@@ -607,74 +608,58 @@ ___
 
 See the [API documentation](https://ataraxis-communication-interface-api.netlify.app/) for the
 detailed description of the methods and classes exposed by components of this library.
+
 ___
 
 ## Developers
 
-This section provides installation, dependency, and build-system instructions for the developers that want to
-modify the source code of this library.
+This section provides installation, dependency, and build-system instructions for project developers.
 
-### Installing the library
+### Installing the Project
 
-The easiest way to ensure you have most recent development dependencies and library source files is to install the 
-python environment for your OS (see below). All environments used during development are exported as .yml files and as 
-spec.txt files to the [envs](envs) folder. The environment snapshots were taken on each of the three explicitly 
-supported OS families: Windows 11, OSx Darwin, and GNU Linux.
+***Note!*** This installation method requires **mamba version 2.3.2 or above**. Currently, all Sun lab automation 
+pipelines require that mamba is installed through the [miniforge3](https://github.com/conda-forge/miniforge) installer.
 
-**Note!** Since the OSx environment was built for the Darwin platform (Apple Silicon), it may not work on Intel-based 
-Apple devices.
-
-1. If you do not already have it installed, install [tox](https://tox.wiki/en/latest/user_guide.html) into the active
-   python environment. The rest of this installation guide relies on the interaction of local tox installation with the
-   configuration files included in with this library.
-2. Download this repository to your local machine using your preferred method, such as git-cloning. If necessary, unpack
-   and move the project directory to the appropriate location on your system.
-3. ```cd``` to the root directory of the project using your command line interface of choice. Make sure it contains
-   the `tox.ini` and `pyproject.toml` files.
-4. Run ```tox -e import``` to automatically import the os-specific development environment included with the source 
-   distribution. Alternatively, you can use ```tox -e create``` to create the environment from scratch and automatically
-   install the necessary dependencies using pyproject.toml file. 
-5. If either step 4 command fails, use ```tox -e provision``` to fix a partially installed environment.
-
-**Hint:** while only the platforms mentioned above were explicitly evaluated, this project will likely work on any 
-common OS, but may require additional configurations steps.
+1. Download this repository to the local machine using the preferred method, such as git-cloning.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
+3. ```cd``` to the root directory of the prepared project distribution.
+4. Install the core Sun lab development dependencies into the ***base*** mamba environment via the 
+   ```mamba install tox uv tox-uv``` command.
+5. Use the ```tox -e create``` command to create the project-specific development environment followed by 
+   ```tox -e install``` command to install the project into that environment as a library.
 
 ### Additional Dependencies
 
-In addition to installing the development environment, separately install the following dependencies:
+In addition to installing the project and all user dependencies, install the following dependencies:
 
-1. [Python](https://www.python.org/downloads/) distributions, one for each version that you intend to support. These 
-   versions will be installed in-addition to the main Python version installed in the development environment.
-   The easiest way to get tox to work as intended is to have separate python distributions, but using 
-   [pyenv](https://github.com/pyenv/pyenv) is a good alternative. This is needed for the 'test' task to work as 
-   intended.
+1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by the developed project. 
+   Currently, this library supports the three latest stable versions. It is recommended to use a tool like 
+   [pyenv](https://github.com/pyenv/pyenv) to install and manage the required versions.
 
 ### Development Automation
 
 This project comes with a fully configured set of automation pipelines implemented using 
-[tox](https://tox.wiki/en/latest/user_guide.html). Check [tox.ini file](tox.ini) for details about 
+[tox](https://tox.wiki/en/latest/user_guide.html). Check the [tox.ini file](tox.ini) for details about the 
 available pipelines and their implementation. Alternatively, call ```tox list``` from the root directory of the project
 to see the list of available tasks.
 
-**Note!** All commits to this project have to successfully complete the ```tox``` task before being pushed to GitHub. 
-To minimize the runtime duration for this task, use ```tox --parallel```.
-
-For more information, check the 'Usage' section of the 
-[ataraxis-automation project](https://github.com/Sun-Lab-NBB/ataraxis-automation#Usage) documentation.
+**Note!** All pull requests for this project have to successfully complete the ```tox``` task before being merged. 
+To expedite the task’s runtime, use the ```tox --parallel``` command to run some tasks in-parallel.
 
 ### Automation Troubleshooting
 
-Many packages used in 'tox' automation pipelines (uv, mypy, ruff) and 'tox' itself are prone to various failures. In 
-most cases, this is related to their caching behavior. Despite a considerable effort to disable caching behavior known 
-to be problematic, in some cases it cannot or should not be eliminated. If you run into an unintelligible error with 
+Many packages used in 'tox' automation pipelines (uv, mypy, ruff) and 'tox' itself may experience runtime failures. In 
+most cases, this is related to their caching behavior. If an unintelligible error is encountered with 
 any of the automation components, deleting the corresponding .cache (.tox, .ruff_cache, .mypy_cache, etc.) manually 
-or via a cli command is very likely to fix the issue.
+or via a CLI command typically solves the issue.
+
 ___
 
 ## Versioning
 
-We use [semantic versioning](https://semver.org/) for this project. For the versions available, see the 
-[tags on this repository](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags).
+This project uses [semantic versioning](https://semver.org/). See the  
+[tags on this repository](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags) for the available 
+project releases.
 
 ---
 
@@ -688,13 +673,13 @@ ___
 ## License
 
 This project is licensed under the GPL3 License: see the [LICENSE](LICENSE) file for details.
+
 ___
 
 ## Acknowledgments
 
 - All Sun lab [members](https://neuroai.github.io/sunlab/people) for providing the inspiration and comments during the
   development of this library.
-- The creators of all other projects used in our development automation pipelines and source code 
-  [see pyproject.toml](pyproject.toml).
+- The creators of all other dependencies and projects listed in the [pyproject.toml](pyproject.toml) file.
 
 ---
