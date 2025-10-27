@@ -1,10 +1,9 @@
-# This file demonstrates the usage of MicroControllerInterface with custom ModuleInterface classes.
+# This file demonstrates the use of MicroControllerInterface with custom ModuleInterface classes.
 #
-# Note that this example is intentionally kept simple and does not cover all possible use cases. If you need a more
-# complex example, check one of the Sun Lab libraries used for scientific data acquisition. Overall, this example
-# demonstrates how to use the PC client to control custom hardware modules running on the microcontroller in real time.
-# It also demonstrates how to access the data received from the microcontroller, that is saved to disk via the
-# DataLogger class.
+# Note that this example is intentionally kept simple and does not cover all possible use cases. Overall, this example
+# demonstrates how to use the PC client to control custom hardware modules running on the Arduino or Teensy
+# microcontroller in real time. It also demonstrates how to access the data received from the microcontroller that is
+# saved to disk via the DataLogger instance.
 #
 # This example is intended to be used together with a microcontroller running the module_integration.cpp from the
 # companion ataraxis-micro-controller library: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
