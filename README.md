@@ -445,6 +445,13 @@ between submitting the message for transmission and it being sent to the microco
 parameter update functions / methods should be simple wrappers around these inherited methods. See the API documentation
 for the ModuleInterface class for the details about these methods inherited by each child interface class.
 
+### Discovering Connected Microcontrollers
+To help determining which microcontrollers are available for communication and at which ports, this library exposes the 
+`axci-id` CLI command. This command is available from any environment that has the library installed and internally 
+calls the `print_microcontroller_ids()` standalone function. This command evaluates each available serial port for 
+whether it is connected to a valid Ataraxis microcontroller and, if so, queries the unique identifier of that 
+microcontroller.
+
 ___
 
 ## API Documentation

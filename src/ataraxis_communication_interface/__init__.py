@@ -16,6 +16,7 @@ from .microcontroller_interface import (
     ExtractedModuleData,
     ExtractedMessageData,
     MicroControllerInterface,
+    print_microcontroller_ids,
     extract_logged_hardware_module_data,
 )
 
@@ -28,4 +29,5 @@ __all__ = [
     "ModuleInterface",
     "ModuleState",
     "extract_logged_hardware_module_data",
+    "print_microcontroller_ids",
 ]

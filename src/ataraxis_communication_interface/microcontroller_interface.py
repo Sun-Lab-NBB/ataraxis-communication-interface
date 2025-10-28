@@ -25,6 +25,7 @@ from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import console, chunk_iterable
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
+from ataraxis_transport_layer_pc import list_available_ports
 
 from .communication import (
     KernelData,
@@ -47,6 +48,8 @@ from .communication import (
 # Prevents typing-related imports from being imported at runtime
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
+
+    from serial.tools.list_ports_common import ListPortInfo
 
 # Defines static constants used in this module
 _MAXIMUM_BYTE_VALUE = 255
@@ -1557,3 +1560,135 @@ def extract_logged_hardware_module_data(
         for module in module_type_id
         if module_event_data[module]  # Only includes modules that have data
     )
+
+
+def _evaluate_port(port: str, baudrate: int = 115200) -> int:
+    """Determines whether the target serial port is connected to an Ataraxis MicroController.
+
+    Args:
+        port: The name of the port to evaluate.
+        baudrate: The baudrate to use for communication if the microcontroller uses the UART serial interface.
+
+    Returns:
+        The unique identifier code of the microcontroller if the port is connected to an Ataraxis MicroController, or
+        -1 if not.
+    """
+    # Initializes a fake multiprocessing queue to initialize communication
+    fake_queue: MPQueue = MPQueue()  # type: ignore[type-arg]
+
+    # Initializes a timer to prevent stale identification attempts from running forever.
+    timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+
+    # Opens communication via teh target port
+    communication = SerialCommunication(
+        controller_id=np.uint8(123),
+        microcontroller_serial_buffer_size=8192,
+        port=port,
+        baudrate=baudrate,
+        logger_queue=fake_queue,
+    )
+
+    # Requests the microcontroller to identify itself. A valid microcontroller would respond with its ID. Any other
+    # asset would either ignore the command or err.
+    identify_controller_command = KernelCommand(
+        command=np.uint8(3),
+        return_code=np.uint8(0),
+    )
+
+    # Blocks until the microcontroller responds with its identification code.
+    attempt = 0
+    response = None
+    while attempt < _RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value and not isinstance(
+        response, ControllerIdentification
+    ):
+        # Sends microcontroller identification command. This command requests the microcontroller to return its
+        # id code.
+        communication.send_message(message=identify_controller_command)
+        attempt += 1
+
+        # Waits for response with timeout
+        timeout_timer.reset()
+        while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
+            response = communication.receive_message()
+            if isinstance(response, ControllerIdentification):
+                break
+
+    # If the microcontroller did not respond to the identification request, returns -1 to indicate that the port is
+    # likely not connected to a valid ataraxis microcontroller.
+    if not isinstance(response, ControllerIdentification):
+        return -1
+
+    # Otherwise, returns the microcontroller's ID.
+    return int(response.controller_id)
+
+
+def print_microcontroller_ids(baudrate: int = 115200) -> None:
+    """Prints all available serial ports and identifies which ones are connected to Arduino or Teensy microcontrollers
+    running the ataraxis-micro-controller library.
+
+    Uses parallel processing to simultaneously query all ports for microcontroller identification.
+
+    Args:
+        baudrate: The baudrate to use for communication during identification. Note, the same baudrate value is used to
+            evaluate all available microcontrollers. The baudrate is only used by the microcontrollers that communicate
+            via the UART serial interface and is ignored by microcontrollers that use the USB interface.
+    """
+    # Records the current console status and enables console if needed
+    is_enabled = True
+    if not console.enabled:
+        is_enabled = False
+        console.enable()
+
+    # Gets all available serial ports
+    available_ports = list_available_ports()
+
+    # Filters out invalid ports (PID == None) - primarily for Linux systems
+    valid_ports = [port for port in available_ports if port.pid is not None]
+
+    # If there are no valid candidates to evaluate, aborts the runtime early
+    if not valid_ports:
+        console.echo("No valid serial ports detected.")
+        if not is_enabled:
+            console.disable()
+        return
+
+    console.echo(f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
+
+    # Prepares the parallel evaluation tasks
+    port_names = [port.device for port in valid_ports]
+
+    # Uses ProcessPoolExecutor to evaluate all ports in parallel
+    results: dict[str, tuple[ListPortInfo, int]] = {}
+
+    with ProcessPoolExecutor() as executor:
+        # Submits all port evaluation tasks
+        future_to_port = {
+            executor.submit(_evaluate_port, port_name, baudrate): (port_name, port_info)
+            for port_name, port_info in zip(port_names, valid_ports, strict=True)
+        }
+
+        # Collects results as they complete
+        for future in as_completed(future_to_port):
+            port_name, port_info = future_to_port[future]
+            controller_id = future.result()
+            results[port_name] = (port_info, controller_id)
+
+    # Prints the results in the original port order (matching print_available_ports style)
+    count = 0
+    for port_name in port_names:
+        if port_name in results:
+            port_info, controller_id = results[port_name]
+            count += 1
+
+            if controller_id == -1:
+                # Port did not respond or is not a valid microcontroller
+                console.echo(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
+            else:
+                # Port is connected to a valid microcontroller with identified ID
+                console.echo(
+                    f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
+                )
+
+    # Restore the console's state if it was disabled before this call
+    if not is_enabled:
+        console.disable()

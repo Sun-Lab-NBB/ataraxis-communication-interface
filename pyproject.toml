@@ -72,10 +72,12 @@ dev = [
     # Types:
     "types-paho-mqtt>=1,<2",
     "types-tqdm>=4,<5",
+    "types-pyserial>=3,<4",
 ]
 
-# Future support for CLI interface(s) can be realizied through this section.
+# Exports the CLI used to identify available microcontrollers and the ports they are connected to.
 [project.scripts]
+axci-id = "ataraxis_communication_interface.microcontroller_interface:print_microcontroller_ids"
 
 # Specifies files that should not be included in the source-code distribution, but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
