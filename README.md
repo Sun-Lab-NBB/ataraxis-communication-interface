@@ -1,7 +1,7 @@
 # ataraxis-communication-interface
 
-A Python library that enables interfacing with custom hardware modules running on Arduino or Teensy microcontrollers 
-through Python interface clients.
+A Python library that provides the centralized interface for exchanging commands and data between Arduino and Teensy
+microcontrollers and host-computers.
 
 ![PyPI - Version](https://img.shields.io/pypi/v/ataraxis-communication-interface)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ataraxis-communication-interface)
@@ -11,28 +11,30 @@ through Python interface clients.
 ![PyPI - License](https://img.shields.io/pypi/l/ataraxis-communication-interface)
 ![PyPI - Status](https://img.shields.io/pypi/status/ataraxis-communication-interface)
 ![PyPI - Wheel](https://img.shields.io/pypi/wheel/ataraxis-communication-interface)
+
 ___
 
 ## Detailed Description
 
-This library allows interfacing with custom hardware modules controlled by Arduino or Teensy microcontrollers via a 
-local Python client or remote MQTT client. It is designed to work in tandem with the companion 
-[microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) and allows hardware module 
-developers to implement PC interfaces for their modules. To do so, the library exposes a shared API that can be 
-integrated into custom interface classes by subclassing the ModuleInterface class. Additionally, the library offers 
-the MicroControllerInterface class, which bridges microcontrollers managing custom hardware modules with local and 
-remote clients, enabling efficient multi-directional communication and data logging.
+This library allows interfacing with custom hardware modules controlled by Arduino or Teensy microcontrollers
+running the companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller). To do so, 
+the library defines a shared API that can be integrated into user-defined interfaces by subclassing the (base) 
+ModuleInterface class. It also provides the MicroControllerInterface class that manages the microcontroller-PC 
+communication and the MQTTCommunication class that allows exchanging data between local and remote clients over the 
+MQTT (TCP) protocol.
+
 ___
 
 ## Features
 
 - Supports Windows, Linux, and macOS.
-- Provides an easy-to-implement API that integrates any user-defined hardware managed by the companion 
-  [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) with local and remote PC clients.
+- Provides the framework for writing and deploying custom interfaces for the hardware module instances managed 
+  by the companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller).
 - Abstracts communication and microcontroller runtime management via the centralized microcontroller interface class.
+- Leverages MQTT protocol to support exchanging data between multiple local and remote clients.
+- Uses JIT compilation and LRU caching to optimize the runtime efficiency of all library assets.
 - Contains many sanity checks performed at initialization time to minimize the potential for unexpected
   behavior and data corruption.
-- Uses MQTT protocol to allow interfacing with microcontrollers over the internet or from non-Python processes.
 - GPL 3 License.
 
 ___
@@ -52,554 +54,403 @@ ___
 
 ## Dependencies
 
-- MQTT broker, if your interface needs to send or receive data over the MQTT protocol. This library was 
-  tested and is intended to be used with a locally running [mosquitto MQTT broker](https://mosquitto.org/). If you have
-  access to an external broker or want to use a different local broker implementation, this would also satisfy the 
-  dependency.
+- **MQTT broker**, if the library is intended to be used for sending and receiving data over the MQTT protocol. The 
+  library was tested with a locally running [mosquitto MQTT broker](https://mosquitto.org/) version **2.0.22**.
 
 For users, all other library dependencies are installed automatically by all supported installation methods 
 (see [Installation](#installation) section).
 
-For developers, see the [Developers](#developers) section for information on installing additional development 
-dependencies.
+***Note!*** Developers should see the [Developers](#developers) section for information on installing additional 
+development dependencies.
+
 ___
 
 ## Installation
 
 ### Source
 
-Note, installation from source is ***highly discouraged*** for everyone who is not an active project developer.
-Developers should see the [Developers](#Developers) section for more details on installing from source. The instructions
-below assume you are ***not*** a developer.
+Note, installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
-1. Download this repository to your local machine using your preferred method, such as Git-cloning. Use one
-   of the stable releases from [GitHub](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/releases).
-2. Unpack the downloaded zip and note the path to the binary wheel (`.whl`) file contained in the archive.
-3. Run ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file, to install the 
-   wheel into the active python environment.
+1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the 
+   [stable releases](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/releases).
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
+3. ```cd``` to the root directory of the prepared project distribution.
+4. Run ```python -m pip install .``` to install the project. Alternatively, if using a distribution with precompiled
+   binaries, use ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file.
 
 ### pip
 Use the following command to install the library using pip: ```pip install ataraxis-communication-interface```.
+
 ___
 
 ## Usage
 
 ### Quickstart
 This section demonstrates how to use custom hardware module interfaces compatible with this library. See 
-[this section](#implementing-custom-module-interfaces) for instructions on how to implement your own module interfaces. 
+[this section](#implementing-custom-module-interfaces) for instructions on how to implement module interface classes. 
 Note, the example below should be run together with the companion 
 [microcontroller module](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart) example. 
-See the [examples](./examples) folder for the .py files used in all sections of this ReadMe.
+See the [example_runtime.py](./examples/example_runtime.py) for the .py implementation of this example.
 ```
-# Imports the required assets
-from multiprocessing import (
-    Queue as MPQueue,
-    Manager,
-)
-from multiprocessing.managers import SyncManager
+# Imports the necessary assets, including the TestModuleInterface class
+from pathlib import Path
 
 import numpy as np
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
+from example_interface import TestModuleInterface
+from ataraxis_data_structures import DataLogger, assemble_log_archives
+from ataraxis_base_utilities import console, LogLevel
+import tempfile
 
-from ataraxis_communication_interface import (
-    ModuleData,
-    ModuleState,
-    ModuleInterface,
-    ModuleParameters,
-    OneOffModuleCommand,
-    RepeatedModuleCommand,
-)
+from ataraxis_communication_interface import MicroControllerInterface, extract_logged_hardware_module_data
 
+# Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
+if __name__ == "__main__":
+    # Enables the console module to communicate the example's runtime progress via the terminal.
+    console.enable()
 
-# Defines the TestModuleInterface class by subclassing the base ModuleInterface class. This class is designed to
-# interface with the TestModule class from the companion ataraxis-micro-controller library, running on the
-# microcontroller.
-class TestModuleInterface(ModuleInterface):
-    # As a minimum, the initialization method has to take in the module type and instance ID. Each user manually
-    # assigns these values in microcontroller's main .cpp file and python script, the values are not inherently
-    # meaningful. The values used on the PC and microcontroller have to match.
-    def __init__(self, module_type: np.uint8, module_id: np.uint8) -> None:
-        # Defines the set of event-codes that the interface will interpret as runtime error events. If the module sends
-        # a message with one of the event-codes from this set to the PC, the interface will automatically raise a
-        # RuntimeError.
-        error_codes = {np.uint8(51)}  # kOutputLocked is the only error code used by TestModule.
+    # Specifies the directory where to save all incoming and outgoing messages processed by the MicroControllerInterface
+    # instance for each hardware module.
+    tempdir = tempfile.TemporaryDirectory()  # Creates a temporary directory for illustration purposes
+    output_directory = Path(tempdir.name)
 
-        # Defines the set of event-codes that the interface will interpret as data events that require additional
-        # processing. When the interface receives a message containing one of these event-codes, it will call the
-        # process_received_data() method on that message. The method can then process the data as necessary and send it
-        # to other destinations.
-        data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}  # kHigh, kLow and kEcho.
+    # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
+    # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
+    data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
+    data_logger.start()  # The DataLogger has to be started before it can save any log entries.
 
-        # Messages with event-codes above 50 that are not in either of the sets above will be saved (logged) to disk,
-        # but will not be processed further during runtime.
+    # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
+    # different module_id codes, but the same type (family) id code.
+    interface_1 = TestModuleInterface(module_type=np.uint8(1), module_id=np.uint8(1))
+    interface_2 = TestModuleInterface(module_type=np.uint8(1), module_id=np.uint8(2))
+    interfaces = (interface_1, interface_2)
 
-        # The base interface class also allows direct communication between the module and other clients over the MQTT
-        # protocol. This example does not demonstrate this functionality, so sets to None to disable.
-        mqtt_command_topics = None
+    # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
+    # ataraxis-micro-controller library and abstracts most inner-workings of the library. Note; example expects a
+    # Teensy 4.1 microcontroller, and the parameters defined below may not be optimal for all supported
+    # microcontrollers!
+    mc_interface = MicroControllerInterface(
+        controller_id=np.uint8(222),
+        buffer_size=8192,
+        port="/dev/ttyACM1",
+        data_logger=data_logger,
+        module_interfaces=interfaces,
+        baudrate=115200,
+        keepalive_interval=5000,
+    )
+    console.echo("Initializing the communication process...")
 
-        # Initializes the parent class, using the sets defined above
-        super().__init__(
-            module_type=module_type,
-            module_id=module_id,
-            mqtt_communication=False,  # Since this example does not work with other MQTT clients, sets to False.
-            mqtt_command_topics=mqtt_command_topics,
-            data_codes=data_codes,
-            error_codes=error_codes,
-        )
+    # Starts the serial communication with the microcontroller by initializing a separate process that handles the
+    # communication. This method may take up to 15 seconds to execute, as it verifies that the microcontroller is
+    # configured correctly, given the MicroControllerInterface configuration.
+    mc_interface.start()
 
-        # Initializes a multiprocessing Queue. In this example, we use the multiprocessing Queue to send the data
-        # to the main process from the communication process. You can initialize any assets that can be pickled as part
-        # of this method runtime.
-        self._mp_manager: SyncManager = Manager()
-        self._output_queue: MPQueue = self._mp_manager.Queue()  # type: ignore
+    console.echo("Communication process: Initialized.", level=LogLevel.SUCCESS)
+    console.echo("Updating hardware module runtime parameters...")
 
-        # Just for demonstration purposes, here is an example of an asset that CANNOT be pickled. Therefore, we have
-        # to initialize the attribute to a placeholder and have the actual initialization as part of the
-        # initialize_remote_assets() method.
-        self._timer: PrecisionTimer | None = None
+    # Due to the current SharedMemoryArray implementation, the SHM instances require additional setup after the
+    # communication process is started.
+    interface_1.start_shared_memory_array()
+    interface_2.start_shared_memory_array()
 
-    # This abstract method acts as the gateway for interface developers to convert and direct the data received from
-    # the hardware module for further real-time processing. For this example, we transfer all received
-    # data into a multiprocessing queue, so that it can be accessed from the main process.
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        # This method will only receive messages with event-codes that match the content of the 'data_codes' set.
+    # Generates and sends new runtime parameters to both hardware module instances running on the microcontroller.
+    # On and Off durations are in microseconds.
+    interface_1.set_parameters(
+        on_duration=np.uint32(1000000), off_duration=np.uint32(1000000), echo_value=np.uint16(121)
+    )
+    interface_2.set_parameters(
+        on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
+    )
 
-        # This case should not be possible, as we initialize the timer as part of the initialize_remote_assets() method.
-        if self._timer is None:
-            raise RuntimeError("PrecisionTimer not initialized.")
+    console.echo("Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
 
-        timestamp = self._timer.elapsed  # Returns the number of milliseconds elapsed since timer initialization
+    console.echo("Sending the 'echo' command to the TestModule 1...")
 
-        # Event codes 52 and 53 are used to communicate the current state of the output pin managed by the example
-        # module.
-        if message.event == 52 or message.event == 53:
-            # These event-codes are transmitted by State messages, so there is no additional data to parse other than
-            # event codes. The codes are transformed into boolean values and are exported via the multiprocessing queue.
-            message_type = "pin state"
-            state = True if message.event == 52 else False
-            self._output_queue.put((self.module_id, message_type, state, timestamp))
+    # Requests instance 1 to return its echo value. By default, the echo command only runs once.
+    interface_1.echo()
 
-        # Since there are only three possible data_codes and two are defined above, the only remaining data code is
-        # 54: the echo value.
-        elif isinstance(message, ModuleData) and message.event == 54:
-            # The echo value is transmitted by a Data message. Data message also includes a data_object, in addition
-            # to the event code. Upon reception, the data object is automatically deserialized into the appropriate
-            # object, so it can be accessed directly.
-            message_type = "echo value"
-            value = message.data_object
-            self._output_queue.put((self.module_id, message_type, value, timestamp))
+    # Waits until the microcontroller responds to the echo command. The interface is configured to update shared
+    # memory array index 2 with the received echo value when it receives the response from the microcontroller.
+    while interface_1.shared_memory[2] == 0:
+        continue
 
-    # Since this example does not receive commands from MQTT, this method is defined with a plain None return
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
-        return
+    # Retrieves and prints the microcontroller's response. The returned value should match the parameter set above: 121.
+    console.echo(message=f"TestModule 1 echo value: {interface_1.shared_memory[2]}.", level=LogLevel.SUCCESS)
 
-    # Use this method to initialize or configure any assets that cannot be pickled and 'transferred' to the remote
-    # Process. In a way, this is a secondary __init__ method called before the main runtime logic of the remote
-    # communication process is executed.
-    def initialize_remote_assets(self) -> None:
-        # Initializes a milliseconds-precise timer. The timer cannot be passed to a remote process and has to be created
-        # by the code running inside the process.
-        self._timer = PrecisionTimer("ms")
+    # Demonstrates the use of non-blocking recurrent commands.
+    console.echo("Executing the example non-blocking runtime, standby for ~5 seconds...")
 
-    # This is the inverse of the initialize_remote_assets() that is used to clean up all custom assets initialized 
-    # inside the communication process. It is called at the end of the communication runtime, before the process is 
-    # terminated.
-    def terminate_remote_assets(self) -> None:
-        # The PrecisionTimer does not require any special cleanup. Other assets may need to have their stop() or 
-        # disconnect() method called from within this method.
-        pass
+    # Instructs the first TestModule instance to start pulsing the managed pin (Pin 5 by default). With the parameters
+    # sent earlier, it keeps the pin ON for 1 second and keeps it off for ~ 2 seconds (1 from off_duration,
+    # 1 from waiting before repeating the command). The microcontroller repeats this command at regular intervals
+    # until it is given a new command or receives a 'dequeue' command (see below).
+    interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=True)
 
-    # The methods below function as a translation interface. Specifically, they take in the input arguments and package
-    # them into the appropriate message structures that can be sent to the microcontroller. If you do not require a
-    # dynamic interface, all messages can also be defined statically at initialization. Then, class methods can just
-    # send the appropriate predefined structure to the communication process, the same way we do with the dequeue
-    # command and the MicroControllerInterface commands.
+    # Instructs the second TestModule instance to start sending its echo value to the PC every 500 milliseconds.
+    interface_2.echo(repetition_delay=np.uint32(500000))
 
-    # This method takes in values for PC-addressable module runtime parameters, packages them into the ModuleParameters
-    # message, and sends them to the microcontroller. Note, the arguments to this method match the parameter names used
-    # in the microcontroller TestModule class implementation.
-    def set_parameters(
-        self,
-        on_duration: np.uint32,  # The time the pin stays HIGH during pulses, in microseconds.
-        off_duration: np.uint32,  # The time the pin stays LOW during pulses, in microseconds.
-        echo_value: np.uint16,  # The value to be echoed back to the PC during echo() command runtimes.
-    ) -> None:
-        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-        # prevents this command from running unless the MicroControllerInterface is initialized.
-        if self._input_queue is None:
-            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
+    # Delays for 5 seconds, accumulating echo values from TestModule 2 and pin On / Off notifications from TestModule
+    # 1. Uses the PrecisionTimer instance to delay the main process for 5 seconds.
+    delay_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    delay_timer.delay(delay=5, block=False)
 
-        # Parameters have to be arranged in the exact order expected by the receiving structure. Additionally,
-        # each parameter has to use the appropriate numpy type.
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-            parameter_data=(on_duration, off_duration, echo_value),
-        )
+    # Cancels both recurrent commands by issuing a dequeue command. Note, the dequeue command does not interrupt already
+    # running commands, it only prevents further command repetitions.
+    interface_1.reset_command_queue()
+    interface_2.reset_command_queue()
 
-        # Directly submits the message to the communication process. The process is initialized and managed by the
-        # MicroControllerInterface class that also manages the runtime of this specific interface. Once both
-        # TestModuleInterface AND MicroControllerInterface are initialized, TestModuleInterface will have access to some
-        # MicroControllerInterface assets via private attributes inherited from the base ModuleInterface class.
-        self._input_queue.put(message)
+    # The result seen here depends on the communication speed between the PC and the microcontroller and the precision
+    # of the microcontroller's clock. For Teensy 4.1, which was used to write this example, the pin is expected to
+    # pulse ~2 times and the echo value is expected to be transmitted ~10 times during the test period.
+    console.echo(message="Non-blocking runtime: Complete.", level=LogLevel.SUCCESS)
+    console.echo(f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+    console.echo(f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
-    # Instructs the managed TestModule to emit a pulse via the manged output pin. The pulse will use the on_duration
-    # and off_duration TestModule parameters to determine the duration of High and Low phases. The arguments to this
-    # method specify whether the pulse is executed once or is continuously repeated with a certain microsecond delay.
-    # Additionally, they determine whether the microcontroller will block while executing the pulse or allow concurrent
-    # execution of other commands.
-    def pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = True) -> None:
-        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-        # prevents this command from running unless the MicroControllerInterface is initialized.
-        if self._input_queue is None:
-            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
+    # Resets the pulse and echo counters before executing the demonstration below.
+    interface_1.shared_memory[0] = 0
+    interface_2.shared_memory[1] = 0
 
-        # Repetition delay of 0 is interpreted as a one-time command (only runs once).
-        command: RepeatedModuleCommand | OneOffModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-                cycle_delay=repetition_delay,
-            )
+    # Repeats the example above, but now uses blocking commands instead of non-blocking.
+    console.echo("Executing the example blocking runtime, standby for ~5 seconds...")
+    interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=False)
+    interface_2.echo(repetition_delay=np.uint32(500000))
+    delay_timer.delay(delay=5, block=False)  # Reuses the same delay timer
+    interface_1.reset_command_queue()
+    interface_2.reset_command_queue()
 
-        # Directly submits the command to the communication process.
-        self._input_queue.put(command)
+    # This time, since the pin pulsing performed by module 1 interferes with the echo command performed by module 2,
+    # both pulse and echo counters are expected to be ~5.
+    console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
+    console.echo(f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+    console.echo(f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
-    # This method returns a message that instructs the TestModule to respond with the current value of its echo_value
-    # parameter. Unlike the pulse() command, echo() command does not require blocking, so the method does not have the
-    # noblock argument. However, the command still supports recurrent execution.
-    def echo(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-        # prevents this command from running unless the MicroControllerInterface is initialized.
-        if self._input_queue is None:
-            raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
+    # Stops the communication process and releases all resources used during runtime.
+    mc_interface.stop()
+    console.echo(f"Communication process: Stopped.", level=LogLevel.SUCCESS)
 
-        command: RepeatedModuleCommand | OneOffModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(2),
-                noblock=np.bool(False),
-            )
+    # Stops the DataLogger and assembles all logged data into a single .npz archive file. This step is required to be
+    # able to extract the logged message data for further analysis.
+    data_logger.stop()
+    console.echo(f"Assembling the message log archive...")
+    assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-                command=np.uint8(2),
-                noblock=np.bool(False),
-                cycle_delay=repetition_delay,
-            )
-
-        # Directly submits the command to the communication process.
-        self._input_queue.put(command)
-
-    @property
-    def output_queue(self) -> MPQueue:  # type: ignore
-        # A helper property that returns the output queue object used by the class to send data from the communication
-        # process back to the central process.
-        return self._output_queue
+    # To process the data logged during runtime, it must be extracted from the archive created above. This can be
+    # done with the help of the `extract_logged_hardware_module_data` function:
+    console.echo(f"Extracting the logged message data...")
+    log_data = extract_logged_hardware_module_data(
+        log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
+        module_type_id=(
+            (int(interface_1.module_type), int(interface_1.module_id)),
+            (int(interface_2.module_type), int(interface_2.module_id)),
+        ),
+    )
+    # Uses pulse off and echo event codes to determine the total number of TestModule 1 pulses and TestModule 2 echo
+    # values encountered during runtime according to the processed log data.
+    module_1_pulses = len(log_data[0].event_data[np.uint8(53)])
+    module_2_echo_values = len(log_data[1].event_data[np.uint8(54)])
+    console.echo(
+        message=(
+            f"According to the extracted data, during runtime the TestModule 1 emitted a total of {module_1_pulses} "
+            f"pulses and the TestModule 2 sent {module_2_echo_values} echo values."
+        ),
+        level=LogLevel.SUCCESS,
+    )
 ```
 
 ### User-Defined Variables
-This library is designed to support many different use patterns. To do so, it intentionally avoids hardcoding
-certain metadata variables that allow the PC interface to identify the managed microcontroller and specific hardware 
-module instances running on that controller. As a user, you **have to** manually define these values **both** for the 
-microcontroller and the PC. The PC and the Microcontroller have to have the **same** interpretation for these values 
-to work as intended.
+This library is designed to flexibly support many different use patterns. To do so, it intentionally avoids hardcoding
+certain metadata variables that allow the PC interface to individuate and address the managed microcontroller and 
+specific hardware module instances. **Each end user has to manually define these values both for the microcontroller 
+and the PC.** 
 
-- `Controller ID`. This is a unique byte-code value between 1 and 255 that identifies the microcontroller during 
-   communication. This ID code is used when logging the data received from the microcontroller, so it has to be unique 
-   for all microcontrollers **and other** Ataraxis classes used at the same time that log data. For example, 
-   [Video System](https://github.com/Sun-Lab-NBB/ataraxis-video-system) classes also use the byte-code ID system to 
-   identify themselves during logging and **will clash** with microcontroller IDs if you are using 
-   both at the same time. This code is provided as an argument when initializing the MicroControllerInterface instance.
+Two of these variables, the `module_type` and the `module_id` are used by the (base) **ModuleInterface** class. The 
+remaining `controlled_id` variable is used by the **MicroControllerInterface** class. See the 
+[companion library’s](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#user-defined-variables) ReadMe for more 
+details about each user-defined metadata variable. Typically, these variables are set in the microcontroller code and 
+the PC code is adjusted to match the microcontroller code’s state.
 
-- `Module Type` for each module. This is a byte-code between 1 and 255 that identifies the family of each module. For 
-   example, all solenoid valves may use the type-code '1,' while all voltage sensors may use type-code '2.' The type 
-   codes do not have an inherent meaning, they are assigned independently for each use case. Therefore, the
-   same collection of custom module classes may have vastly different type-codes for two different projects. This 
-   design pattern is intentional and allows developers to implement modules without worrying about clashing with 
-   already existing modules. This code is provided as an argument when subclassing the ModuleInterface class.
+### Keepalive
+A major runtime safety feature of this library is the support for keepalive messaging. To work as intended, **both the 
+PC (MicroControllerInterface instance) and the microcontroller (Kernel instance) must be configured to use the same 
+keepalive interval.** 
 
-- `Module ID` for each module. This byte-code between 1 and 255 has to be unique within the module type (family) and
-   is used to identify specific module instances. For example, this code will be used to identify different voltage 
-   sensors if more than one sensor is used by the same microcontroller at the same time. This code is provided as an 
-   argument when subclassing the ModuleInterface class.
+When enabled, the MicroControllerInterface instance sends a 'keepalive' command at regular intervals, specified by the 
+`keepalive_interval` initialization argument. If the microcontroller does not receive the command for 
+**two consecutive interval windows**, it aborts the runtime by resetting the microcontroller’s hardware and software to 
+the default state and sends an error message to the PC. If the PC does not receive the microcontroller’s acknowledgement
+that it has received the keepalive command within **one interval windows from sending the previous command**, it aborts
+the communication runtime with an error.
+
+The keepalive functionality is **disabled** (set to 0) by default, but it is recommended to enable it for most use 
+cases. See the [API documentation for the MicroControllerInterface class](#api-documentation) for more details on 
+configuring the keepalive messaging.
+
+***Note!*** The appropriate keepalive interval depends on the communication speed and the CPU frequency of the 
+microcontroller. For a fast microcontroller (teensy4.1) that uses the USB communication interface, an appropriate 
+keepalive interval is typically measured in milliseconds (100 to 500). For a slower microcontroller (arduino mega) with 
+a UART communication interface using the baudrate of 115200, the appropriate keepalive interval is typically measured 
+in seconds (2 to 5).
+
+### Communication
+During runtime, all communication with the microcontroller is routed via the MicroControllerInterface instance that 
+implements the centralized communication and control interface for each microcontroller. To optimize runtime 
+performance, the communication is managed by a daemonic process running in a separate CPU thread (core).
+
+When the data is sent to the microcontroller, it is first transferred to the communication process, which then transmits
+it to the microcontroller. When the data is received from the microcontroller, it is mostly handled by the communication
+process, unless the end user implements the logic for routing it to other runtime processes.
 
 ### Data Logging
-Like some other Ataraxis libraries, this library relies on the 
-[DataLogger](https://github.com/Sun-Lab-NBB/ataraxis-data-structures#datalogger) class to save all incoming and outgoing
-messages in their byte-serialized forms to disk as `.npy` files. It is **highly** advised to study the documentation for
-the class before using this library, especially if you want to parse the logged data manually instead of using the 
-method exposed by each ModuleInterface class.
+This library relies on the [DataLogger](https://github.com/Sun-Lab-NBB/ataraxis-data-structures#datalogger) class to 
+save all incoming and outgoing messages to disk during PC-microcontroller communication. Each message sent or received 
+by the PC is serialized and saved as an uncompressed **.npy** file.
 
-The DataLogger may be shared by multiple Ataraxis classes that generate log entries, such as 
-[VideoSystem](https://github.com/Sun-Lab-NBB/ataraxis-video-system) classes. To support using 
-the same logger class for multiple sources, each source (class) active at the same time has to use a unique byte-ID
-(system id). These id-codes are used to identify the source class in log files and during further processing.
+The same DataLogger instance as used by the MicroControllerInterface instances may be shared by multiple other Ataraxis 
+assets that generate log entries, such as [VideoSystem](https://github.com/Sun-Lab-NBB/ataraxis-video-system) classes. 
+To support using the same logger instance for multiple concurrently active sources, 
+**each source has to use a unique identifier value (controller id) when sending data to the logger instance**.
 
-***Critically:*** Each MicroControllerInterface accepts a DataLogger instance at instantiation. Generally, it is advised
-to use the same DataLogger instance for all MicroControllerInterface classes active at the same time, although this is
-not required.
+**Note!** Currently, only the MicroControllerInterface supports logging the data to disk.
 
-#### Log entries format
-Each message is logged as a one-dimensional numpy uint8 array (.npy file). Inside the array, the data is organized in 
-the following order:
-1. The uint8 id of the data source. For this library, the source ID is the ID code of the microcontroller managed by the
-   MicroControllerInterface that submits the data to be logged. The ID occupies the first byte of each logged array.
-2. The uint64 timestamp that specifies the number of microseconds relative to the **onset** timestamp (see below). The 
-   timestamp occupies **8** bytes following the ID byte.
+#### Log Format
+Each message is logged as a one-dimensional numpy uint8 array, saved as an .npy file. Inside the array, the data is 
+organized in the following order:
+1. The uint8 id of the data source (microcontroller). The ID occupies the first byte of each log entry.
+2. The uint64 timestamp that specifies the number of microseconds elapsed since the acquisition of the **onset** 
+   timestamp (see below). The timestamp occupies **8** bytes following the ID byte. This value communicates when each 
+   message was sent or received by the PC.
 3. The serialized message payload sent to the microcontroller or received from the microcontroller. The payload can 
-   be deserialzied using the appropriate message structure. The payload occupies all remaining bytes, following the 
+   be deserialized using the appropriate message structure. The payload occupies all remaining bytes, following the 
    source ID and the timestamp.
 
 #### Onset timestamp:
-Each MicroControllerInterface that logs its data generates an `onset` timestamp as part of its `start()` method runtime.
-This log entry uses a modified data order and stores the current UTC time, accurate to microseconds. All further log 
-entries for the same source use the timestamp section of their payloads to communicate the number of microseconds 
-elapsed since the onset timestamp. The onset log entries follow the following order:
-1. The uint8 id of the data source.
-2. The uint64 value **0** that occupies 8 bytes following the source id. This is the only time when the timestamp value 
-   of a log entry can be set to 0.
-3. The uint64 value that stores the number of microseconds elapsed since the UTC epoch. This value specifies the 
+Each MicroControllerInterface generates an `onset` timestamp as part of its `start()` method runtime. This log entry 
+uses a modified data order and stores the current UTC time, accurate to microseconds, as the total number of 
+microseconds elapsed since the UTC epoch onset. All further log entries for the same source use the timestamp section 
+of their payloads to communicate the number of microseconds elapsed since the onset timestamp acquisition. 
+
+The onset log entry uses the following data organization order:
+1. The uint8 id of the data source (video system instance).
+2. The uint64 value **0** that occupies 8 bytes following the source id. A 'timestamp' value of 0 universally indicates 
+   that the log entry stores the onset timestamp.
+3. The uint64 value that stores the number of microseconds elapsed since the UTC epoch onset. This value specifies the 
    current time when the onset timestamp was generated.
 
-#### Starting and stopping logging
-Until the DataLogger is started through its `start()` method, the log entries will be buffered in the multiprocessing 
-queue, which uses the host-computer’s RAM. To avoid running out of buffer space, **make sure** the DataLogger's 
-`start()` method is called before calling the `start()` method of any MicroControllerInterface class. Once all sources
-using the same DataLogger have finished their runtime, call the `stop()` method to end log saving and then call the
-`compress_logs()` method to compress all individual `.npy` entries into an `.npz` archive. Compressing the logs is 
-required to later parse logged module data for further analysis (see [quickstart](#quickstart)).
+#### Working with MicroControllerInterface Logs
 
-#### Reading custom module data from logs
-The base ModuleInterface class exposes the `extract_logged_data()` method that allows parsing received ModuleState and 
-ModuleData messages from compressed '.npz' archives. Currently, the method only works with messages that use 'event' 
-byte-codes greater than 51 and only with messages sent by custom hardware module classes (children of base 
-ModuleInterface class). The only exception to this rule is Command Completion events (event code 2), which are also
-parsed for each hardware module.
+See the [quickstart](#quickstart) example above for a demonstration on how to assemble and parse the frame acquisition
+log archives generated by the VideoSystem instance at runtime. 
 
-***Note:*** to parse logged data, the ModuleInterface has to be used to initialize a MicroControllerInterface. The 
-MicroControllerInterface overwrites certain attributes inside each managed ModuleInterface during its initialization, 
-which is required for the log parser to find the target log file. Overall, it is advised to parse logged data 
-immediately after finishing the communication runtime, as the class would be configured correctly for the parsing to 
-work as intended.
+**Note!** Currently, the log parsing function only works with messages that use event-codes greater than 50 and only 
+with messages sent by custom hardware module instances. The only exception to this rule is the **Command Completion** 
+events (event code 2), which are also parsed for each hardware module.
 
-***Attention!*** Since version 3.1.0 the library exposes a global, multiprocessing-safe, and instance-independent 
-function `extract_logged_hardware_module_data()`. This function behaves exactly like the instance-bound log extraction 
-method does, but can be used to parse logged data without the need to have initialized MicroControllerInterface or 
-ModuleInterface instances. You can use the `log_path` property of an initialized MicroControllerInterface instance to 
-get the path to the .npz archive that stores logged data after compression, and the `module_type` and `module_id` 
-properties of initialized ModuleInterface instances to get the type and instance ID codes of each module for which to 
-parse the data.
+The logged data is packaged into a hierarchical structure the segments messages by each custom hardware module instance,
+packing each in the **ExtractedModuleData** dataclass instances. Each instance further segments the data into 'events'
+by storing extracted data in a dictionary that uses event-codes as keys and tuples of **ExtractedMessageData** instances
+as values. Each **ExtractedMessageData** stores the data of a single message received from the respective hardware 
+module during runtime.
 
 ### Custom Module Interfaces
-For this library an interface is a class that contains the logic for sending the command and parameter data to the 
+For this library, an interface is a class that contains the logic for sending the command and parameter data to the 
 hardware module and receiving and processing the data sent by the module to the PC. The microcontroller and PC libraries
-ensure that the data is efficiently moved between the module and the interface, but each custom hardware module 
-developer is responsible for handling that data.
+ensure that the data is efficiently moved between the module and the interface and saved (logged) to disk. The rest of 
+the module-interface interaction is up to the end user (module / interface developer).
 
 ### Implementing Custom Module Interfaces
 All module interfaces intended to be accessible through this library have to follow the implementation guidelines
 described in the [example module interface implementation file](./examples/example_interface.py). Specifically, 
 **all custom module interfaces have to subclass the ModuleInterface class from this library and implement all abstract
-methods**. Additionally, all commands and parameter messages generated by the interface **have to use one of the valid
-[message structures](#module-messages) exposed by this library**.
+methods**.
 
 #### Abstract Methods
-These methods act as a gateway that custom interface developers can use to execute custom logic to process incoming or
-outgoing data. The MicroControllerInterface class that manages the communication will call these methods for incoming or
-outgoing data according to the configuration of each managed ModuleInterface (see below for details). Currently, there 
-are four abstract methods defined by the base ModuleInterface class: initialize_remote_assets(), 
-terminate_remote_assets(), process_received_data() and parse_mqtt_command()
+These methods provide the inherited API used by the centralized microcontroller interface to connect hardware module 
+interfaces to their hardware modules managed by the companion microcontroller. Specifically, the 
+MicroControllerInterface calls these methods as part of the remote communication process’s runtime cycle to work with 
+the data sent by the custom hardware module.
 
 #### initialize_remote_assets
 This method is called by the MicroControllerInterface once for each ModuleInterface at the beginning of the 
-communication cycle. The method should be used to initialize or configure custom assets (queue, shared memory buffers, 
-timer, etc.) that cannot be pickled and transferred to the communication Process. Any assets that can be pickled can be
-initialized during the interface __init__ method runtime. All assets should be stored in class attributes, so that they
-can be accessed from other abstract methods.
+communication cycle. The method should be used to initialize or configure custom assets (queues, shared memory buffers, 
+timers, etc.) that need to be processed from the (remote) communication process.
 ```
 def initialize_remote_assets(self) -> None:
-    # Initializes a milliseconds-precise timer. The timer cannot be passed to a remote process and has to be created
-    # by the code running inside the process.
-    self._timer = PrecisionTimer("ms")
+    # Connects to the shared memory array from the remote process.
+    self._shared_memory.connect()
 ```
 
 #### terminate_remote_assets
 This method is the inverse of the initialize_remote_assets() method. It is called by the MicroControllerInterface for
 each ModuleInterface at the end of the communication cycle. This method should be used to clean up (terminate) any 
 assets initialized at the beginning of the communication runtime to ensure all resources are released before the process
-is terminated. The example below is not from the TestModuleInterface, but showcases the proper termination of the 
-MQTTCommunication class used by some interfaces in the Sun lab.
+is terminated.
 ```
 def terminate_remote_assets(self) -> None:
-    # This was called inside the initialize_remote_assets()
-    # self._communication = MQTTCommunication()
-    # self._communication.connect()
-    
-    # This is called in the terminate_remote_assets()
-    self._communication.disconnect()
+    # The shared memory array must be manually disconnected from each process that uses it to prevent runtime
+    # errors.
+    self._shared_memory.disconnect()
 ```
-
-#### parse_mqtt_command
-This method translates commands sent by other MQTT clients into ModuleCommand messages that are transmitted to the 
-microcontroller for execution. MicroControllerInterface uses its MQTTCommunication class to monitor the topics listed
-by each managed ModuleInterface. When one of the monitored topics receives a message, MicroControllerInterface calls 
-this method for all ModuleInterfaces that listed that topic as their 'command topic.'
-
-The purpose of the method is to parse the topic and/or payload of a received MQTT message and, based on this data, to
-construct and return the command message to send to the Module. While the example TestModuleInterface does not 
-demonstrate this functionality, consider this example implementation used to control water valves in the Sun Lab:
-```
-def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> OneOffModuleCommand | None:
-    if topic == 'gimbl/reward':
-        return OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(1),
-            noblock=np.bool(False),  # Blocks to ensure reward delivery precision.
-        )
-```
-
-Currently, the method is designed to only process commands and work with all valid module commands.
 
 #### process_received_data
-This method allows processing incoming ModuleState and ModuleData messages as they are received by the PC. 
-MicroControllerInterface calls this method for any State or Data message received from the hardware module, if the 
-event code from that messages matches one of the codes in the data_codes attribute of the ModuleInterface. Therefore, 
-this method will only be called on the messages specified by the ModuleInterface developer.
+This method allows processing incoming module messages as they are received by the PC. The MicroControllerInterface 
+instance calls this method for any ModuleState or ModuleData message received from the hardware module, if the 
+event code of the message matches one of the codes in the data_codes attribute of the module’s interface instance.
 
-**Note:** The MicroControllerInterface class ***automatically*** saves (logs) each received and sent message to the PC
-as a stream of bytes. Therefore, this method should ***not*** be used to save the data for post-runtime analysis. 
-Instead, this method should be used to process the data in real time. For example, use this method to communicate the 
-physical location of a real life object to the Unity game engine simulating the virtual reality (via MQTT). Or use this 
-method to display a real-time graph for the microcontroller-recorded event, such as voltage detected by the voltage 
-sensor.
+**Note!** The MicroControllerInterface class ***automatically*** saves (logs) each received and sent message to disk. 
+Therefore, this method should ***not*** be used to save the data for post-runtime processing. Instead, this method 
+should be used to process the data in real time or route it to other processes / machines for real time processing.
 
 Since all ModuleInterfaces used by the same MicroControllerInterface share the communication process, 
-process_received_data should not use complex logic or processing. Treat this method as you would a hardware interrupt 
-function: its main goal is to move the data to a different context, where it can be processed, as quickly as possible 
-and allow the communication loop to run for other modules.
+**process_received_data() should not use complex logic or processing**. Treat this method as a hardware interrupt 
+function: its main goal is to handle the incoming data as quickly as possible and allow the communication loop to run 
+for other modules.
 
-This example demonstrates the implementation of the processing method to send the data back to the main process. All 
-assets other than the message are stored in class attributes. The timer is initialized via the 
-initialize_remote_assets() method:
+This example demonstrates the implementation of the processing method to send the data back to the main process:
 ```
-def process_received_data(
-    self,
-    message: ModuleData | ModuleState,
-) -> None:
-     if self._timer is None:
-            raise RuntimeError("PrecisionTimer not initialized.")
-
-    timestamp = self._timer.elapsed  # Returns the number of milliseconds elapsed since timer initialization
-
+def process_received_data(self, message: ModuleData | ModuleState) -> None:
     # Event codes 52 and 53 are used to communicate the current state of the output pin managed by the example
-    # module.
+    # module. State messages transmit these event-codes, so there is no additional data to parse other than
+    # event codes.
     if message.event == 52 or message.event == 53:
-        # These event-codes are transmitted by State messages, so there is no additional data to parse other than
-        # event codes. The codes are transformed into boolean values and are exported via the multiprocessing queue.
-        message_type = "pin state"
-        state = True if message.event == 52 else False
-        self._output_queue.put((self.module_id, message_type, state, timestamp))
+        # Code 52 indicates that the pin outputs a HIGH signal, code 53 indicates the pin outputs a LOW signal.
+        # If the pin state has changed from HIGH (52) to LOW (53), increments the pulse count stored in the shared
+        # memory array.
+        if message.event == 53 and self._previous_pin_state:
+            self._shared_memory[0] += 1
+
+        # Sets the previous pin state value to match the recorded pin state.
+        self._previous_pin_state = True if message.event == 52 else False
+
+    # The module uses code 54 messages to return its echo value to the PC.
+    elif isinstance(message, ModuleData) and message.event == 54:
+        # The echo value is transmitted by a Data message. In addition to the event code, Data messages include a
+        # data_object. Upon reception, the data object is automatically deserialized into the appropriate
+        # Python object, so it can be accessed directly.
+        self._shared_memory[2] = message.data_object  # Records the received data value to the shared memory.
+        self._shared_memory[1] += 1  # Increments the received echo value count.
 ```
 
-#### Module Messages
-In addition to abstract methods, each interface may need to implement a number of messages that can be sent to the 
-microcontroller. Unlike abstract methods, implementing custom command and parameter messages is optional: not all 
-modules may need to receive data from the PC to function.
+#### Sending Data to the Microcontroller
+In addition to abstract methods, each interface may need to send data to the microcontroller. Broadly, the outgoing 
+messages are divided into two categories: **commands** and **parameter updates**. Command messages instruct the module 
+to perform a specified action. Parameter updates are used to overwrite the module’s runtime parameters to broadly adjust
+how the module behaves while executing commands.
 
-To communicate with the module, the interface has to define one of the valid Module-targeted messages:
-OneOffModuleCommand, RepeatedModuleCommand, DequeueModuleCommand, or ModuleParameters. Each of these messages is a 
-dataclass that as a minimum contains 3 fields: the type of the target module, the instance ID of the target module, and
-a return_code. Since return_code is currently only used for debugging, **make sure the return_code is always set to 
-0**. Check the [API documentation](https://ataraxis-communication-interface-api.netlify.app/) for details about
-supported message structures.
+Each interface should use the `send_parameters()` method inherited from the (base) ModuleInterface class to send 
+parameter update messages to the managed module and the `send_command()` method to send command messages to the managed 
+module. These utility method abstracts the necessary steps for packaging and transmitting the input data to the module.
 
-It is not relevant how each interface defines its command and parameter messages. For example, in the 
-TestModuleInterface, we define methods that translate user-input into command messages. This enables users to 
-flexibly define commands to be sent to the module.
-```
-def pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = True) -> None:
-    # The _input_queue is provided by the managing MicroControllerInterface during its initialization. This guard
-    # prevents this command from running unless the MicroControllerInterface is initialized.
-    if self._input_queue is None:
-        raise RuntimeError("MicroControllerInterface that manages ModuleInterface is not initialized.")
+**Note!** These methods use LRU caching and JIT compilation to optimize their runtime speed and minimize the delay 
+between submitting the message for transmission and it being sent to the microcontroller. Therefore, most command and 
+parameter update functions / methods should be simple wrappers around these inherited methods. See the API documentation
+for the ModuleInterface class for the details about these methods inherited by each child interface class.
 
-    # Repetition delay of 0 is interpreted as a one-time command (only runs once).
-    command: RepeatedModuleCommand | OneOffModuleCommand
-    if repetition_delay == 0:
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-            command=np.uint8(1),
-            noblock=np.bool(noblock),
-        )
-    else:
-        command = RepeatedModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-            command=np.uint8(1),
-            noblock=np.bool(noblock),
-            cycle_delay=repetition_delay,
-        )
-
-    # Directly submits the command to the communication process.
-    self._input_queue.put(command)
-```
-
-However, you can also statically hard-code a set of fixed commands and expose them as interface class properties or 
-follow any other implementation that makes sense for your use case.
-
-#### Submitting messages to the microcontroller
-
-Since version 3.0.0, there are two ways for sending command or parameter messages to the microcontroller. The first way
-is to submit the message instance to the `send_message()` method of the MicroControllerInterface instance managing the 
-target microcontroller:
-```
-# This demonstrates creating and seinding a dequeue command to the hardware module with type 1 and id 3.
-mc_interface.send_message(DequeueModuleCommand(np.uint8(1), np.uint8(3), np.uint8(0)))
-```
-
-The second way, introduced in version 3.0.0 is using the _input_queue attribute inherited from the base ModuleInterface
-class. **Note**, this attribute is provided by the managing MicroControllerInterface class, so it is initially set to 
-None. The ModuleInterface has to be submitted to the initialization method of the MicroControllerInterface class to be 
-able to use this attribute for message submission:
-```
-command = RepeatedModuleCommand(
-    module_type=self._module_type,
-    module_id=self._module_id,
-    return_code=np.uint8(0),  # Keep this set to 0, the functionality is only for debugging purposes.
-    command=np.uint8(2),
-    noblock=np.bool(False),
-    cycle_delay=repetition_delay,
-)
-
-# Directly submits the command to the communication process.
-self._input_queue.put(command)
-```
+### Discovering Connected Microcontrollers
+To help determining which microcontrollers are available for communication and at which ports, this library exposes the 
+`axci-id` CLI command. This command is available from any environment that has the library installed and internally 
+calls the `print_microcontroller_ids()` standalone function. This command evaluates each available serial port for 
+whether it is connected to a valid Ataraxis microcontroller and, if so, queries the unique identifier of that 
+microcontroller.
 
 ___
 
@@ -607,74 +458,58 @@ ___
 
 See the [API documentation](https://ataraxis-communication-interface-api.netlify.app/) for the
 detailed description of the methods and classes exposed by components of this library.
+
 ___
 
 ## Developers
 
-This section provides installation, dependency, and build-system instructions for the developers that want to
-modify the source code of this library.
+This section provides installation, dependency, and build-system instructions for project developers.
 
-### Installing the library
+### Installing the Project
 
-The easiest way to ensure you have most recent development dependencies and library source files is to install the 
-python environment for your OS (see below). All environments used during development are exported as .yml files and as 
-spec.txt files to the [envs](envs) folder. The environment snapshots were taken on each of the three explicitly 
-supported OS families: Windows 11, OSx Darwin, and GNU Linux.
+***Note!*** This installation method requires **mamba version 2.3.2 or above**. Currently, all Sun lab automation 
+pipelines require that mamba is installed through the [miniforge3](https://github.com/conda-forge/miniforge) installer.
 
-**Note!** Since the OSx environment was built for the Darwin platform (Apple Silicon), it may not work on Intel-based 
-Apple devices.
-
-1. If you do not already have it installed, install [tox](https://tox.wiki/en/latest/user_guide.html) into the active
-   python environment. The rest of this installation guide relies on the interaction of local tox installation with the
-   configuration files included in with this library.
-2. Download this repository to your local machine using your preferred method, such as git-cloning. If necessary, unpack
-   and move the project directory to the appropriate location on your system.
-3. ```cd``` to the root directory of the project using your command line interface of choice. Make sure it contains
-   the `tox.ini` and `pyproject.toml` files.
-4. Run ```tox -e import``` to automatically import the os-specific development environment included with the source 
-   distribution. Alternatively, you can use ```tox -e create``` to create the environment from scratch and automatically
-   install the necessary dependencies using pyproject.toml file. 
-5. If either step 4 command fails, use ```tox -e provision``` to fix a partially installed environment.
-
-**Hint:** while only the platforms mentioned above were explicitly evaluated, this project will likely work on any 
-common OS, but may require additional configurations steps.
+1. Download this repository to the local machine using the preferred method, such as git-cloning.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
+3. ```cd``` to the root directory of the prepared project distribution.
+4. Install the core Sun lab development dependencies into the ***base*** mamba environment via the 
+   ```mamba install tox uv tox-uv``` command.
+5. Use the ```tox -e create``` command to create the project-specific development environment followed by 
+   ```tox -e install``` command to install the project into that environment as a library.
 
 ### Additional Dependencies
 
-In addition to installing the development environment, separately install the following dependencies:
+In addition to installing the project and all user dependencies, install the following dependencies:
 
-1. [Python](https://www.python.org/downloads/) distributions, one for each version that you intend to support. These 
-   versions will be installed in-addition to the main Python version installed in the development environment.
-   The easiest way to get tox to work as intended is to have separate python distributions, but using 
-   [pyenv](https://github.com/pyenv/pyenv) is a good alternative. This is needed for the 'test' task to work as 
-   intended.
+1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by the developed project. 
+   Currently, this library supports the three latest stable versions. It is recommended to use a tool like 
+   [pyenv](https://github.com/pyenv/pyenv) to install and manage the required versions.
 
 ### Development Automation
 
 This project comes with a fully configured set of automation pipelines implemented using 
-[tox](https://tox.wiki/en/latest/user_guide.html). Check [tox.ini file](tox.ini) for details about 
+[tox](https://tox.wiki/en/latest/user_guide.html). Check the [tox.ini file](tox.ini) for details about the 
 available pipelines and their implementation. Alternatively, call ```tox list``` from the root directory of the project
 to see the list of available tasks.
 
-**Note!** All commits to this project have to successfully complete the ```tox``` task before being pushed to GitHub. 
-To minimize the runtime duration for this task, use ```tox --parallel```.
-
-For more information, check the 'Usage' section of the 
-[ataraxis-automation project](https://github.com/Sun-Lab-NBB/ataraxis-automation#Usage) documentation.
+**Note!** All pull requests for this project have to successfully complete the ```tox``` task before being merged. 
+To expedite the task’s runtime, use the ```tox --parallel``` command to run some tasks in-parallel.
 
 ### Automation Troubleshooting
 
-Many packages used in 'tox' automation pipelines (uv, mypy, ruff) and 'tox' itself are prone to various failures. In 
-most cases, this is related to their caching behavior. Despite a considerable effort to disable caching behavior known 
-to be problematic, in some cases it cannot or should not be eliminated. If you run into an unintelligible error with 
+Many packages used in 'tox' automation pipelines (uv, mypy, ruff) and 'tox' itself may experience runtime failures. In 
+most cases, this is related to their caching behavior. If an unintelligible error is encountered with 
 any of the automation components, deleting the corresponding .cache (.tox, .ruff_cache, .mypy_cache, etc.) manually 
-or via a cli command is very likely to fix the issue.
+or via a CLI command typically solves the issue.
+
 ___
 
 ## Versioning
 
-We use [semantic versioning](https://semver.org/) for this project. For the versions available, see the 
-[tags on this repository](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags).
+This project uses [semantic versioning](https://semver.org/). See the  
+[tags on this repository](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags) for the available 
+project releases.
 
 ---
 
@@ -688,13 +523,13 @@ ___
 ## License
 
 This project is licensed under the GPL3 License: see the [LICENSE](LICENSE) file for details.
+
 ___
 
 ## Acknowledgments
 
 - All Sun lab [members](https://neuroai.github.io/sunlab/people) for providing the inspiration and comments during the
   development of this library.
-- The creators of all other projects used in our development automation pipelines and source code 
-  [see pyproject.toml](pyproject.toml).
+- The creators of all other dependencies and projects listed in the [pyproject.toml](pyproject.toml) file.
 
 ---

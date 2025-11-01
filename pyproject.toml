@@ -1,27 +1,25 @@
-# Defines the build system used for the project. For pure-python projects, uses the hatchling build system, which is
-# used internally by scikit-build for our C-extension projects. Therefore, there is clear continuity between our
-# c-extension and pure-python projects.
+# Defines the build system used for the project.
 [build-system]
-requires = ["hatchling>=1,<2"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "3.2.1"
-description = "Enables interfacing with custom hardware modules running on Arduino or Teensy microcontrollers through Python interface clients."
+version = "4.0.0"
+description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.14"
 authors = [
-    { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
-    { name = "Jacob Groner", email = "jrg349@cornell.edu" },
+    { name = "Ivan Kondratyev" },
+    { name = "Jacob Groner" },
 ]
 maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["ataraxis", "MQTT", "Serial", "communication", "interface", "unity", "microcontroller"]
+keywords = ["ataraxis", "serial", "communication", "interface", "microcontroller", "USB", "UART", "TCP", "MQTT"]
 
 classifiers = [
     # Development status
@@ -32,102 +30,54 @@ classifiers = [
     # License
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     # Supported Python Versions
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    # "Programming Language :: Python :: 3.14", # Waiting on numba to support 3.14
     # Supported OS systems
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
-    "Operating System :: MacOS :: MacOS X"
+    "Operating System :: MacOS :: MacOS X",
+    # Typing
+    "Typing :: Typed"
 ]
 
-# Runtime project dependencies. This overlaps with 'condarun' optional list.
+# Runtime project dependencies.
 dependencies = [
     "numpy>=2,<3",
-    "numba>=0,<1",
-    "ataraxis-time>=3,<4",
-    "ataraxis-base-utilities>=3,<4",
-    "ataraxis-data-structures>=3,<4",
-    "ataraxis-transport-layer-pc>=1,<2",
+    "ataraxis-time>=5,<6",
+    "ataraxis-base-utilities>=5,<6",
+    "ataraxis-data-structures>=5,<6",
+    "ataraxis-transport-layer-pc>=3,<4",
     "paho-mqtt>=2,<3",
+    "tqdm>=4,<5",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/ataraxis-communication-interface"
 Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
 
-# Specifies additional dependencies that can be installed alongside the main library. Also, this is the section that
-# stores conda, condarun, and noconda lists that facilitate setting up dependencies via conda where possible.
+# Specifies additional dependencies that can be installed alongside the main library.
 [project.optional-dependencies]
 
-# Runtime dependencies known to be installable with conda for all development platforms
-# (OSX ARM64, WIN AMD64, LIN AMD64). This specification is used by ataraxis-automation to resolve as many
-# project dependencies with conda over pip as possible.
-condarun = [
-    "numpy>=2,<3",
-]
-
-# Dependencies known to be installable with conda for all development platforms (OSX ARM64, WIN AMD64, LIN AMD64).
-conda = [
-    # Testing
-    "pytest>=8,<9",
-    "pytest-cov>=6,<7",
-    "pytest-xdist>=3,<4",
-
-    # Coverage Reports
-    "coverage[toml]>=7,<8",
-    "junitparser>=3,<4",
-
-    # Documentation
-    "sphinx>=8,<9",
-    "importlib-metadata>=8,<9",
-    "sphinx-rtd-theme>=3,<4",
-    "sphinx-click>=6,<7",
-    "sphinx-autodoc-typehints>=3,<4",
-
-    # Linting and Stub-generation
-    "mypy>=1,<2",
-    "ruff>=0,<1",
-
-    # Building
-    "hatchling>=1,<2",
-
-    # Distribution
-    "twine>=6,<7",
-    "grayskull>=2,<3",
-]
-
-# Dependencies known to not be installable with conda for at least one supported development platform
-# (OSX ARM64, WIN AMD64, LIN AMD64).
-noconda = [
+# Dependencies that support developing this project.
+dev = [
     # Tox
     "tox>=4,<5",
-    "tox-uv>=1,<2",
     "uv>=0,<1",
+    "tox-uv>=1,<2",
 
-    # Documentation
-    "sphinx-rtd-dark-mode>=1,<2",
-
-    # Building
-    "build>=1,<2",
+    # Development Automation
+    "ataraxis-automation>=7,<8",
 
     # Types:
     "types-paho-mqtt>=1,<2",
-
-    # Automation
-    "ataraxis-automation>=4,<5",
+    "types-tqdm>=4,<5",
+    "types-pyserial>=3,<4",
 ]
 
-# A shorthand specification that installs tox and all packages required for development tasks. This specification can
-# be used by developers to quickly install all necessary components for working on this project. Has to be installed
-# from pip.
-dev = [
-    "ataraxis-communication-interface[conda]",
-    "ataraxis-communication-interface[noconda]"
-]
-
-# Future support for CLI interface(s) can be realizied through this section.
+# Exports the CLI used to identify available microcontrollers and the ports they are connected to.
 [project.scripts]
+axci-id = "ataraxis_communication_interface.microcontroller_interface:print_microcontroller_ids"
 
 # Specifies files that should not be included in the source-code distribution, but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
@@ -139,9 +89,9 @@ packages = ["src/ataraxis_communication_interface", "examples"]
 
 # Ruff Configuration.
 [tool.ruff]
-line-length = 120         # Maximum column length is set to 120 for this project.
+line-length = 120         # The maximum column length is set to 120 for this project.
 indent-width = 4          # Same as black, indents are 4 spaces
-target-version = "py311"  # Targets the lowest supported version of python
+target-version = "py312"  # Targets the lowest supported version of python
 src = ["src"]             # The name of the source directory
 
 # Excludes 'service' .py files, such as the sphinx configuration file from linting.
@@ -152,6 +102,16 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
+    "W291",  # Conflicts with docstring formatting
+    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "C901",  # Sometimes complex functions are necessary
+    "PLR0913",  # Sometimes complex functions are necessary
+    "PLR0912",  # Sometimes complex functions are necessary
+    "PLR0915",  # Sometimes complex type defenitions are necessary
+    "PLR0911", # Sometimes complex return graphs are necessary
+    "FBT001", # Sometimes positional boolean atguments are necessary
+    "FBT002", # Sometimes positional boolean arguments are necessary
+    "SLF001",  # Sometimes accessing private members is necessary
     "COM812", # Conflicts with the formatter
     "ISC001", # Conflicts with the formatter
     "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
@@ -166,7 +126,7 @@ lint.ignore = [
 quote-style = "double"             # Uses double quotes for strings
 indent-style = "space"             # Uses space for indents
 skip-magic-trailing-comma = false  # Like black, ignores trailing commas
-line-ending = "auto"               # Automatically detects and standardizes line ending character
+line-ending = "auto"               # Automatically detects and standardizes line-ending character
 
 # Docstrings and comments' line length
 [tool.ruff.lint.pycodestyle]
@@ -192,8 +152,27 @@ length-sort = true                 # Places shorter imports first
 
 # MyPy configuration section.
 [tool.mypy]
-disallow_untyped_defs = true # Enforces function annotation
-warn_unused_ignores = true   # Warns against using 'type: ignore' for packages that have type stubs available.
+# Strict mode settings (equivalent to --strict)
+warn_unused_configs = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+
+# Extra checks (equivalent to --extra-checks)
+extra_checks = true
+
+# Pretty output (equivalent to --pretty)
+pretty = true
+
 exclude = [
     "ataraxis-communication-interface-\\d+", # Ignores temporary folder created by setuptools when building the sdist
     "venv.*/",                               # Ignores virtual environments
@@ -225,5 +204,4 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
     "pass",
-    "\\.\\.\\."
 ]
