@@ -5,6 +5,7 @@ microcontrollers.
 
 from abc import ABC, abstractmethod
 import sys
+import copy
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
@@ -597,9 +598,6 @@ class MicroControllerInterface:  # pragma: no cover
         self._baudrate: int = baudrate
         self._buffer_size: int = buffer_size
 
-        # Managed modules and data logger queue.
-        self._modules: tuple[ModuleInterface, ...] = module_interfaces
-
         # Extracts the queue and log path from the logger instance.
         self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]
         self._log_directory: Path = data_logger.output_directory
@@ -619,7 +617,8 @@ class MicroControllerInterface:  # pragma: no cover
         # module to use the input queue instantiated above to submit command and parameter messages to the
         # microcontroller.
         processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
-        for module in self._modules:
+        modules: list[ModuleInterface] = []  # This is used to iteratively build the internal tuple of interfaces.
+        for module in module_interfaces:
             # If the module's combined type + id code is already inside the processed_types_id set, this means another
             # module with the same exact type and ID combination has already been processed.
             if module.type_id in processed_type_ids:
@@ -638,6 +637,17 @@ class MicroControllerInterface:  # pragma: no cover
             # data and functionality realized through the main interface to each module interface. For example,
             # ModuleInterface classes can use their own _input_queue to
             module.set_input_queue(input_queue=self._input_queue)
+
+            # The current implementation of the LRU caching at the module level is not pickleable. However, the LRU
+            # cache does not need to be transferred to the remote process, as the remote process itself is not expected
+            # to create any command messages. Therefore, copies each Module and explicitly removes the LRU cached
+            # functions from the module object before it is piped to the remote process.
+            internal_module = copy.deepcopy(module)
+            internal_module._create_command_message = None  # type: ignore[assignment]
+            internal_module._create_parameters_message = None  # type: ignore[assignment]
+            modules.append(internal_module)
+
+        self._modules: tuple[ModuleInterface, ...] = tuple(modules)
 
     def __repr__(self) -> str:
         """Returns the string representation of the class instance."""
