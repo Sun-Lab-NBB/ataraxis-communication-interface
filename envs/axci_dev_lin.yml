@@ -30,7 +30,7 @@ dependencies:
   - pluggy=1.6.0=pyhd8ed1ab_0
   - pyproject-api=1.10.0=pyhcf101f3_0
   - python=3.13.9=hc97d973_101_cp313
-  - python-uv=0.9.7=pyhcf101f3_0
+  - python-uv=0.9.5=pyhcf101f3_0
   - python_abi=3.13=8_cp313
   - readline=8.2=h8c095d6_2
   - tk=8.6.13=noxft_hd72426e_102
@@ -39,7 +39,7 @@ dependencies:
   - tox-uv=1.29.0=pyhd8ed1ab_0
   - typing_extensions=4.15.0=pyhcf101f3_0
   - tzdata=2025b=h78e105d_0
-  - uv=0.9.7=h30787bc_0
-  - virtualenv=20.35.4=pyhd8ed1ab_0
+  - uv=0.9.5=h30787bc_0
+  - virtualenv=20.35.3=pyhd8ed1ab_0
   - zstd=1.5.7=hb8e6e7a_2
 

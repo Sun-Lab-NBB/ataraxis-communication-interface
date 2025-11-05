@@ -5,11 +5,12 @@ microcontrollers.
 
 from abc import ABC, abstractmethod
 import sys
-import copy
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from functools import partial, lru_cache
+
+# noinspection PyProtectedMember
+from functools import partial, lru_cache, _lru_cache_wrapper
 from threading import Thread
 from dataclasses import dataclass
 from multiprocessing import (
@@ -245,9 +246,12 @@ class ModuleInterface(ABC):  # pragma: no cover
             return_code=_ZERO_BYTE,
         )
 
-        # Creates bound cached methods for creating command and parameter messages this instance
-        self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
-        self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
+        # Since the bound LRU-cache methods cannot be pickled and lead to errors on Windows, the cached methods are
+        # initialized to the None placeholder. The managing MicroControllerInterface is expected to call the
+        # 'enable_cache' method to enable the LRU cache functionality once the remote communication process is
+        # initialized.
+        self._create_command_message: None | _lru_cache_wrapper[OneOffModuleCommand | RepeatedModuleCommand] = None
+        self._create_parameters_message: None | _lru_cache_wrapper[ModuleParameters] = None
 
     def __repr__(self) -> str:
         """Returns the string representation of the instance."""
@@ -374,11 +378,11 @@ class ModuleInterface(ABC):  # pragma: no cover
                 is only executed once.
         """
         # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None:
+        if self._input_queue is None or self._create_command_message is None:
             message = (
-                f"Unable to submit the command {command} to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
-                f"before calling this method."
+                f"Unable to send the command message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize and start the "
+                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -406,11 +410,11 @@ class ModuleInterface(ABC):  # pragma: no cover
                 parameter structure on the microcontroller.
         """
         # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None:
+        if self._input_queue is None or self._create_parameters_message is None:
             message = (
-                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
-                f"before calling this method."
+                f"Unable to send the runtime parameters update message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize and start the "
+                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -424,9 +428,9 @@ class ModuleInterface(ABC):  # pragma: no cover
         # Prevents interfacing with the microcontroller until the communication is initialized.
         if self._input_queue is None:
             message = (
-                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
-                f"before calling this method."
+                f"Unable to send the deque command message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize and start the "
+                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -443,6 +447,15 @@ class ModuleInterface(ABC):  # pragma: no cover
         configuration and should not be called directly by end users.
         """
         self._input_queue = input_queue
+
+    def enable_cache(self) -> None:
+        """Initializes the LRU caches for command and parameter message creation methods.
+
+        This service method is used by the MicroControllerInterface as part of its start() method runtime to finalize
+        the instance's configuration and should not be called directly by end users.
+        """
+        self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
+        self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
 
     @property
     def module_type(self) -> np.uint8:
@@ -598,6 +611,9 @@ class MicroControllerInterface:  # pragma: no cover
         self._baudrate: int = baudrate
         self._buffer_size: int = buffer_size
 
+        #  Stores references to all managed interfaces in the internal attribute.
+        self._modules: tuple[ModuleInterface, ...] = tuple(module_interfaces)
+
         # Extracts the queue and log path from the logger instance.
         self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]
         self._log_directory: Path = data_logger.output_directory
@@ -617,8 +633,7 @@ class MicroControllerInterface:  # pragma: no cover
         # module to use the input queue instantiated above to submit command and parameter messages to the
         # microcontroller.
         processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
-        modules: list[ModuleInterface] = []  # This is used to iteratively build the internal tuple of interfaces.
-        for module in module_interfaces:
+        for module in self._modules:
             # If the module's combined type + id code is already inside the processed_types_id set, this means another
             # module with the same exact type and ID combination has already been processed.
             if module.type_id in processed_type_ids:
@@ -637,17 +652,6 @@ class MicroControllerInterface:  # pragma: no cover
             # data and functionality realized through the main interface to each module interface. For example,
             # ModuleInterface classes can use their own _input_queue to
             module.set_input_queue(input_queue=self._input_queue)
-
-            # The current implementation of the LRU caching at the module level is not pickleable. However, the LRU
-            # cache does not need to be transferred to the remote process, as the remote process itself is not expected
-            # to create any command messages. Therefore, copies each Module and explicitly removes the LRU cached
-            # functions from the module object before it is piped to the remote process.
-            internal_module = copy.deepcopy(module)
-            internal_module._create_command_message = None  # type: ignore[assignment]
-            internal_module._create_parameters_message = None  # type: ignore[assignment]
-            modules.append(internal_module)
-
-        self._modules: tuple[ModuleInterface, ...] = tuple(modules)
 
     def __repr__(self) -> str:
         """Returns the string representation of the class instance."""
@@ -792,6 +796,11 @@ class MicroControllerInterface:  # pragma: no cover
         # Creates and starts the watchdog thread.
         self._watchdog_thread = Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
+
+        # Once the remote communication process has started, activates the LRU caches for all modules to enable
+        # constructing and sending messages from each interface instance.
+        for module in self._modules:
+            module.enable_cache()
 
         # Issues the global reset command. This ensures that the controller always starts with 'default' parameters for
         # Teensy microcontroller boards that do not reset upon communication interface connection cycling.
