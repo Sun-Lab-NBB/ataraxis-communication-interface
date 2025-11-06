@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from enum import IntEnum
 from typing import Any
 from pathlib import Path
-from functools import _lru_cache_wrapper
 from threading import Thread
 from dataclasses import dataclass
 from multiprocessing import (
@@ -75,8 +74,8 @@ class ModuleInterface(ABC, metaclass=abc.ABCMeta):
     _error_codes: set[np.uint8]
     _input_queue: MPQueue | None
     _dequeue_command: Incomplete
-    _create_command_message: None | _lru_cache_wrapper[OneOffModuleCommand | RepeatedModuleCommand]
-    _create_parameters_message: None | _lru_cache_wrapper[ModuleParameters]
+    _create_command_message: Incomplete
+    _create_parameters_message: Incomplete
     def __init__(
         self,
         module_type: np.uint8,
@@ -85,6 +84,8 @@ class ModuleInterface(ABC, metaclass=abc.ABCMeta):
         data_codes: set[np.uint8] | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
+    def __getstate__(self) -> dict[str, Any]: ...
+    def __setstate__(self, state: dict[str, Any]) -> None: ...
     @abstractmethod
     def initialize_remote_assets(self) -> None: ...
     @abstractmethod
@@ -103,7 +104,6 @@ class ModuleInterface(ABC, metaclass=abc.ABCMeta):
     ) -> None: ...
     def reset_command_queue(self) -> None: ...
     def set_input_queue(self, input_queue: MPQueue) -> None: ...
-    def enable_cache(self) -> None: ...
     @property
     def module_type(self) -> np.uint8: ...
     @property

@@ -8,9 +8,7 @@ import sys
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-
-# noinspection PyProtectedMember
-from functools import partial, lru_cache, _lru_cache_wrapper
+from functools import partial, lru_cache
 from threading import Thread
 from dataclasses import dataclass
 from multiprocessing import (
@@ -246,12 +244,10 @@ class ModuleInterface(ABC):  # pragma: no cover
             return_code=_ZERO_BYTE,
         )
 
-        # Since the bound LRU-cache methods cannot be pickled and lead to errors on Windows, the cached methods are
-        # initialized to the None placeholder. The managing MicroControllerInterface is expected to call the
-        # 'enable_cache' method to enable the LRU cache functionality once the remote communication process is
-        # initialized.
-        self._create_command_message: None | _lru_cache_wrapper[OneOffModuleCommand | RepeatedModuleCommand] = None
-        self._create_parameters_message: None | _lru_cache_wrapper[ModuleParameters] = None
+        # Binds LRU caches for command and parameter message creation. The LRU cache is used to optimize runtime
+        # performance.
+        self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
+        self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
 
     def __repr__(self) -> str:
         """Returns the string representation of the instance."""
@@ -260,6 +256,20 @@ class ModuleInterface(ABC):  # pragma: no cover
             f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
             f"error_codes={sorted(self._error_codes)})"
         )
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Excludes LRU cache wrappers when pickling the instance."""
+        # Since LRU caches are only used in the main thread and cannot be pickled, the easiest way to ensure each
+        # interface functions as expected on Windows (requires pickling to spawn the communication process) is to
+        # exclude them during pickling.
+        state = self.__dict__.copy()
+        state["_create_command_message"] = None
+        state["_create_parameters_message"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore the instance without LRU caches during unpickling."""
+        self.__dict__.update(state)
 
     @abstractmethod
     def initialize_remote_assets(self) -> None:
@@ -381,8 +391,9 @@ class ModuleInterface(ABC):  # pragma: no cover
         if self._input_queue is None or self._create_command_message is None:
             message = (
                 f"Unable to send the command message to the module {self._module_id} of type "
-                f"{self._module_type}. Use the module interface instance to initialize and start the "
-                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
+                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
+                f"instance to enable constructing and sending messages to the microcontroller. Note; at this time only "
+                f"the main runtime process can construct and send messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -413,8 +424,9 @@ class ModuleInterface(ABC):  # pragma: no cover
         if self._input_queue is None or self._create_parameters_message is None:
             message = (
                 f"Unable to send the runtime parameters update message to the module {self._module_id} of type "
-                f"{self._module_type}. Use the module interface instance to initialize and start the "
-                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
+                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
+                f"instance to enable constructing and sending messages to the microcontroller. Note; at this time only "
+                f"the main runtime process can construct and send messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -447,15 +459,6 @@ class ModuleInterface(ABC):  # pragma: no cover
         configuration and should not be called directly by end users.
         """
         self._input_queue = input_queue
-
-    def enable_cache(self) -> None:
-        """Initializes the LRU caches for command and parameter message creation methods.
-
-        This service method is used by the MicroControllerInterface as part of its start() method runtime to finalize
-        the instance's configuration and should not be called directly by end users.
-        """
-        self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
-        self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
 
     @property
     def module_type(self) -> np.uint8:
@@ -796,11 +799,6 @@ class MicroControllerInterface:  # pragma: no cover
         # Creates and starts the watchdog thread.
         self._watchdog_thread = Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
-
-        # Once the remote communication process has started, activates the LRU caches for all modules to enable
-        # constructing and sending messages from each interface instance.
-        for module in self._modules:
-            module.enable_cache()
 
         # Issues the global reset command. This ensures that the controller always starts with 'default' parameters for
         # Teensy microcontroller boards that do not reset upon communication interface connection cycling.
