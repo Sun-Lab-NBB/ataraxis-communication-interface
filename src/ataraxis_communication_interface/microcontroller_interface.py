@@ -244,7 +244,8 @@ class ModuleInterface(ABC):  # pragma: no cover
             return_code=_ZERO_BYTE,
         )
 
-        # Creates bound cached methods for creating command and parameter messages this instance
+        # Binds LRU caches for command and parameter message creation. The LRU cache is used to optimize runtime
+        # performance.
         self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
         self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
 
@@ -255,6 +256,20 @@ class ModuleInterface(ABC):  # pragma: no cover
             f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
             f"error_codes={sorted(self._error_codes)})"
         )
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Excludes LRU cache wrappers when pickling the instance."""
+        # Since LRU caches are only used in the main thread and cannot be pickled, the easiest way to ensure each
+        # interface functions as expected on Windows (requires pickling to spawn the communication process) is to
+        # exclude them during pickling.
+        state = self.__dict__.copy()
+        state["_create_command_message"] = None
+        state["_create_parameters_message"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore the instance without LRU caches during unpickling."""
+        self.__dict__.update(state)
 
     @abstractmethod
     def initialize_remote_assets(self) -> None:
@@ -373,11 +388,12 @@ class ModuleInterface(ABC):  # pragma: no cover
                 is only executed once.
         """
         # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None:
+        if self._input_queue is None or self._create_command_message is None:
             message = (
-                f"Unable to submit the command {command} to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
-                f"before calling this method."
+                f"Unable to send the command message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
+                f"instance to enable constructing and sending messages to the microcontroller. Note; at this time only "
+                f"the main runtime process can construct and send messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -405,11 +421,12 @@ class ModuleInterface(ABC):  # pragma: no cover
                 parameter structure on the microcontroller.
         """
         # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None:
+        if self._input_queue is None or self._create_parameters_message is None:
             message = (
-                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
-                f"before calling this method."
+                f"Unable to send the runtime parameters update message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
+                f"instance to enable constructing and sending messages to the microcontroller. Note; at this time only "
+                f"the main runtime process can construct and send messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -423,9 +440,9 @@ class ModuleInterface(ABC):  # pragma: no cover
         # Prevents interfacing with the microcontroller until the communication is initialized.
         if self._input_queue is None:
             message = (
-                f"Unable to submit a deque command to module {self._module_id} of type {self._module_type}. The "
-                f"ModuleInterface instance has to be used to initialize a MicroControllerInterface instance "
-                f"before calling this method."
+                f"Unable to send the deque command message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize and start the "
+                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
             raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
@@ -597,8 +614,8 @@ class MicroControllerInterface:  # pragma: no cover
         self._baudrate: int = baudrate
         self._buffer_size: int = buffer_size
 
-        # Managed modules and data logger queue.
-        self._modules: tuple[ModuleInterface, ...] = module_interfaces
+        #  Stores references to all managed interfaces in the internal attribute.
+        self._modules: tuple[ModuleInterface, ...] = tuple(module_interfaces)
 
         # Extracts the queue and log path from the logger instance.
         self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]

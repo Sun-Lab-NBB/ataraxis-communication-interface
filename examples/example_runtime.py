@@ -11,6 +11,8 @@
 # API documentation: https://ataraxis-communication-interface-api.netlify.app/.
 # Authors: Ivan Kondratyev (Inkaros), Jacob Groner.
 
+import multiprocessing
+
 # Imports the necessary assets, including the TestModuleInterface class
 from pathlib import Path
 

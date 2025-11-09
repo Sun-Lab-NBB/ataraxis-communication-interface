@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "4.0.0"
+version = "4.0.1rc3"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = { file = "LICENSE" }
