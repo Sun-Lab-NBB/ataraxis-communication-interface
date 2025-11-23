@@ -6,11 +6,11 @@ build-backend = "hatchling.build"
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "4.0.1"
+version = "4.1.0rc1"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 authors = [
     { name = "Ivan Kondratyev" },
     { name = "Jacob Groner" },
@@ -32,7 +32,7 @@ classifiers = [
     # Supported Python Versions
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    # "Programming Language :: Python :: 3.14", # Waiting on numba to support 3.14
+    "Programming Language :: Python :: 3.14",
     # Supported OS systems
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
@@ -47,7 +47,7 @@ dependencies = [
     "ataraxis-time>=5,<6",
     "ataraxis-base-utilities>=5,<6",
     "ataraxis-data-structures>=5,<6",
-    "ataraxis-transport-layer-pc>=3,<4",
+    "ataraxis-transport-layer-pc>=3.1.0rc1,<4",
     "paho-mqtt>=2,<3",
     "tqdm>=4,<5",
 ]
