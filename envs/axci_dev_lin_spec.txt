@@ -28,7 +28,7 @@ https://conda.anaconda.org/conda-forge/noarch/platformdirs-4.5.0-pyhcf101f3_0.co
 https://conda.anaconda.org/conda-forge/noarch/pluggy-1.6.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/pyproject-api-1.10.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/python-3.13.9-hc97d973_101_cp313.conda
-https://conda.anaconda.org/conda-forge/noarch/python-uv-0.9.7-pyhcf101f3_0.conda
+https://conda.anaconda.org/conda-forge/noarch/python-uv-0.9.5-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/python_abi-3.13-8_cp313.conda
 https://conda.anaconda.org/conda-forge/linux-64/readline-8.2-h8c095d6_2.conda
 https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_hd72426e_102.conda
@@ -37,6 +37,6 @@ https://conda.anaconda.org/conda-forge/noarch/tox-4.32.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tox-uv-1.29.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.15.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
-https://conda.anaconda.org/conda-forge/linux-64/uv-0.9.7-h30787bc_0.conda
-https://conda.anaconda.org/conda-forge/noarch/virtualenv-20.35.4-pyhd8ed1ab_0.conda
+https://conda.anaconda.org/conda-forge/linux-64/uv-0.9.5-h30787bc_0.conda
+https://conda.anaconda.org/conda-forge/noarch/virtualenv-20.35.3-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb8e6e7a_2.conda
