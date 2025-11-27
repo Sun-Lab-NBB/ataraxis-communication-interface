@@ -1,12 +1,12 @@
 # Defines the build system used for the project.
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.28.0"]
 build-backend = "hatchling.build"
 
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "4.1.0rc1"
+version = "4.1.0rc2"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = { file = "LICENSE" }

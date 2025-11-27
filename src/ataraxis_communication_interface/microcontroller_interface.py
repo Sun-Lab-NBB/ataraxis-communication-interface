@@ -1579,7 +1579,7 @@ def extract_logged_hardware_module_data(
     )
 
 
-def _evaluate_port(port: str, baudrate: int = 115200) -> int:
+def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
     """Determines whether the target serial port is connected to an Ataraxis MicroController.
 
     Args:
@@ -1587,56 +1587,65 @@ def _evaluate_port(port: str, baudrate: int = 115200) -> int:
         baudrate: The baudrate to use for communication if the microcontroller uses the UART serial interface.
 
     Returns:
-        The unique identifier code of the microcontroller if the port is connected to an Ataraxis MicroController, or
-        -1 if not.
+        A tuple containing: (1) the unique identifier code of the microcontroller if the port is connected to an
+        Ataraxis MicroController, or -1 if not; (2) an error message string if a connection error occurred, or None
+        if no error occurred.
     """
-    # Initializes a fake multiprocessing queue to initialize communication
-    fake_queue: MPQueue = MPQueue()  # type: ignore[type-arg]
+    try:
+        # Initializes a fake multiprocessing queue to initialize communication
+        fake_queue: MPQueue = MPQueue()  # type: ignore[type-arg]
 
-    # Initializes a timer to prevent stale identification attempts from running forever.
-    timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        # Initializes a timer to prevent stale identification attempts from running forever.
+        timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    # Opens communication via teh target port
-    communication = SerialCommunication(
-        controller_id=np.uint8(123),
-        microcontroller_serial_buffer_size=8192,
-        port=port,
-        baudrate=baudrate,
-        logger_queue=fake_queue,
-    )
+        # Opens communication via the target port
+        communication = SerialCommunication(
+            controller_id=np.uint8(123),
+            microcontroller_serial_buffer_size=8192,
+            port=port,
+            baudrate=baudrate,
+            logger_queue=fake_queue,
+        )
 
-    # Requests the microcontroller to identify itself. A valid microcontroller would respond with its ID. Any other
-    # asset would either ignore the command or err.
-    identify_controller_command = KernelCommand(
-        command=np.uint8(3),
-        return_code=np.uint8(0),
-    )
+        # Requests the microcontroller to identify itself. A valid microcontroller would respond with its ID. Any other
+        # asset would either ignore the command or err.
+        identify_controller_command = KernelCommand(
+            command=np.uint8(3),
+            return_code=np.uint8(0),
+        )
 
-    # Blocks until the microcontroller responds with its identification code.
-    attempt = 0
-    response = None
-    while attempt < _RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value and not isinstance(
-        response, ControllerIdentification
-    ):
-        # Sends microcontroller identification command. This command requests the microcontroller to return its
-        # id code.
-        communication.send_message(message=identify_controller_command)
-        attempt += 1
+        # Blocks until the microcontroller responds with its identification code.
+        attempt = 0
+        response = None
+        while attempt < _RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value and not isinstance(
+            response, ControllerIdentification
+        ):
+            # Sends microcontroller identification command. This command requests the microcontroller to return its
+            # id code.
+            communication.send_message(message=identify_controller_command)
+            attempt += 1
 
-        # Waits for response with timeout
-        timeout_timer.reset()
-        while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
-            response = communication.receive_message()
-            if isinstance(response, ControllerIdentification):
-                break
+            # Waits for response with timeout
+            timeout_timer.reset()
+            while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
+                response = communication.receive_message()
+                if isinstance(response, ControllerIdentification):
+                    break
 
-    # If the microcontroller did not respond to the identification request, returns -1 to indicate that the port is
-    # likely not connected to a valid ataraxis microcontroller.
-    if not isinstance(response, ControllerIdentification):
-        return -1
+        # If the microcontroller did not respond to the identification request, returns -1 to indicate that the port is
+        # likely not connected to a valid ataraxis microcontroller.
+        if not isinstance(response, ControllerIdentification):
+            return -1, None
 
-    # Otherwise, returns the microcontroller's ID.
-    return int(response.controller_id)
+        # Otherwise, returns the microcontroller's ID.
+        return int(response.controller_id), None
+
+    except Exception as e:  # noqa: BLE001
+        # Catches any connection-related exceptions and returns an error message instead of propagating the exception.
+        # This prevents individual port failures from aborting the entire evaluation process.
+        error_type = type(e).__name__
+        error_msg = str(e) if str(e) else error_type
+        return -1, f"{error_type}: {error_msg}"
 
 
 def print_microcontroller_ids(baudrate: int = 115200) -> None:
@@ -1675,7 +1684,7 @@ def print_microcontroller_ids(baudrate: int = 115200) -> None:
     port_names = [port.device for port in valid_ports]
 
     # Uses ProcessPoolExecutor to evaluate all ports in parallel
-    results: dict[str, tuple[ListPortInfo, int]] = {}
+    results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
     with ProcessPoolExecutor() as executor:
         # Submits all port evaluation tasks
@@ -1687,17 +1696,20 @@ def print_microcontroller_ids(baudrate: int = 115200) -> None:
         # Collects results as they complete
         for future in as_completed(future_to_port):
             port_name, port_info = future_to_port[future]
-            controller_id = future.result()
-            results[port_name] = (port_info, controller_id)
+            controller_id, error_msg = future.result()
+            results[port_name] = (port_info, controller_id, error_msg)
 
     # Prints the results in the original port order (matching print_available_ports style)
     count = 0
     for port_name in port_names:
         if port_name in results:
-            port_info, controller_id = results[port_name]
+            port_info, controller_id, error_msg = results[port_name]
             count += 1
 
-            if controller_id == -1:
+            if error_msg is not None:
+                # Port encountered a connection error
+                console.echo(f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_msg}]")
+            elif controller_id == -1:
                 # Port did not respond or is not a valid microcontroller
                 console.echo(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
             else:
