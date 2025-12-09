@@ -1,12 +1,12 @@
 # Defines the build system used for the project.
 [build-system]
-requires = ["hatchling==1.28.0"]
+requires = ["hatchling==1.28"]
 build-backend = "hatchling.build"
 
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "4.1.0rc2"
+version = "4.1.0"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -47,7 +47,7 @@ dependencies = [
     "ataraxis-time>=5,<6",
     "ataraxis-base-utilities>=5,<6",
     "ataraxis-data-structures>=5,<6",
-    "ataraxis-transport-layer-pc>=3.1.0rc1,<4",
+    "ataraxis-transport-layer-pc>=3.1.1,<4",
     "paho-mqtt>=2,<3",
     "tqdm>=4,<5",
 ]
