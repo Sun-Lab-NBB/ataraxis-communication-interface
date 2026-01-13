@@ -35,6 +35,7 @@ ___
 - Uses JIT compilation and LRU caching to optimize the runtime efficiency of all library assets.
 - Contains many sanity checks performed at initialization time to minimize the potential for unexpected
   behavior and data corruption.
+- Includes an MCP server for AI agent integration (compatible with Claude Desktop and other MCP clients).
 - GPL 3 License.
 
 ___
@@ -44,6 +45,8 @@ ___
 - [Dependencies](#dependencies)
 - [Installation](#installation)
 - [Usage](#usage)
+- [CLI Commands](#cli-commands)
+- [MCP Server](#mcp-server-agentic-integration)
 - [API Documentation](#api-documentation)
 - [Developers](#developers)
 - [Versioning](#versioning)
@@ -452,12 +455,76 @@ between submitting the message for transmission and it being sent to the microco
 parameter update functions / methods should be simple wrappers around these inherited methods. See the API documentation
 for the ModuleInterface class for the details about these methods inherited by each child interface class.
 
-### Discovering Connected Microcontrollers
-To help determining which microcontrollers are available for communication and at which ports, this library exposes the
-`axci-id` CLI command. This command is available from any environment that has the library installed and internally
-calls the `print_microcontroller_ids()` standalone function. This command evaluates each available serial port for
-whether it is connected to a valid Ataraxis microcontroller and, if so, queries the unique identifier of that
-microcontroller.
+___
+
+## CLI Commands
+
+This library provides several CLI commands for system diagnostics and MCP server management. All commands are available
+from any environment that has the library installed.
+
+### axci-id
+Discovers connected microcontrollers by evaluating each available serial port for whether it is connected to a valid
+Ataraxis microcontroller and, if so, queries the unique identifier of that microcontroller. Internally calls the
+`print_microcontroller_ids()` function.
+
+```bash
+axci-id
+```
+
+### axci-mqtt
+Checks whether an MQTT broker is reachable at the specified host and port. Useful for verifying broker availability
+before running code that depends on MQTT communication. Internally calls the `check_mqtt_connectivity()` function.
+
+```bash
+axci-mqtt
+```
+
+### axci-mcp
+Starts the MCP server for AI agent integration. See the [MCP Server](#mcp-server-agentic-integration) section for
+details.
+
+```bash
+axci-mcp
+```
+
+___
+
+## MCP Server (Agentic Integration)
+
+This library includes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables AI agents
+to programmatically interact with microcontroller discovery and MQTT broker connectivity checking functionality.
+
+### Starting the Server
+
+Start the MCP server using the CLI:
+
+```bash
+axci-mcp
+```
+
+### Available Tools
+
+| Tool                    | Description                                                                      |
+|-------------------------|----------------------------------------------------------------------------------|
+| `list_microcontrollers` | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs    |
+| `check_mqtt_broker`     | Checks whether an MQTT broker is reachable at the specified host and port        |
+
+### Claude Desktop Configuration
+
+For integration with Claude Desktop, add the following to the Claude Desktop configuration file
+(`~/.config/claude/claude_desktop_config.json` on Linux,
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "ataraxis-communication-interface": {
+      "command": "axci-mcp"
+    }
+  }
+}
+```
 
 ___
 
