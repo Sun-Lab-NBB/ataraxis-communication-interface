@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ataraxis-communication-interface": {
+      "command": "axci-mcp",
+      "args": []
+    }
+  }
+}

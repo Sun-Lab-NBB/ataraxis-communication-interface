@@ -14,3 +14,10 @@ MicroController Interface
    :members:
    :undoc-members:
    :show-inheritance:
+
+MCP Server
+==========
+.. automodule:: ataraxis_communication_interface.mcp_server
+   :members:
+   :undoc-members:
+   :show-inheritance:

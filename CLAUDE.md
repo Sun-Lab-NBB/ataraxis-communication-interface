@@ -10,16 +10,23 @@ This ensures you:
 - Follow existing patterns and conventions
 - Don't introduce inconsistencies or break integrations
 
-## Code Contributions and Review
+## Style Guide Compliance
 
-Before writing, modifying, or reviewing any code, you MUST invoke the `/sun-lab-style` skill to load the Sun Lab
-Python coding conventions. All code contributions must strictly follow these conventions and all code reviews must
-check for compliance. Key conventions include:
+Before writing, modifying, or reviewing any code or documentation, you MUST invoke the `/sun-lab-style` skill to load
+the Sun Lab conventions. This applies to ALL file types including:
+- Python source files (`.py`)
+- Documentation files (`README.md`, docstrings)
+- Configuration files when adding comments or descriptions
+
+All contributions must strictly follow these conventions and all reviews must check for compliance. Key conventions
+include:
 - Google-style docstrings with proper sections
 - Full type annotations with explicit array dtypes
 - Keyword arguments for function calls
-- Third person imperative comments
+- Third person imperative mood for comments and documentation
 - Proper error handling with `console.error()`
+- README structure and formatting standards
+- MCP server documentation format
 
 ## Cross-Referenced Library Verification
 
@@ -79,7 +86,7 @@ if available.
 ## Available Skills
 
 - `/explore-codebase` - Perform in-depth codebase exploration
-- `/sun-lab-style` - Apply Sun Lab Python coding conventions (REQUIRED for all code changes)
+- `/sun-lab-style` - Apply Sun Lab coding and documentation conventions (REQUIRED for all code and documentation changes)
 
 ## Project Context
 
@@ -106,7 +113,10 @@ communication with support for multiple hardware modules, automatic message logg
 - **Message Protocol**: Binary-safe message structures using frozen dataclasses with 166 different data type
   prototypes (scalars and arrays of various numeric types).
 - **MQTT Communication**: Network-based communication via MQTT broker for distributed systems.
-- **CLI**: `axci-id` command for discovering connected microcontrollers.
+- **MCP Server**: Model Context Protocol server for AI agent integration with microcontroller discovery and MQTT
+  broker connectivity tools.
+- **CLI Commands**: `axci-id` for microcontroller discovery, `axci-mqtt` for MQTT broker connectivity checking,
+  `axci-mcp` for starting the MCP server.
 
 ### Key Patterns
 
