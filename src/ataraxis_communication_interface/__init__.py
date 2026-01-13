@@ -1,5 +1,5 @@
-"""This library provides the centralized interface for exchanging commands and data between Arduino and Teensy
-microcontrollers and host-computers.
+"""Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers
+and host-computers.
 
 See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface for more details.
 API documentation: https://ataraxis-communication-interface-api.netlify.app/

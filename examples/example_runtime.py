@@ -1,17 +1,18 @@
-# This file demonstrates the use of MicroControllerInterface with custom ModuleInterface classes.
-#
-# Note that this example is intentionally kept simple and does not cover all possible use cases. Overall, this example
-# demonstrates how to use the PC client to control custom hardware modules running on the Arduino or Teensy
-# microcontroller in real time. It also demonstrates how to access the data received from the microcontroller that is
-# saved to disk via the DataLogger instance.
-#
-# This example is intended to be used together with a microcontroller running the module_integration.cpp from the
-# companion ataraxis-micro-controller library: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
-# See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface#quickstart for more details.
-# API documentation: https://ataraxis-communication-interface-api.netlify.app/.
-# Authors: Ivan Kondratyev (Inkaros), Jacob Groner.
+"""This example script demonstrates the use of MicroControllerInterface with custom ModuleInterface classes.
 
-# Imports the necessary assets, including the TestModuleInterface class
+Note that this example is intentionally kept simple and does not cover all possible use cases. Overall, this example
+demonstrates how to use the PC client to control custom hardware modules running on the Arduino or Teensy
+microcontroller in real time. It also demonstrates how to access the data received from the microcontroller that is
+saved to disk via the DataLogger instance.
+
+This example is intended to be used together with a microcontroller running the module_integration.cpp from the
+companion ataraxis-micro-controller library: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
+
+See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface#quickstart for more details.
+API documentation: https://ataraxis-communication-interface-api.netlify.app/
+Authors: Ivan Kondratyev (Inkaros), Jacob Groner
+"""
+
 from pathlib import Path
 
 import numpy as np
@@ -145,17 +146,17 @@ if __name__ == "__main__":
 
     # Stops the communication process and releases all resources used during runtime.
     mc_interface.stop()
-    console.echo(f"Communication process: Stopped.", level=LogLevel.SUCCESS)
+    console.echo("Communication process: Stopped.", level=LogLevel.SUCCESS)
 
     # Stops the DataLogger and assembles all logged data into a single .npz archive file. This step is required to be
     # able to extract the logged message data for further analysis.
     data_logger.stop()
-    console.echo(f"Assembling the message log archive...")
+    console.echo("Assembling the message log archive...")
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # To process the data logged during runtime, it must be extracted from the archive created above. This can be
     # done with the help of the `extract_logged_hardware_module_data` function:
-    console.echo(f"Extracting the logged message data...")
+    console.echo("Extracting the logged message data...")
     log_data = extract_logged_hardware_module_data(
         log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
         module_type_id=(
