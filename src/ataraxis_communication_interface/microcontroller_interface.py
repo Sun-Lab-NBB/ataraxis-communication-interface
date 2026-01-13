@@ -1,6 +1,5 @@
-"""This module provides the ModuleInterface and MicroControllerInterface classes. They aggregate the methods that allow
-Python PC clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy
-microcontrollers.
+"""Provides the ModuleInterface and MicroControllerInterface classes that aggregate the methods allowing Python PC
+clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers.
 """
 
 from abc import ABC, abstractmethod
@@ -45,16 +44,16 @@ from .communication import (
     ControllerIdentification,
 )
 
-# Prevents typing-related imports from being imported at runtime
+# Prevents typing-related imports from executing at runtime.
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
 
     from serial.tools.list_ports_common import ListPortInfo
 
-# Defines static constants used in this module
+# Defines static constants used by this module.
 _MAXIMUM_BYTE_VALUE = 255
 _ZERO_BYTE = np.uint8(0)
-_ZERO_BOOL = np.bool(False)
+_ZERO_BOOL = np.bool_(False)  # noqa: FBT003
 _ZERO_LONG = np.uint32(0)
 
 
@@ -614,7 +613,7 @@ class MicroControllerInterface:  # pragma: no cover
         self._baudrate: int = baudrate
         self._buffer_size: int = buffer_size
 
-        #  Stores references to all managed interfaces in the internal attribute.
+        # Stores references to all managed interfaces in the internal attribute.
         self._modules: tuple[ModuleInterface, ...] = tuple(module_interfaces)
 
         # Extracts the queue and log path from the logger instance.
@@ -648,12 +647,11 @@ class MicroControllerInterface:  # pragma: no cover
                 )
                 console.error(message=message, error=ValueError)
 
-            # Adds each processed type+id code to the tracker set
+            # Adds each processed type+id code to the tracker set.
             processed_type_ids.add(module.type_id)
 
             # Overwrites the attributes for each processed ModuleInterface with valid data. This effectively binds some
-            # data and functionality realized through the main interface to each module interface. For example,
-            # ModuleInterface classes can use their own _input_queue to
+            # data and functionality realized through the main interface to each module interface.
             module.set_input_queue(input_queue=self._input_queue)
 
     def __repr__(self) -> str:
@@ -673,10 +671,10 @@ class MicroControllerInterface:  # pragma: no cover
         self._input_queue.put(self._reset_command)
 
     def _watchdog(self) -> None:
-        """This method is used by the watchdog thread to ensure that the communication process is alive during runtime.
+        """Monitors the communication process to ensure it remains alive during runtime.
 
-        This method raises RuntimeErrors if it detects that the communication process has prematurely shut down. It
-        verifies the process state in 20-millisecond cycles and releases the GIL between state verifications.
+        Raises RuntimeErrors if it detects that the communication process has prematurely shut down. Verifies the
+        process state in 20-millisecond cycles and releases the GIL between state verifications.
 
         Notes:
             If the method detects that the communication process has terminated prematurely, it carries out the
@@ -718,7 +716,7 @@ class MicroControllerInterface:  # pragma: no cover
                 console.error(message=message, error=RuntimeError)
 
     def start(self) -> None:
-        """Strats the instance's communication process and begins interfacing with the microcontroller.
+        """Starts the instance's communication process and begins interfacing with the microcontroller.
 
         Notes:
             As part of this method runtime, the interface verifies the target microcontroller's configuration to
@@ -765,7 +763,7 @@ class MicroControllerInterface:  # pragma: no cover
         self._communication_process.start()
 
         # Connects to the shared memory array to send and receive control signals. This has to be done after
-        # initializing the communication process
+        # initializing the communication process.
         self._terminator_array.connect()
         # Ensures the buffer is destroyed if the instance is garbage-collected to prevent memory leaks.
         self._terminator_array.enable_buffer_destruction()
@@ -780,8 +778,8 @@ class MicroControllerInterface:  # pragma: no cover
                 # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
                 self._terminator_array[0] = 1
 
-                # Waits for at most _PROCES_TERMINATION_TIMEOUT seconds before forcibly terminating the communication
-                # process to prevent deadlocks
+                # Waits for at most _PROCESS_TERMINATION_TIMEOUT seconds before forcibly terminating the communication
+                # process to prevent deadlocks.
                 self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.
@@ -1168,7 +1166,7 @@ class MicroControllerInterface:  # pragma: no cover
         )
 
         # Tracks whether the microcontroller has responded to the last keepalive command sent from the PC.
-        keepalive_response_received = True  # Must be initialized to True
+        keepalive_response_received = True  # Must be initialized to True.
 
         # Initializes the main communication loop. This loop runs until the exit conditions are encountered.
         # The exit conditions for the loop require the first variable in the terminator_array to be set to True
@@ -1263,7 +1261,7 @@ class MicroControllerInterface:  # pragma: no cover
                             message = (
                                 f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
                                 f"{controller_id} encountered an error when executing command {in_data.command}. "
-                                f"Error code: {in_data.event}. The error message also contained the following data"
+                                f"Error code: {in_data.event}. The error message also contained the following data "
                                 f"object: {in_data.data_object}."
                             )
                         else:
@@ -1297,7 +1295,7 @@ class MicroControllerInterface:  # pragma: no cover
 
 @dataclass()
 class ExtractedMessageData:
-    """Stores the data parsed from the message sent to the PC by a hardware module instance during runtime."""
+    """Contains the data parsed from a message sent to the PC by a hardware module instance during runtime."""
 
     timestamp: np.uint64
     """The number of microseconds elapsed since the UTC epoch onset when the message was received by the PC."""
@@ -1309,7 +1307,7 @@ class ExtractedMessageData:
 
 @dataclass()
 class ExtractedModuleData:
-    """Stores the data parsed from all non-service messages sent to the PC by a hardware module instance during
+    """Contains the data parsed from all non-service messages sent to the PC by a hardware module instance during
     runtime.
     """
 

@@ -1,20 +1,20 @@
-# This example demonstrates the implementation of an AXCI-compatible hardware module interface class.
-#
-# This file demonstrates the process of writing interface classes for custom hardware modules managed by the
-# ataraxis-micro-controller (AXMC) library and interfaced through the AXCI (this) library. This implementation showcases
-# one of the many possible interface design patterns. The main advantage of this library, similar to the AXMC, is that
-# it is designed to work with any class design and layout, as long as it subclasses the base ModuleInterface class and
-# implements all abstract methods: initialize_remote_assets, terminate_remote_assets, and process_received_data.
-#
-# For the best learning experience, it is recommended to review this code side-by-side with the implementation
-# of the companion TestModule class defined in the ataraxis-micro-controller library:
-# https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
-#
-# See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface#quickstart for more details.
-# API documentation: https://ataraxis-communication-interface-api.netlify.app/.
-# Authors: Ivan Kondratyev (Inkaros), Jacob Groner.
+"""This example script demonstrates the implementation of an AXCI-compatible hardware module interface class.
 
-# Imports the required assets
+This file demonstrates the process of writing interface classes for custom hardware modules managed by the
+ataraxis-micro-controller (AXMC) library and interfaced through the AXCI (this) library. This implementation showcases
+one of the many possible interface design patterns. The main advantage of this library, similar to the AXMC, is that
+it is designed to work with any class design and layout, as long as it subclasses the base ModuleInterface class and
+implements all abstract methods: initialize_remote_assets, terminate_remote_assets, and process_received_data.
+
+For the best learning experience, it is recommended to review this code side-by-side with the implementation of the
+companion TestModule class defined in the ataraxis-micro-controller library:
+https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
+
+See https://github.com/Sun-Lab-NBB/ataraxis-communication-interface#quickstart for more details.
+API documentation: https://ataraxis-communication-interface-api.netlify.app/
+Authors: Ivan Kondratyev (Inkaros), Jacob Groner
+"""
+
 import numpy as np
 from ataraxis_communication_interface import ModuleData, ModuleState, ModuleInterface
 from ataraxis_data_structures import SharedMemoryArray
@@ -93,7 +93,7 @@ class TestModuleInterface(ModuleInterface):
     # This utility method should be called, after starting the remote communication process to connect to the
     # shared memory array from the main process. See the documentation for the ataraxis-data-structures library for
     # information about proper initialization and termination of the SharedMemoryArray instances.
-    def start_shared_memory_array(self):
+    def start_shared_memory_array(self) -> None:
         self._shared_memory.connect()
         self._shared_memory.enable_buffer_destruction()
 
@@ -116,7 +116,9 @@ class TestModuleInterface(ModuleInterface):
     def pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = True) -> None:
         self.send_command(
             command=np.uint8(1),
-            noblock=np.bool(noblock),  # Determines whether the microcontroller can execute other commands concurrently.
+            noblock=np.bool_(
+                noblock
+            ),  # Determines whether the microcontroller can execute other commands concurrently.
             repetition_delay=repetition_delay,  # Determines whether to repeat the command at a certain interval.
         )
 
@@ -124,7 +126,7 @@ class TestModuleInterface(ModuleInterface):
     def echo(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
         self.send_command(
             command=np.uint8(2),
-            noblock=np.bool(False),  # The echo command does not have any time-delays, so is always blocking.
+            noblock=np.bool_(False),  # The echo command does not have any time-delays, so is always blocking.
             repetition_delay=repetition_delay,
         )
 

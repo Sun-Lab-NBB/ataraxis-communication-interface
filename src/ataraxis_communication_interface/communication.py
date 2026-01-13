@@ -1,5 +1,5 @@
-"""This module provides the SerialCommunication and MQTTCommunication classes that jointly support the communication
-between and within host-machines (PCs) and Arduino / Teensy microcontrollers.
+"""Provides the SerialCommunication and MQTTCommunication classes that jointly support the communication between and
+within host-machines (PCs) and Arduino / Teensy microcontrollers.
 """
 
 from enum import IntEnum
@@ -22,7 +22,7 @@ from ataraxis_transport_layer_pc import TransportLayer
 _ZERO_BYTE = np.uint8(0)
 _ZERO_SHORT = np.uint16(0)
 _ZERO_LONG = np.uint32(0)
-_TRUE = np.bool(True)
+_TRUE = np.bool_(True)  # noqa: FBT003
 
 
 class SerialProtocols(IntEnum):
