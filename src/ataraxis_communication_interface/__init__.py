@@ -6,6 +6,10 @@ API documentation: https://ataraxis-communication-interface-api.netlify.app/
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
+from .mcp_server import (
+    run_server,
+    run_mcp_server,
+)
 from .communication import (
     ModuleData,
     ModuleState,
@@ -32,4 +36,6 @@ __all__ = [
     "check_mqtt_connectivity",
     "extract_logged_hardware_module_data",
     "print_microcontroller_ids",
+    "run_mcp_server",
+    "run_server",
 ]

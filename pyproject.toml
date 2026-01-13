@@ -50,6 +50,8 @@ dependencies = [
     "ataraxis-transport-layer-pc>=3.1.1,<4",
     "paho-mqtt>=2,<3",
     "tqdm>=4,<5",
+    "mcp>=1,<2",
+    "httpx>=0.27,<1",
 ]
 
 [project.urls]
@@ -75,10 +77,11 @@ dev = [
     "types-pyserial>=3,<4",
 ]
 
-# Exports CLI commands for microcontroller discovery and MQTT connectivity checking.
+# Exports CLI commands for microcontroller discovery, MQTT connectivity checking, and MCP server.
 [project.scripts]
 axci-id = "ataraxis_communication_interface.microcontroller_interface:print_microcontroller_ids"
 axci-mqtt = "ataraxis_communication_interface.communication:check_mqtt_connectivity"
+axci-mcp = "ataraxis_communication_interface.mcp_server:run_mcp_server"
 
 # Specifies files that should not be included in the source-code distribution, but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
