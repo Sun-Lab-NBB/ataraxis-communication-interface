@@ -75,9 +75,10 @@ dev = [
     "types-pyserial>=3,<4",
 ]
 
-# Exports the CLI used to identify available microcontrollers and the ports they are connected to.
+# Exports CLI commands for microcontroller discovery and MQTT connectivity checking.
 [project.scripts]
 axci-id = "ataraxis_communication_interface.microcontroller_interface:print_microcontroller_ids"
+axci-mqtt = "ataraxis_communication_interface.communication:check_mqtt_connectivity"
 
 # Specifies files that should not be included in the source-code distribution, but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
