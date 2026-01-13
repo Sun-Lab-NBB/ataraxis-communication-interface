@@ -3,10 +3,10 @@
 requires = ["hatchling==1.28"]
 build-backend = "hatchling.build"
 
-# Project metdata section. Provides the genral ID information about the project.
+# Project metadata section. Provides the general ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "4.1.0"
+version = "4.2.0"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -19,7 +19,7 @@ maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["ataraxis", "serial", "communication", "interface", "microcontroller", "USB", "UART", "TCP", "MQTT"]
+keywords = ["ataraxis", "serial", "communication", "interface", "microcontroller", "USB", "UART", "TCP", "MQTT", "MCP"]
 
 classifiers = [
     # Development status
@@ -111,9 +111,9 @@ lint.ignore = [
     "C901",  # Sometimes complex functions are necessary
     "PLR0913",  # Sometimes complex functions are necessary
     "PLR0912",  # Sometimes complex functions are necessary
-    "PLR0915",  # Sometimes complex type defenitions are necessary
+    "PLR0915",  # Sometimes complex type definitions are necessary
     "PLR0911", # Sometimes complex return graphs are necessary
-    "FBT001", # Sometimes positional boolean atguments are necessary
+    "FBT001", # Sometimes positional boolean arguments are necessary
     "FBT002", # Sometimes positional boolean arguments are necessary
     "SLF001",  # Sometimes accessing private members is necessary
     "COM812", # Conflicts with the formatter
