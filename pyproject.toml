@@ -9,7 +9,7 @@ name = "ataraxis-communication-interface"
 version = "5.0.0"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
-license = "GPL-3.0-or-later"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.15"
 authors = [
