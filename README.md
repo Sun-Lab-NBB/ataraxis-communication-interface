@@ -1,7 +1,7 @@
 # ataraxis-communication-interface
 
-A Python library that provides the centralized interface for exchanging commands and data between Arduino and Teensy
-microcontrollers and host-computers.
+Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and
+host-computers.
 
 ![PyPI - Version](https://img.shields.io/pypi/v/ataraxis-communication-interface)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ataraxis-communication-interface)
@@ -36,7 +36,7 @@ ___
 - Contains many sanity checks performed at initialization time to minimize the potential for unexpected
   behavior and data corruption.
 - Includes an MCP server for AI agent integration (compatible with Claude Desktop and other MCP clients).
-- GPL 3 License.
+- Apache 2 License.
 
 ___
 
@@ -596,7 +596,7 @@ ___
 
 ## License
 
-This project is licensed under the GPL3 License: see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache 2.0 License: see the [LICENSE](LICENSE) file for details.
 
 ___
 
