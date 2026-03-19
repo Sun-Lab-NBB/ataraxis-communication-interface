@@ -21,7 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import console, resolve_worker_count
-from ataraxis_data_structures import DataLogger, LogArchiveReader, LogMessage, SharedMemoryArray
+from ataraxis_data_structures import DataLogger, LogArchiveReader, SharedMemoryArray
 from ataraxis_transport_layer_pc import list_available_ports
 
 from .communication import (
@@ -1601,7 +1601,7 @@ def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
         # Catches any connection-related exceptions and returns an error message instead of propagating the exception.
         # This prevents individual port failures from aborting the entire evaluation process.
         error_type = type(e).__name__
-        error_msg = str(e) if str(e) else error_type
+        error_msg = str(e) or error_type
         return -1, f"{error_type}: {error_msg}"
 
 
@@ -1667,6 +1667,5 @@ def print_microcontroller_ids(baudrate: int = 115200) -> None:
                 else:
                     # Port is connected to a valid microcontroller with identified ID
                     console.echo(
-                        f"{count}: {port_info.device} -> {port_info.description} "
-                        f"[Microcontroller ID: {controller_id}]"
+                        f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
                     )

@@ -11,11 +11,10 @@ from multiprocessing import Queue as MPQueue
 
 import numpy as np
 from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats
+from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, get_timestamp
 import paho.mqtt.client as mqtt
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import LogPackage
-from ataraxis_time import get_timestamp
 from ataraxis_transport_layer_pc import TransportLayer
 
 # Defines constants frequently used in this module
@@ -1382,6 +1381,9 @@ class SerialCommunication:
             f"available from the SerialProtocols enumeration."
         )
         console.error(message, error=ValueError)
+        # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
+        # noinspection PyUnreachableCode
+        raise ValueError(message)  # pragma: no cover
 
     def _log_data(self, timestamp: int, data: NDArray[np.uint8]) -> None:
         """Packages and sends the input data to the DataLogger instance that writes it to disk.
