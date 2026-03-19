@@ -11,11 +11,10 @@ from multiprocessing import Queue as MPQueue
 
 import numpy as np
 from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats
+from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, get_timestamp
 import paho.mqtt.client as mqtt
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import LogPackage
-from ataraxis_time.time_helpers import get_timestamp
 from ataraxis_transport_layer_pc import TransportLayer
 
 # Defines constants frequently used in this module
@@ -1382,7 +1381,8 @@ class SerialCommunication:
             f"available from the SerialProtocols enumeration."
         )
         console.error(message, error=ValueError)
-        # Fallback to appease mypy
+        # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
+        # noinspection PyUnreachableCode
         raise ValueError(message)  # pragma: no cover
 
     def _log_data(self, timestamp: int, data: NDArray[np.uint8]) -> None:
@@ -1596,29 +1596,20 @@ def check_mqtt_connectivity(host: str = "127.0.0.1", port: int = 1883) -> None:
         host: The IP address or hostname of the MQTT broker.
         port: The socket port used by the MQTT broker.
     """
-    # Records the current console status and enables console if needed.
-    is_enabled = True
-    if not console.enabled:
-        is_enabled = False
-        console.enable()
+    with console.temporarily_enabled():
+        console.echo(f"Checking MQTT broker connectivity at {host}:{port}...")
 
-    console.echo(f"Checking MQTT broker connectivity at {host}:{port}...")
+        # Creates a temporary MQTTCommunication instance to test connectivity.
+        mqtt_client = MQTTCommunication(ip=host, port=port)
 
-    # Creates a temporary MQTTCommunication instance to test connectivity.
-    mqtt_client = MQTTCommunication(ip=host, port=port)
-
-    # Attempts to connect to the MQTT broker.
-    try:
-        mqtt_client.connect()
-        console.echo(f"MQTT broker at {host}:{port} is reachable.")
-        mqtt_client.disconnect()
-    except ConnectionError:
-        console.echo(
-            f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
-            f"host/port are correct.",
-            level=LogLevel.ERROR,
-        )
-
-    # Restores the console state if it was disabled before this call.
-    if not is_enabled:
-        console.disable()
+        # Attempts to connect to the MQTT broker.
+        try:
+            mqtt_client.connect()
+            console.echo(f"MQTT broker at {host}:{port} is reachable.")
+            mqtt_client.disconnect()
+        except ConnectionError:
+            console.echo(
+                f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
+                f"host/port are correct.",
+                level=LogLevel.ERROR,
+            )
