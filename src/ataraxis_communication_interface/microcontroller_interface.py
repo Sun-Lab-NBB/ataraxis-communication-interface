@@ -14,16 +14,14 @@ from multiprocessing import (
     Queue as MPQueue,
     Manager,
     Process,
-    cpu_count,
 )
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from tqdm import tqdm
 import numpy as np
 from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from ataraxis_base_utilities import console, chunk_iterable
-from ataraxis_data_structures import DataLogger, SharedMemoryArray
+from ataraxis_base_utilities import console, resolve_worker_count
+from ataraxis_data_structures import DataLogger, LogArchiveReader, LogMessage, SharedMemoryArray
 from ataraxis_transport_layer_pc import list_available_ports
 
 from .communication import (
@@ -395,7 +393,6 @@ class ModuleInterface(ABC):  # pragma: no cover
                 f"the main runtime process can construct and send messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
-            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
         # Creates or queries the command message object from the instance-specific LRU cache.
         command_message = self._create_command_message(command, noblock, repetition_delay)
@@ -428,7 +425,6 @@ class ModuleInterface(ABC):  # pragma: no cover
                 f"the main runtime process can construct and send messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
-            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
         # Creates or queries the command message object from the instance-specific LRU cache and submits it to the
         # microcontroller.
@@ -444,7 +440,6 @@ class ModuleInterface(ABC):  # pragma: no cover
                 f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
             )
             console.error(message=message, error=RuntimeError)
-            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable.
 
         # Packages the data into a dequeue command message and submits it for execution.
         self._input_queue.put(
@@ -890,7 +885,6 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{_RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value} attempts."
             )
             console.error(message=message, error=TypeError)
-            raise TypeError(message)  # Fallback to appease mypy, should not be reachable
 
         # If a response is received, but the ID contained in the received message does not match the expected ID,
         # raises an error
@@ -1347,72 +1341,63 @@ def _process_module_message_batch(
         module: {} for module in module_type_id
     }
 
-    # Opens the processed log archive using memory mapping. If module data processing is performed in parallel, all
-    # processes interact with the archive concurrently.
-    with np.load(log_path, allow_pickle=False, fix_imports=False, mmap_mode="r") as archive:
-        # Loops over the batch of messages and extracts module data
-        for item in file_names:
-            message = archive[item]
+    # Uses LogArchiveReader to iterate over the batch messages. Passing the pre-discovered onset_us avoids redundant
+    # onset scanning in each worker process.
+    reader = LogArchiveReader(archive_path=log_path, onset_us=onset_us)
+    for log_msg in reader.iter_messages(keys=file_names):
+        payload = log_msg.payload
 
-            # Extracts the payload from each logged message.
-            payload = message[9:]
+        # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
+        # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
+        # '2'. In the future, if enough interest is shown, this list may be extended to also include outgoing
+        # messages. For now, these messages need to be parsed manually by users that need this data.
+        if (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA) or (
+            payload[4] != _ModuleStatusCodes.COMMAND_COMPLETE
+            and payload[4] <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
+        ):
+            continue
 
-            # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
-            # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
-            # '2'. In the future, if enough interest is shown, this list may be extended to also include outgoing
-            # messages. For now, these messages need to be parsed manually by users that need this data.
-            if (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA) or (
-                payload[4] != _ModuleStatusCodes.COMMAND_COMPLETE
-                and payload[4] <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
-            ):
-                continue
+        # Checks if this message comes from one of the processed modules
+        current_module = None
+        for module in module_type_id:
+            if payload[1] == module[0] and payload[2] == module[1]:
+                current_module = module
+                break
 
-            # Checks if this message comes from one of the processed modules
-            current_module = None
-            for module in module_type_id:
-                if payload[1] == module[0] and payload[2] == module[1]:
-                    current_module = module
-                    break
+        if current_module is None:
+            continue
 
-            if current_module is None:
-                continue
+        # Extracts command, event, and, if supported, data object from the message payload.
+        command_code = np.uint8(payload[3])
+        event = np.uint8(payload[4])
 
-            # Extracts the elapsed microseconds since timestamp and uses it to calculate the global timestamp for the
-            # message, in microseconds since epoch onset.
-            elapsed_microseconds = np.uint64(message[1:9].view(np.uint64).item())
-            timestamp = onset_us + elapsed_microseconds
+        # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
+        # in size. Extracts and formats the data object, included with the logged payload.
+        data: None | np.number | NDArray[np.number] = None
+        if len(payload) > _RuntimeParameters.MINIMUM_MODULE_DATA_SIZE.value:
+            # noinspection PyTypeChecker
+            prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
 
-            # Extracts command, event, and, if supported, data object from the message payload.
-            command_code = np.uint8(payload[3])
-            event = np.uint8(payload[4])
-
-            # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
-            # in size. Extracts and formats the data object, included with the logged payload.
-            data: None | np.number | NDArray[np.number] = None
-            if len(payload) > _RuntimeParameters.MINIMUM_MODULE_DATA_SIZE.value:
-                # noinspection PyTypeChecker
-                prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
-
-                # Depending on the prototype, reads the data object as an array or scalar
-                if isinstance(prototype, np.ndarray):
-                    data = payload[6:].view(prototype.dtype)[:].copy()
-                elif prototype is not None:
-                    data = payload[6:].view(prototype.dtype)[0].copy()
-                else:
-                    data = None  # Marks as an error case
-
-            # Creates an ExtractedMessageData instance with the extracted information
-            message_data = ExtractedMessageData(
-                timestamp=timestamp,
-                command=command_code,
-                data=data,
-            )
-
-            # Adds the extracted message data to the batch results, grouped by event code
-            if event not in batch_data[current_module]:
-                batch_data[current_module][event] = [message_data]
+            # Depending on the prototype, reads the data object as an array or scalar
+            if isinstance(prototype, np.ndarray):
+                data = payload[6:].view(prototype.dtype)[:].copy()  # type: ignore[assignment]
+            elif prototype is not None:
+                data = payload[6:].view(prototype.dtype)[0].copy()
             else:
-                batch_data[current_module][event].append(message_data)
+                data = None  # Marks as an error case
+
+        # Creates an ExtractedMessageData instance with the extracted information
+        message_data = ExtractedMessageData(
+            timestamp=log_msg.timestamp_us,
+            command=command_code,
+            data=data,
+        )
+
+        # Adds the extracted message data to the batch results, grouped by event code
+        if event not in batch_data[current_module]:
+            batch_data[current_module][event] = [message_data]
+        else:
+            batch_data[current_module][event].append(message_data)
 
     return batch_data
 
@@ -1463,45 +1448,22 @@ def extract_logged_hardware_module_data(
         )
         console.error(message=error_message, error=ValueError)
 
-    # Memory-maps the processed archive to conserve RAM. The first processing pass is designed to find the onset
-    # timestamp value and count the total number of messages.
-    with np.load(log_path, allow_pickle=False, fix_imports=False, mmap_mode="r") as archive:
-        # Locates the logging onset timestamp. The onset is used to convert the timestamps for logged module data into
-        # absolute UTC timestamps. Originally, all timestamps other than onset are stored as elapsed time in
-        # microseconds relative to the onset timestamp.
-        timestamp_offset = 0
-        onset_us = np.uint64(0)
-        message_list = list(archive.files)
+    # Uses LogArchiveReader to handle archive access, onset timestamp discovery, and batch creation.
+    reader = LogArchiveReader(archive_path=log_path)
 
-        for number, item in enumerate(message_list):
-            message: NDArray[np.uint8] = archive[item]  # Extracts message payload from the compressed .npy file
-
-            # Recovers the uint64 timestamp value from each message. The timestamp occupies 8 bytes of each logged
-            # message starting at index 1. If the timestamp value is 0, the message contains the onset timestamp value
-            # stored as an 8-byte payload. Index 0 stores the source ID (uint8 value)
-            timestamp_value = message[1:9].view(np.uint64).item()
-            if timestamp_value == 0:
-                # Extracts the byte-serialized UTC timestamp stored as microseconds since epoch onset.
-                onset_us = np.uint64(message[9:].view(np.int64).item())
-
-                # Breaks the loop once the onset is found. Generally, the onset is expected to be found very early into
-                # the loop
-                timestamp_offset = number  # Records the item number at which the onset value was found.
-                break
-
-    # Builds the list of files to process after discovering the timestamp (the list of remaining messages)
-    messages_to_process = message_list[timestamp_offset + 1 :]
-
-    # If there are no leftover messages to process, return an empty tuple
-    if not messages_to_process:
+    # If there are no messages to process, returns an empty tuple
+    if reader.message_count == 0:
         return ()
+
+    onset_us = reader.onset_timestamp_us
 
     # Small archives are processed sequentially to avoid the unnecessary overhead of setting up the multiprocessing
     # runtime. This is also done for large files if the user explicitly requests to use a single worker process.
     module_event_data: dict[tuple[int, int], dict[np.uint8, tuple[ExtractedMessageData, ...]]]
-    if n_workers == 1 or len(messages_to_process) < _RuntimeParameters.PARALLEL_PROCESSING_THRESHOLD.value:
+    if n_workers == 1 or reader.message_count < _RuntimeParameters.PARALLEL_PROCESSING_THRESHOLD.value:
         # Processes all messages in a single batch sequentially
-        batch_results = _process_module_message_batch(log_path, messages_to_process, onset_us, module_type_id)
+        all_keys = reader.get_batches(workers=1, batch_multiplier=1)
+        batch_results = _process_module_message_batch(log_path, all_keys[0], onset_us, module_type_id)
 
         # Convert the lists of ExtractedMessageData instances to tuples for the final data structure
         module_event_data = {
@@ -1509,26 +1471,21 @@ def extract_logged_hardware_module_data(
             for module, event_dict in batch_results.items()
         }
     else:
-        # If the user enabled using all available cores, configures the runtime to use all available CPUs
-        if n_workers < 0:
-            n_workers = cpu_count()
+        # Resolves the number of worker processes to use for parallel processing.
+        if n_workers < 1:
+            n_workers = resolve_worker_count(requested_workers=0)
 
-        # Creates batches of messages to process during runtime. Uses a fairly high batch multiplier to create many
-        # smaller batches, which leads to a measurable increase in the processing speed, especially for large archives.
-        # The optimal multiplier value (4) was determined experimentally.
-        batches = []
-        batch_indices = []  # Keeps track of batch order
-        for i, batch in enumerate(chunk_iterable(messages_to_process, n_workers * 4)):
-            if batch:
-                batches.append((log_path, list(batch), onset_us, module_type_id))
-                batch_indices.append(i)
+        # Uses LogArchiveReader to create batches optimized for parallel processing. The batch multiplier of 4
+        # creates many smaller batches for better load distribution across workers.
+        batch_keys = reader.get_batches(workers=n_workers, batch_multiplier=4)
+        batches = [(log_path, keys, onset_us, module_type_id) for keys in batch_keys]
 
         # Processes batches using ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             # Submits all tasks
             future_to_index = {
                 executor.submit(_process_module_message_batch, *batch_args): idx
-                for idx, batch_args in zip(batch_indices, batches, strict=False)
+                for idx, batch_args in enumerate(batches)
             }
 
             # Collects results while maintaining message order. This also propagates processing errors to the caller
@@ -1538,7 +1495,9 @@ def extract_logged_hardware_module_data(
             )
 
             # Creates a progress bar for batch processing
-            with tqdm(total=len(batches), desc="Extracting microcontroller hardware module data", unit="batch") as pbar:
+            with console.progress(
+                total=len(batches), description="Extracting microcontroller hardware module data", unit="batch"
+            ) as pbar:
                 for future in as_completed(future_to_index):
                     results[future_to_index[future]] = future.result()
                     pbar.update(1)  # Updates the progress bar after each batch completes
@@ -1657,65 +1616,57 @@ def print_microcontroller_ids(baudrate: int = 115200) -> None:
             evaluate all available microcontrollers. The baudrate is only used by the microcontrollers that communicate
             via the UART serial interface and is ignored by microcontrollers that use the USB interface.
     """
-    # Records the current console status and enables console if needed
-    is_enabled = True
-    if not console.enabled:
-        is_enabled = False
-        console.enable()
+    with console.temporarily_enabled():
+        # Gets all available serial ports
+        available_ports = list_available_ports()
 
-    # Gets all available serial ports
-    available_ports = list_available_ports()
+        # Filters out invalid ports (PID == None) - primarily for Linux systems
+        valid_ports = [port for port in available_ports if port.pid is not None]
 
-    # Filters out invalid ports (PID == None) - primarily for Linux systems
-    valid_ports = [port for port in available_ports if port.pid is not None]
+        # If there are no valid candidates to evaluate, aborts the runtime early
+        if not valid_ports:
+            console.echo("No valid serial ports detected.")
+            return
 
-    # If there are no valid candidates to evaluate, aborts the runtime early
-    if not valid_ports:
-        console.echo("No valid serial ports detected.")
-        if not is_enabled:
-            console.disable()
-        return
+        console.echo(f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
 
-    console.echo(f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
+        # Prepares the parallel evaluation tasks
+        port_names = [port.device for port in valid_ports]
 
-    # Prepares the parallel evaluation tasks
-    port_names = [port.device for port in valid_ports]
+        # Uses ProcessPoolExecutor to evaluate all ports in parallel
+        results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
-    # Uses ProcessPoolExecutor to evaluate all ports in parallel
-    results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
+        with ProcessPoolExecutor() as executor:
+            # Submits all port evaluation tasks
+            future_to_port = {
+                executor.submit(_evaluate_port, port_name, baudrate): (port_name, port_info)
+                for port_name, port_info in zip(port_names, valid_ports, strict=True)
+            }
 
-    with ProcessPoolExecutor() as executor:
-        # Submits all port evaluation tasks
-        future_to_port = {
-            executor.submit(_evaluate_port, port_name, baudrate): (port_name, port_info)
-            for port_name, port_info in zip(port_names, valid_ports, strict=True)
-        }
+            # Collects results as they complete
+            for future in as_completed(future_to_port):
+                port_name, port_info = future_to_port[future]
+                controller_id, error_msg = future.result()
+                results[port_name] = (port_info, controller_id, error_msg)
 
-        # Collects results as they complete
-        for future in as_completed(future_to_port):
-            port_name, port_info = future_to_port[future]
-            controller_id, error_msg = future.result()
-            results[port_name] = (port_info, controller_id, error_msg)
+        # Prints the results in the original port order (matching print_available_ports style)
+        count = 0
+        for port_name in port_names:
+            if port_name in results:
+                port_info, controller_id, error_msg = results[port_name]
+                count += 1
 
-    # Prints the results in the original port order (matching print_available_ports style)
-    count = 0
-    for port_name in port_names:
-        if port_name in results:
-            port_info, controller_id, error_msg = results[port_name]
-            count += 1
-
-            if error_msg is not None:
-                # Port encountered a connection error
-                console.echo(f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_msg}]")
-            elif controller_id == -1:
-                # Port did not respond or is not a valid microcontroller
-                console.echo(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
-            else:
-                # Port is connected to a valid microcontroller with identified ID
-                console.echo(
-                    f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
-                )
-
-    # Restore the console's state if it was disabled before this call
-    if not is_enabled:
-        console.disable()
+                if error_msg is not None:
+                    # Port encountered a connection error
+                    console.echo(
+                        f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_msg}]"
+                    )
+                elif controller_id == -1:
+                    # Port did not respond or is not a valid microcontroller
+                    console.echo(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
+                else:
+                    # Port is connected to a valid microcontroller with identified ID
+                    console.echo(
+                        f"{count}: {port_info.device} -> {port_info.description} "
+                        f"[Microcontroller ID: {controller_id}]"
+                    )

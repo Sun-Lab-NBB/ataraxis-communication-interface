@@ -50,7 +50,6 @@ dependencies = [
 
     # Data Processing
     "numpy>=2,<3",
-    "tqdm>=4,<5",
 
     # Communication
     "paho-mqtt>=2,<3",
@@ -81,7 +80,6 @@ dev = [
 
     # Types
     "types-paho-mqtt>=1,<2",
-    "types-tqdm>=4,<5",
     "types-pyserial>=3,<4",
 ]
 
