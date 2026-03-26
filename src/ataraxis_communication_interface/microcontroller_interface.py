@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from functools import partial, lru_cache
 from threading import Thread
-from dataclasses import dataclass
 from multiprocessing import (
     Queue as MPQueue,
     Manager,
@@ -18,12 +17,12 @@ from multiprocessing import (
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
-from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from ataraxis_base_utilities import console, resolve_worker_count
-from ataraxis_data_structures import DataLogger, LogArchiveReader, SharedMemoryArray
+from ataraxis_base_utilities import console
+from ataraxis_data_structures import DataLogger, SharedMemoryArray
 from ataraxis_transport_layer_pc import list_available_ports
 
+from .manifest import ModuleSourceData, write_microcontroller_manifest
 from .communication import (
     KernelData,
     ModuleData,
@@ -31,9 +30,7 @@ from .communication import (
     ModuleState,
     KernelCommand,
     ReceptionCode,
-    SerialProtocols,
     ModuleParameters,
-    SerialPrototypes,
     OneOffModuleCommand,
     SerialCommunication,
     DequeueModuleCommand,
@@ -41,6 +38,7 @@ from .communication import (
     RepeatedModuleCommand,
     ControllerIdentification,
 )
+from .log_processing import ExtractedModuleData, ExtractedMessageData
 
 # Prevents typing-related imports from executing at runtime.
 if TYPE_CHECKING:
@@ -144,6 +142,8 @@ class ModuleInterface(ABC):  # pragma: no cover
     Args:
         module_type: The code that identifies the type (family) of the interfaced module.
         module_id: The code that identifies the specific interfaced module instance.
+        name: A colloquial human-readable name for this hardware module (e.g., 'encoder', 'lick_sensor'). Written
+            to the microcontroller manifest file alongside the type+id code to identify this module.
         error_codes: An optional set of codes used by the module to communicate runtime errors. Receiving a message
             with an event-code from this set raises a RuntimeError and aborts the runtime.
         data_codes: An optional set of codes used by the module to communicate data messages that required online
@@ -156,6 +156,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         _type_id: Stores the type and id codes combined into a single uint16 value.
         _data_codes: Stores all message event-codes that require additional processing.
         _error_codes: Stores all message error-codes that warrant runtime interruption.
+        _name: Stores the human-readable name of this module instance.
         _input_queue: The multiprocessing queue used to send command and parameter messages to the microcontroller
             communication process.
         _dequeue_command: Stores the instance's DequeueModuleCommand object.
@@ -174,6 +175,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         self,
         module_type: np.uint8,
         module_id: np.uint8,
+        name: str,
         error_codes: set[np.uint8] | None = None,
         data_codes: set[np.uint8] | None = None,
     ) -> None:
@@ -210,10 +212,18 @@ class ModuleInterface(ABC):  # pragma: no cover
                 f"{data_codes} of type {type(data_codes).__name__} and / or at least one non-uint8 item."
             )
             console.error(message=message, error=TypeError)
+        if not isinstance(name, str) or not name:
+            message = (
+                f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
+                f"Expected a non-empty string for the 'name' argument, but encountered {name!r} of type "
+                f"{type(name).__name__}."
+            )
+            console.error(message=message, error=TypeError)
 
-        # Saves type and ID data into class attributes
+        # Saves type, ID, and name data into class attributes.
         self._module_type: np.uint8 = module_type
         self._module_id: np.uint8 = module_id
+        self._name: str = name
 
         # Combines type and ID codes into a 16-bit value. This is used to ensure every module instance has a unique
         # ID + Type combination. This method is position-aware, so inverse type-id pairs are coded as different
@@ -250,7 +260,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         """Returns the string representation of the instance."""
         return (
             f"ModuleInterface(module_type={self._module_type}, module_id={self._module_id}, "
-            f"combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
+            f"name='{self._name}', combined_type_id={self._type_id}, data_codes={sorted(self._data_codes)}, "
             f"error_codes={sorted(self._error_codes)})"
         )
 
@@ -312,6 +322,21 @@ class ModuleInterface(ABC):  # pragma: no cover
         Args:
             message: The ModuleState or ModuleData instance that stores the message data received from the interfaced
                 hardware module instance.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def process_log_data(self, extracted_data: ExtractedModuleData, output_directory: Path) -> None:
+        """Processes the extracted log data for this module instance.
+
+        This method is invoked by the log processing pipeline after extracting this module's data from the .npz log
+        archive. Implement custom post-extraction processing logic (e.g., converting extracted message data to
+        .feather files) in subclass overrides.
+
+        Args:
+            extracted_data: The ExtractedModuleData instance containing this module's extracted log data, organized
+                by event code.
+            output_directory: The path to the directory where processed output files should be written.
         """
         raise NotImplementedError
 
@@ -481,8 +506,13 @@ class ModuleInterface(ABC):  # pragma: no cover
         """Returns the set of message event-codes event codes that trigger runtime errors."""
         return self._error_codes
 
+    @property
+    def name(self) -> str:
+        """Returns the human-readable name of this module interface instance."""
+        return self._name
 
-class MicroControllerInterface:  # pragma: no cover
+
+class MicroControllerInterface(ABC):  # pragma: no cover
     """Interfaces with the hardware module instances managed by the Arduino or Teensy microcontroller running the
     ataraxis-micro-controller library.
 
@@ -511,6 +541,8 @@ class MicroControllerInterface:  # pragma: no cover
             specification).
         port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci-id' CLI
             command to discover the available microcontrollers and their respective communication port names.
+        name: A colloquial human-readable name for this microcontroller (e.g., 'actor_controller'). Written to the
+            microcontroller manifest file alongside the controller_id to identify this controller.
         baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
             the value used by the microcontroller. This parameter is ignored when using the USB interface.
         keepalive_interval: The interval, in milliseconds, at which to send the keepalive messages to the
@@ -522,6 +554,7 @@ class MicroControllerInterface:  # pragma: no cover
     Attributes:
         _started: Tracks whether the communication process has been started.
         _controller_id: Stores the id of the managed microcontroller.
+        _name: Stores the human-readable name of this microcontroller instance.
         _port: Stores the USB port used for microcontroller communication.
         _baudrate: Stores the baudrate used during communication over the UART serial interface.
         _buffer_size: Stores the microcontroller's serial buffer size, in bytes.
@@ -555,6 +588,7 @@ class MicroControllerInterface:  # pragma: no cover
         module_interfaces: tuple[ModuleInterface, ...],
         buffer_size: int,
         port: str,
+        name: str,
         baudrate: int = 115200,
         keepalive_interval: int = 0,
     ) -> None:
@@ -599,9 +633,17 @@ class MicroControllerInterface:  # pragma: no cover
                 f"encountered {keepalive_interval} of type {type(keepalive_interval).__name__}."
             )
             console.error(message=message, error=TypeError)
+        if not isinstance(name, str) or not name:
+            message = (
+                f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
+                f"{controller_id}. Expected a non-empty string for the 'name' argument, but encountered {name!r} of "
+                f"type {type(name).__name__}."
+            )
+            console.error(message=message, error=TypeError)
 
-        # Controller (kernel) ID information.
+        # Controller (kernel) ID and name information.
         self._controller_id: np.uint8 = controller_id
+        self._name: str = name
 
         # SerialCommunication parameters. This is used to initialize the communication in the remote process.
         self._port: str = port
@@ -649,11 +691,24 @@ class MicroControllerInterface:  # pragma: no cover
             # data and functionality realized through the main interface to each module interface.
             module.set_input_queue(input_queue=self._input_queue)
 
+        # Writes the controller and its modules to the manifest file in the DataLogger output directory. This enables
+        # downstream log processing tools to identify which archives were produced by this library.
+        module_sources = tuple(
+            ModuleSourceData(type_id=int(module.type_id), name=module.name) for module in self._modules
+        )
+        write_microcontroller_manifest(
+            log_directory=self._log_directory,
+            controller_id=int(self._controller_id),
+            controller_name=self._name,
+            modules=module_sources,
+        )
+
     def __repr__(self) -> str:
         """Returns the string representation of the class instance."""
         return (
-            f"MicroControllerInterface(controller_id={self._controller_id}, usb_port={self._port}, "
-            f"baudrate={self._baudrate}, started={self._started}, keepalive_interval={self._keepalive_interval} ms)"
+            f"MicroControllerInterface(controller_id={self._controller_id}, name='{self._name}', "
+            f"usb_port={self._port}, baudrate={self._baudrate}, started={self._started}, "
+            f"keepalive_interval={self._keepalive_interval} ms)"
         )
 
     def __del__(self) -> None:
@@ -664,6 +719,37 @@ class MicroControllerInterface:  # pragma: no cover
     def reset_controller(self) -> None:
         """Resets the managed microcontroller to use the default hardware and software parameters."""
         self._input_queue.put(self._reset_command)
+
+    @abstractmethod
+    def process_kernel_log_data(
+        self, kernel_messages: tuple[ExtractedMessageData, ...], output_directory: Path
+    ) -> None:
+        """Processes kernel-level messages extracted from log archives during post-hoc log processing.
+
+        This method is invoked by the log processing pipeline when a kernel callback is registered. Implement custom
+        kernel data/state message processing logic in subclass overrides.
+
+        Args:
+            kernel_messages: A tuple of ExtractedMessageData instances containing the extracted kernel messages in
+                chronological order.
+            output_directory: The path to the directory where processed output files should be written.
+        """
+        raise NotImplementedError
+
+    @property
+    def controller_id(self) -> np.uint8:
+        """Returns the unique identifier code of the managed microcontroller."""
+        return self._controller_id
+
+    @property
+    def name(self) -> str:
+        """Returns the human-readable name of this microcontroller interface instance."""
+        return self._name
+
+    @property
+    def modules(self) -> tuple[ModuleInterface, ...]:
+        """Returns the tuple of ModuleInterface instances managed by this MicroControllerInterface."""
+        return self._modules
 
     def _watchdog(self) -> None:
         """Monitors the communication process to ensure it remains alive during runtime.
@@ -1285,255 +1371,6 @@ class MicroControllerInterface:  # pragma: no cover
             # Terminates all custom assets
             for module in module_interfaces:
                 module.terminate_remote_assets()
-
-
-@dataclass()
-class ExtractedMessageData:
-    """Contains the data parsed from a message sent to the PC by a hardware module instance during runtime."""
-
-    timestamp: np.uint64
-    """The number of microseconds elapsed since the UTC epoch onset when the message was received by the PC."""
-    command: np.uint8
-    """The code of the command that the module was executing when it sent the message to the PC."""
-    data: None | np.number | NDArray[np.number]
-    """The parsed data object transmitted with the message (or None, for state-only messages)."""
-
-
-@dataclass()
-class ExtractedModuleData:
-    """Contains the data parsed from all non-service messages sent to the PC by a hardware module instance during
-    runtime.
-    """
-
-    module_type: int
-    """Stores the type (family) code of the hardware module instance whose data is stored in the 'data' attribute."""
-    module_id: int
-    """Stores the unique identifier code of the hardware module instance whose data is stored in the 'data' 
-    attribute."""
-    # noinspection PyTypeHints
-    event_data: dict[np.uint8, tuple[ExtractedMessageData, ...]]
-    """A dictionary that uses message event codes as keys and tuples of ExtractedMessageData instances as values."""
-
-
-def _process_module_message_batch(
-    log_path: Path,
-    file_names: list[str],
-    onset_us: np.uint64,
-    module_type_id: tuple[tuple[int, int], ...],
-) -> dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]]:
-    """Processes the target batch of MicroControllerInterface-generated messages stored in the .npz log file.
-
-    This worker function is used by the extract_logged_hardware_module_data() function to process multiple message
-    batches in parallel to speed up the hardware module data extraction.
-
-    Args:
-        log_path: The path to the processed .npz log file.
-        file_names: The names of the individual message .npy files stored in the target archive.
-        onset_us: The onset of the data acquisition, in microseconds elapsed since UTC epoch onset.
-        module_type_id: The module type and ID codes to extract.
-
-    Returns:
-        A dictionary mapping module (type, id) tuples to lists of extracted data dictionaries. Each data dictionary
-        contains a list of ExtractedMessageData instances for each processed event code.
-    """
-    # Pre-creates the dictionary to store the extracted data for this batch
-    batch_data: dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] = {
-        module: {} for module in module_type_id
-    }
-
-    # Uses LogArchiveReader to iterate over the batch messages. Passing the pre-discovered onset_us avoids redundant
-    # onset scanning in each worker process.
-    reader = LogArchiveReader(archive_path=log_path, onset_us=onset_us)
-    for log_msg in reader.iter_messages(keys=file_names):
-        payload = log_msg.payload
-
-        # Filters out the messages to exclusively process custom Data and State messages (event codes 51 and above).
-        # The only exception to this rule is the CommandComplete state message, which uses the system-reserved code
-        # '2'. In the future, if enough interest is shown, this list may be extended to also include outgoing
-        # messages. For now, these messages need to be parsed manually by users that need this data.
-        if (payload[0] != SerialProtocols.MODULE_STATE and payload[0] != SerialProtocols.MODULE_DATA) or (
-            payload[4] != _ModuleStatusCodes.COMMAND_COMPLETE
-            and payload[4] <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
-        ):
-            continue
-
-        # Checks if this message comes from one of the processed modules
-        current_module = None
-        for module in module_type_id:
-            if payload[1] == module[0] and payload[2] == module[1]:
-                current_module = module
-                break
-
-        if current_module is None:
-            continue
-
-        # Extracts command, event, and, if supported, data object from the message payload.
-        command_code = np.uint8(payload[3])
-        event = np.uint8(payload[4])
-
-        # This section is executed only if the parsed payload is MessageData. MessageState payloads are only 5 bytes
-        # in size. Extracts and formats the data object, included with the logged payload.
-        data: None | np.number | NDArray[np.number] = None
-        if len(payload) > _RuntimeParameters.MINIMUM_MODULE_DATA_SIZE.value:
-            # noinspection PyTypeChecker
-            prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
-
-            # Depending on the prototype, reads the data object as an array or scalar
-            if isinstance(prototype, np.ndarray):
-                data = payload[6:].view(prototype.dtype)[:].copy()  # type: ignore[assignment]
-            elif prototype is not None:
-                data = payload[6:].view(prototype.dtype)[0].copy()
-            else:
-                data = None  # Marks as an error case
-
-        # Creates an ExtractedMessageData instance with the extracted information
-        message_data = ExtractedMessageData(
-            timestamp=log_msg.timestamp_us,
-            command=command_code,
-            data=data,
-        )
-
-        # Adds the extracted message data to the batch results, grouped by event code
-        if event not in batch_data[current_module]:
-            batch_data[current_module][event] = [message_data]
-        else:
-            batch_data[current_module][event].append(message_data)
-
-    return batch_data
-
-
-def extract_logged_hardware_module_data(
-    log_path: Path,
-    module_type_id: tuple[tuple[int, int], ...],
-    n_workers: int = -1,
-) -> tuple[ExtractedModuleData, ...]:
-    """Extracts the received message data for the requested hardware module instances from the .npz log file generated
-    by a MicroControllerInterface instance during runtime.
-
-    This function reads the '.npz' archive generated by the DataLogger's assemble_log_archives() method for a
-    MicroControllerInterface instance and extracts the data for all non-system messages transmitted by the requested
-    hardware module instances from the microcontroller to the PC.
-
-    Notes:
-        At this time, the function exclusively works with the data sent by the microcontroller to the PC.
-
-        The extracted data does not contain library-reserved events and messages. This includes all Kernel messages
-        and module messages with event codes 0 through 50. The only exceptions to this rule are messages with event
-        code 2, which report command completion. These messages are parsed in addition to custom messages sent by each
-        hardware module.
-
-        If the target .npz archive contains fewer than 2000 messages, the processing is carried out sequentially
-        regardless of the specified worker-count.
-
-    Args:
-        log_path: The path to the .npz archive file that stores the logged data generated by the
-            MicroControllerInterface instance during runtime.
-        module_type_id: A tuple of tuples, where each inner tuple stores the type and ID codes of a specific hardware
-            module, whose data should be extracted from the archive, e.g.: ((3, 1), (4, 2)).
-        n_workers: The number of parallel worker processes (CPU cores) to use for processing. Setting this to a value
-            below 1 uses all available CPU cores. Setting this to a value of 1 conducts the processing sequentially.
-
-    Returns:
-        A tuple of ExtractedModuleData instances. Each instance stores all data extracted from the log archive for one
-        specific hardware module instance.
-
-    Raises:
-        ValueError: If the target .npz archive does not exist.
-    """
-    # If the specified compressed log archive does not exist, raises an error
-    if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
-        error_message = (
-            f"Unable to extract hardware module data from the log file {log_path}, as it does not exist or does "
-            f"not point to a valid .npz archive."
-        )
-        console.error(message=error_message, error=ValueError)
-
-    # Uses LogArchiveReader to handle archive access, onset timestamp discovery, and batch creation.
-    reader = LogArchiveReader(archive_path=log_path)
-
-    # If there are no messages to process, returns an empty tuple
-    if reader.message_count == 0:
-        return ()
-
-    onset_us = reader.onset_timestamp_us
-
-    # Small archives are processed sequentially to avoid the unnecessary overhead of setting up the multiprocessing
-    # runtime. This is also done for large files if the user explicitly requests to use a single worker process.
-    module_event_data: dict[tuple[int, int], dict[np.uint8, tuple[ExtractedMessageData, ...]]]
-    if n_workers == 1 or reader.message_count < _RuntimeParameters.PARALLEL_PROCESSING_THRESHOLD.value:
-        # Processes all messages in a single batch sequentially
-        all_keys = reader.get_batches(workers=1, batch_multiplier=1)
-        batch_results = _process_module_message_batch(log_path, all_keys[0], onset_us, module_type_id)
-
-        # Convert the lists of ExtractedMessageData instances to tuples for the final data structure
-        module_event_data = {
-            module: {event: tuple(message_list) for event, message_list in event_dict.items()}
-            for module, event_dict in batch_results.items()
-        }
-    else:
-        # Resolves the number of worker processes to use for parallel processing.
-        if n_workers < 1:
-            n_workers = resolve_worker_count(requested_workers=0)
-
-        # Uses LogArchiveReader to create batches optimized for parallel processing. The batch multiplier of 4
-        # creates many smaller batches for better load distribution across workers.
-        batch_keys = reader.get_batches(workers=n_workers, batch_multiplier=4)
-        batches = [(log_path, keys, onset_us, module_type_id) for keys in batch_keys]
-
-        # Processes batches using ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            # Submits all tasks
-            future_to_index = {
-                executor.submit(_process_module_message_batch, *batch_args): idx
-                for idx, batch_args in enumerate(batches)
-            }
-
-            # Collects results while maintaining message order. This also propagates processing errors to the caller
-            # process.
-            results: list[dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] | None] = [None] * len(
-                batches
-            )
-
-            # Creates a progress bar for batch processing
-            with console.progress(
-                total=len(batches), description="Extracting microcontroller hardware module data", unit="batch"
-            ) as pbar:
-                for future in as_completed(future_to_index):
-                    results[future_to_index[future]] = future.result()
-                    pbar.update(1)  # Updates the progress bar after each batch completes
-
-        # Combines processing results from all batches
-        combined_module_data: dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] = {
-            module: {} for module in module_type_id
-        }
-
-        # Processes results from each batch to maintain chronological ordering
-        for batch_result in results:
-            if batch_result is not None:  # Skips None results
-                for module, event_dict in batch_result.items():
-                    for event, message_list in event_dict.items():
-                        # Iteratively fills the dictionary with ExtractedMessageData instances from each batch
-                        if event not in combined_module_data[module]:
-                            combined_module_data[module][event] = message_list
-                        else:
-                            combined_module_data[module][event].extend(message_list)
-
-        # Convert all lists to tuples for the final data structure
-        module_event_data = {
-            module: {event: tuple(message_list) for event, message_list in event_dict.items()}
-            for module, event_dict in combined_module_data.items()
-        }
-
-    # Creates ExtractedModuleData instances for each module and returns the tuple of created instances to caller
-    return tuple(
-        ExtractedModuleData(
-            module_type=module[0],
-            module_id=module[1],
-            event_data=module_event_data[module],
-        )
-        for module in module_type_id
-        if module_event_data[module]  # Only includes modules that have data
-    )
 
 
 def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
