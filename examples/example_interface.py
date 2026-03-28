@@ -36,6 +36,7 @@ class TestModuleInterface(ModuleInterface):
         super().__init__(
             module_type=module_type,
             module_id=module_id,
+            name="test_module",
             data_codes=data_codes,
             error_codes=None,  # The test module does not have any expected error states.
         )

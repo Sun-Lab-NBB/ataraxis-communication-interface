@@ -38,7 +38,6 @@ from .communication import (
     RepeatedModuleCommand,
     ControllerIdentification,
 )
-from .log_processing import ExtractedModuleData, ExtractedMessageData
 
 # Prevents typing-related imports from executing at runtime.
 if TYPE_CHECKING:
@@ -325,21 +324,6 @@ class ModuleInterface(ABC):  # pragma: no cover
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def process_log_data(self, extracted_data: ExtractedModuleData, output_directory: Path) -> None:
-        """Processes the extracted log data for this module instance.
-
-        This method is invoked by the log processing pipeline after extracting this module's data from the .npz log
-        archive. Implement custom post-extraction processing logic (e.g., converting extracted message data to
-        .feather files) in subclass overrides.
-
-        Args:
-            extracted_data: The ExtractedModuleData instance containing this module's extracted log data, organized
-                by event code.
-            output_directory: The path to the directory where processed output files should be written.
-        """
-        raise NotImplementedError
-
     def _create_command_message_implementation(
         self,
         command: np.uint8,
@@ -512,7 +496,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         return self._name
 
 
-class MicroControllerInterface(ABC):  # pragma: no cover
+class MicroControllerInterface:  # pragma: no cover
     """Interfaces with the hardware module instances managed by the Arduino or Teensy microcontroller running the
     ataraxis-micro-controller library.
 
@@ -719,22 +703,6 @@ class MicroControllerInterface(ABC):  # pragma: no cover
     def reset_controller(self) -> None:
         """Resets the managed microcontroller to use the default hardware and software parameters."""
         self._input_queue.put(self._reset_command)
-
-    @abstractmethod
-    def process_kernel_log_data(
-        self, kernel_messages: tuple[ExtractedMessageData, ...], output_directory: Path
-    ) -> None:
-        """Processes kernel-level messages extracted from log archives during post-hoc log processing.
-
-        This method is invoked by the log processing pipeline when a kernel callback is registered. Implement custom
-        kernel data/state message processing logic in subclass overrides.
-
-        Args:
-            kernel_messages: A tuple of ExtractedMessageData instances containing the extracted kernel messages in
-                chronological order.
-            output_directory: The path to the directory where processed output files should be written.
-        """
-        raise NotImplementedError
 
     @property
     def controller_id(self) -> np.uint8:

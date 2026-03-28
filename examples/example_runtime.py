@@ -22,7 +22,7 @@ from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_base_utilities import console, LogLevel
 import tempfile
 
-from ataraxis_communication_interface import MicroControllerInterface, extract_logged_hardware_module_data
+from ataraxis_communication_interface import MicroControllerInterface, extract_log_data
 
 # Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
 if __name__ == "__main__":
@@ -155,14 +155,16 @@ if __name__ == "__main__":
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # To process the data logged during runtime, it must be extracted from the archive created above. This can be
-    # done with the help of the `extract_logged_hardware_module_data` function:
+    # done with the help of the `extract_log_data` function, which extracts both module and kernel data in a single
+    # pass through the archive. The caller must specify which event codes to extract.
     console.echo("Extracting the logged message data...")
-    log_data = extract_logged_hardware_module_data(
+    log_data, _kernel_data = extract_log_data(
         log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
         module_type_id=(
             (int(interface_1.module_type), int(interface_1.module_id)),
             (int(interface_2.module_type), int(interface_2.module_id)),
         ),
+        module_event_codes=frozenset({2, 52, 53, 54}),
     )
     # Uses pulse off and echo event codes to determine the total number of TestModule 1 pulses and TestModule 2 echo
     # values encountered during runtime according to the processed log data.

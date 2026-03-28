@@ -26,9 +26,8 @@ from .communication import (
 from .log_processing import (
     ExtractedModuleData,
     ExtractedMessageData,
-    extract_kernel_messages,
+    extract_log_data,
     run_log_processing_pipeline,
-    extract_logged_hardware_module_data,
 )
 from .microcontroller_interface import (
     ModuleInterface,
@@ -49,8 +48,7 @@ __all__ = [
     "ModuleSourceData",
     "ModuleState",
     "check_mqtt_connectivity",
-    "extract_kernel_messages",
-    "extract_logged_hardware_module_data",
+    "extract_log_data",
     "print_microcontroller_ids",
     "run_log_processing_pipeline",
     "run_mcp_server",
