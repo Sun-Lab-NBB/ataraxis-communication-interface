@@ -195,15 +195,10 @@ def config_show(config_path: Path) -> None:  # pragma: no cover
         console.echo(message=f"  Controller ID: {controller.controller_id}")
         for module in controller.modules:
             console.echo(
-                message=(
-                    f"    Module ({module.module_type}, {module.module_id}): "
-                    f"events={list(module.event_codes)}"
-                )
+                message=(f"    Module ({module.module_type}, {module.module_id}): events={list(module.event_codes)}")
             )
         if controller.kernel is not None:
-            console.echo(
-                message=f"    Kernel: events={list(controller.kernel.event_codes)}"
-            )
+            console.echo(message=f"    Kernel: events={list(controller.kernel.event_codes)}")
         else:
             console.echo(message="    Kernel: not configured")
 

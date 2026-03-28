@@ -317,9 +317,7 @@ def execute_job(
     kernel_event_codes: frozenset[int] | None = None
 
     if controller_config.modules:
-        module_type_id = tuple(
-            (module.module_type, module.module_id) for module in controller_config.modules
-        )
+        module_type_id = tuple((module.module_type, module.module_id) for module in controller_config.modules)
         # Collects all event codes across all modules into a single frozenset for extract_log_data.
         all_module_events: set[int] = set()
         for module in controller_config.modules:
@@ -912,13 +910,15 @@ def _write_module_feather(
             else:
                 data_bytes_column.append(None)
 
-    dataframe = pl.DataFrame({
-        "timestamp_us": pl.Series(name="timestamp_us", values=timestamps, dtype=pl.UInt64),
-        "command": pl.Series(name="command", values=commands, dtype=pl.UInt8),
-        "event": pl.Series(name="event", values=events, dtype=pl.UInt8),
-        "prototype": pl.Series(name="prototype", values=prototypes, dtype=pl.UInt8),
-        "data": pl.Series(name="data", values=data_bytes_column, dtype=pl.Binary),
-    })
+    dataframe = pl.DataFrame(
+        {
+            "timestamp_us": pl.Series(name="timestamp_us", values=timestamps, dtype=pl.UInt64),
+            "command": pl.Series(name="command", values=commands, dtype=pl.UInt8),
+            "event": pl.Series(name="event", values=events, dtype=pl.UInt8),
+            "prototype": pl.Series(name="prototype", values=prototypes, dtype=pl.UInt8),
+            "data": pl.Series(name="data", values=data_bytes_column, dtype=pl.Binary),
+        }
+    )
 
     filename = (
         f"{CONTROLLER_FEATHER_PREFIX}{source_id}"
@@ -960,13 +960,15 @@ def _write_kernel_feather(
         else:
             data_bytes_column.append(None)
 
-    dataframe = pl.DataFrame({
-        "timestamp_us": pl.Series(name="timestamp_us", values=timestamps, dtype=pl.UInt64),
-        "command": pl.Series(name="command", values=commands, dtype=pl.UInt8),
-        "event": pl.Series(name="event", values=events, dtype=pl.UInt8),
-        "prototype": pl.Series(name="prototype", values=prototypes, dtype=pl.UInt8),
-        "data": pl.Series(name="data", values=data_bytes_column, dtype=pl.Binary),
-    })
+    dataframe = pl.DataFrame(
+        {
+            "timestamp_us": pl.Series(name="timestamp_us", values=timestamps, dtype=pl.UInt64),
+            "command": pl.Series(name="command", values=commands, dtype=pl.UInt8),
+            "event": pl.Series(name="event", values=events, dtype=pl.UInt8),
+            "prototype": pl.Series(name="prototype", values=prototypes, dtype=pl.UInt8),
+            "data": pl.Series(name="data", values=data_bytes_column, dtype=pl.Binary),
+        }
+    )
 
     filename = f"{CONTROLLER_FEATHER_PREFIX}{source_id}{KERNEL_FEATHER_INFIX}{FEATHER_SUFFIX}"
     dataframe.write_ipc(file=output_directory / filename)

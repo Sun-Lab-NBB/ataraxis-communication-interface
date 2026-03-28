@@ -2,83 +2,38 @@
 within host-machines (PCs) and Arduino / Teensy microcontrollers.
 """
 
+from __future__ import annotations
+
 from enum import IntEnum
 from queue import Queue
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from dataclasses import field, dataclass
-from collections.abc import Callable
-from multiprocessing import Queue as MPQueue
 
 import numpy as np
-from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, get_timestamp
 import paho.mqtt.client as mqtt
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import LogPackage
 from ataraxis_transport_layer_pc import TransportLayer
 
-# Defines constants frequently used in this module
-_ZERO_BYTE = np.uint8(0)
-_ZERO_SHORT = np.uint16(0)
-_ZERO_LONG = np.uint32(0)
-_TRUE = np.bool_(True)  # noqa: FBT003
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from multiprocessing import Queue as MPQueue
 
+    from numpy.typing import NDArray
 
-class SerialProtocols(IntEnum):
-    """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
-    communication.
+_ZERO_BYTE: np.uint8 = np.uint8(0)
+"""Default zero value for uint8 fields used across message dataclasses."""
 
-    Notes:
-        The elements in this enumeration should be accessed through their 'as_uint8' property to enforce
-        the type expected by other classes from this library.
-    """
+_ZERO_SHORT: np.uint16 = np.uint16(0)
+"""Default zero value for uint16 fields used across message dataclasses."""
 
-    UNDEFINED = 0
-    """Not a valid protocol code. Used to initialize the SerialCommunication class."""
+_ZERO_LONG: np.uint32 = np.uint32(0)
+"""Default zero value for uint32 fields used across message dataclasses."""
 
-    REPEATED_MODULE_COMMAND = 1
-    """Used by Module-addressed commands that should be repeated (executed recurrently)."""
+_TRUE: np.bool_ = np.bool_(True)  # noqa: FBT003
+"""Default boolean true value for noblock fields used across command dataclasses."""
 
-    ONE_OFF_MODULE_COMMAND = 2
-    """Used by Module-addressed commands that should not be repeated (executed only once)."""
-
-    DEQUEUE_MODULE_COMMAND = 3
-    """Used by Module-addressed commands that remove all queued commands, including recurrent commands."""
-
-    KERNEL_COMMAND = 4
-    """Used by Kernel-addressed commands. All Kernel commands are always non-repeatable (one-shot)."""
-
-    MODULE_PARAMETERS = 5
-    """Used by Module-addressed parameter messages."""
-
-    MODULE_DATA = 6
-    """Used by Module data or error messages that include an arbitrary data object in addition to the event state-code.
-    """
-
-    KERNEL_DATA = 7
-    """Used by Kernel data or error messages that include an arbitrary data object in addition to event state-code."""
-
-    MODULE_STATE = 8
-    """Used by Module data or error messages that only include the state-code."""
-
-    KERNEL_STATE = 9
-    """Used by Kernel data or error messages that only include the state-code."""
-
-    RECEPTION_CODE = 10
-    """Used to acknowledge the reception of command and parameter messages from the PC."""
-
-    CONTROLLER_IDENTIFICATION = 11
-    """Used to identify the host-microcontroller to the PC."""
-
-    MODULE_IDENTIFICATION = 12
-    """Used to identify the hardware module instances managed by the microcontroller's Kernel instance to the PC."""
-
-    def as_uint8(self) -> np.uint8:
-        """Returns the specified enumeration element as a numpy uint8 type."""
-        return np.uint8(self.value)
-
-
-# Type alias for supported numpy types
 type PrototypeType = (
     np.bool_
     | np.uint8
@@ -104,8 +59,6 @@ type PrototypeType = (
     | NDArray[np.float64]
 )
 
-
-# Defines prototype factories for all supported types
 _PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]] = {
     # 1 byte total
     1: lambda: np.bool_(0),  # kOneBool
@@ -312,6 +265,61 @@ _PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]] = {
     164: lambda: np.zeros(15, dtype=np.int64),  # kFifteenInt64s
     165: lambda: np.zeros(15, dtype=np.float64),  # kFifteenFloat64s
 }
+"""Maps prototype integer codes to factory callables that produce the corresponding numpy prototype objects."""
+
+
+class SerialProtocols(IntEnum):
+    """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
+    communication.
+
+    Notes:
+        The elements in this enumeration should be accessed through their 'as_uint8' method to enforce
+        the type expected by other classes from this library.
+    """
+
+    UNDEFINED = 0
+    """Not a valid protocol code. Used to initialize the SerialCommunication class."""
+
+    REPEATED_MODULE_COMMAND = 1
+    """Used by Module-addressed commands that should be repeated (executed recurrently)."""
+
+    ONE_OFF_MODULE_COMMAND = 2
+    """Used by Module-addressed commands that should not be repeated (executed only once)."""
+
+    DEQUEUE_MODULE_COMMAND = 3
+    """Used by Module-addressed commands that remove all queued commands, including recurrent commands."""
+
+    KERNEL_COMMAND = 4
+    """Used by Kernel-addressed commands. All Kernel commands are always non-repeatable (one-shot)."""
+
+    MODULE_PARAMETERS = 5
+    """Used by Module-addressed parameter messages."""
+
+    MODULE_DATA = 6
+    """Used by Module data or error messages that include an arbitrary data object in addition to the event state-code.
+    """
+
+    KERNEL_DATA = 7
+    """Used by Kernel data or error messages that include an arbitrary data object in addition to event state-code."""
+
+    MODULE_STATE = 8
+    """Used by Module data or error messages that only include the state-code."""
+
+    KERNEL_STATE = 9
+    """Used by Kernel data or error messages that only include the state-code."""
+
+    RECEPTION_CODE = 10
+    """Used to acknowledge the reception of command and parameter messages from the PC."""
+
+    CONTROLLER_IDENTIFICATION = 11
+    """Used to identify the host-microcontroller to the PC."""
+
+    MODULE_IDENTIFICATION = 12
+    """Used to identify the hardware module instances managed by the microcontroller's Kernel instance to the PC."""
+
+    def as_uint8(self) -> np.uint8:
+        """Returns the specified enumeration element as a numpy uint8 type."""
+        return np.uint8(self.value)
 
 
 class SerialPrototypes(IntEnum):
@@ -321,414 +329,414 @@ class SerialPrototypes(IntEnum):
 
     # 1 byte total
     ONE_BOOL = 1
-    """1 8-bit boolean"""
+    """1 8-bit boolean."""
     ONE_UINT8 = 2
-    """1 unsigned 8-bit integer"""
+    """1 unsigned 8-bit integer."""
     ONE_INT8 = 3
-    """1 signed 8-bit integer"""
+    """1 signed 8-bit integer."""
 
     # 2 bytes total
     TWO_BOOLS = 4
-    """An array of 2 8-bit booleans"""
+    """An array of 2 8-bit booleans."""
     TWO_UINT8S = 5
-    """An array of 2 unsigned 8-bit integers"""
+    """An array of 2 unsigned 8-bit integers."""
     TWO_INT8S = 6
-    """An array of 2 signed 8-bit integers"""
+    """An array of 2 signed 8-bit integers."""
     ONE_UINT16 = 7
-    """1 unsigned 16-bit integer"""
+    """1 unsigned 16-bit integer."""
     ONE_INT16 = 8
-    """1 signed 16-bit integer"""
+    """1 signed 16-bit integer."""
 
     # 3 bytes total
     THREE_BOOLS = 9
-    """An array of 3 8-bit booleans"""
+    """An array of 3 8-bit booleans."""
     THREE_UINT8S = 10
-    """An array of 3 unsigned 8-bit integers"""
+    """An array of 3 unsigned 8-bit integers."""
     THREE_INT8S = 11
-    """An array of 3 signed 8-bit integers"""
+    """An array of 3 signed 8-bit integers."""
 
     # 4 bytes total
     FOUR_BOOLS = 12
-    """An array of 4 8-bit booleans"""
+    """An array of 4 8-bit booleans."""
     FOUR_UINT8S = 13
-    """An array of 4 unsigned 8-bit integers"""
+    """An array of 4 unsigned 8-bit integers."""
     FOUR_INT8S = 14
-    """An array of 4 signed 8-bit integers"""
+    """An array of 4 signed 8-bit integers."""
     TWO_UINT16S = 15
-    """An array of 2 unsigned 16-bit integers"""
+    """An array of 2 unsigned 16-bit integers."""
     TWO_INT16S = 16
-    """An array of 2 signed 16-bit integers"""
+    """An array of 2 signed 16-bit integers."""
     ONE_UINT32 = 17
-    """1 unsigned 32-bit integer"""
+    """1 unsigned 32-bit integer."""
     ONE_INT32 = 18
-    """1 signed 32-bit integer"""
+    """1 signed 32-bit integer."""
     ONE_FLOAT32 = 19
-    """1 single-precision 32-bit floating-point number"""
+    """1 single-precision 32-bit floating-point number."""
 
     # 5 bytes total
     FIVE_BOOLS = 20
-    """An array of 5 8-bit booleans"""
+    """An array of 5 8-bit booleans."""
     FIVE_UINT8S = 21
-    """An array of 5 unsigned 8-bit integers"""
+    """An array of 5 unsigned 8-bit integers."""
     FIVE_INT8S = 22
-    """An array of 5 signed 8-bit integers"""
+    """An array of 5 signed 8-bit integers."""
 
     # 6 bytes total
     SIX_BOOLS = 23
-    """An array of 6 8-bit booleans"""
+    """An array of 6 8-bit booleans."""
     SIX_UINT8S = 24
-    """An array of 6 unsigned 8-bit integers"""
+    """An array of 6 unsigned 8-bit integers."""
     SIX_INT8S = 25
-    """An array of 6 signed 8-bit integers"""
+    """An array of 6 signed 8-bit integers."""
     THREE_UINT16S = 26
-    """An array of 3 unsigned 16-bit integers"""
+    """An array of 3 unsigned 16-bit integers."""
     THREE_INT16S = 27
-    """An array of 3 signed 16-bit integers"""
+    """An array of 3 signed 16-bit integers."""
 
     # 7 bytes total
     SEVEN_BOOLS = 28
-    """An array of 7 8-bit booleans"""
+    """An array of 7 8-bit booleans."""
     SEVEN_UINT8S = 29
-    """An array of 7 unsigned 8-bit integers"""
+    """An array of 7 unsigned 8-bit integers."""
     SEVEN_INT8S = 30
-    """An array of 7 signed 8-bit integers"""
+    """An array of 7 signed 8-bit integers."""
 
     # 8 bytes total
     EIGHT_BOOLS = 31
-    """An array of 8 8-bit booleans"""
+    """An array of 8 8-bit booleans."""
     EIGHT_UINT8S = 32
-    """An array of 8 unsigned 8-bit integers"""
+    """An array of 8 unsigned 8-bit integers."""
     EIGHT_INT8S = 33
-    """An array of 8 signed 8-bit integers"""
+    """An array of 8 signed 8-bit integers."""
     FOUR_UINT16S = 34
-    """An array of 4 unsigned 16-bit integers"""
+    """An array of 4 unsigned 16-bit integers."""
     FOUR_INT16S = 35
-    """An array of 4 signed 16-bit integers"""
+    """An array of 4 signed 16-bit integers."""
     TWO_UINT32S = 36
-    """An array of 2 unsigned 32-bit integers"""
+    """An array of 2 unsigned 32-bit integers."""
     TWO_INT32S = 37
-    """An array of 2 signed 32-bit integers"""
+    """An array of 2 signed 32-bit integers."""
     TWO_FLOAT32S = 38
-    """An array of 2 single-precision 32-bit floating-point numbers"""
+    """An array of 2 single-precision 32-bit floating-point numbers."""
     ONE_UINT64 = 39
-    """1 unsigned 64-bit integer"""
+    """1 unsigned 64-bit integer."""
     ONE_INT64 = 40
-    """1 signed 64-bit integer"""
+    """1 signed 64-bit integer."""
     ONE_FLOAT64 = 41
-    """1 double-precision 64-bit floating-point number"""
+    """1 double-precision 64-bit floating-point number."""
 
     # 9 bytes total
     NINE_BOOLS = 42
-    """An array of 9 8-bit booleans"""
+    """An array of 9 8-bit booleans."""
     NINE_UINT8S = 43
-    """An array of 9 unsigned 8-bit integers"""
+    """An array of 9 unsigned 8-bit integers."""
     NINE_INT8S = 44
-    """An array of 9 signed 8-bit integers"""
+    """An array of 9 signed 8-bit integers."""
 
     # 10 bytes total
     TEN_BOOLS = 45
-    """An array of 10 8-bit booleans"""
+    """An array of 10 8-bit booleans."""
     TEN_UINT8S = 46
-    """An array of 10 unsigned 8-bit integers"""
+    """An array of 10 unsigned 8-bit integers."""
     TEN_INT8S = 47
-    """An array of 10 signed 8-bit integers"""
+    """An array of 10 signed 8-bit integers."""
     FIVE_UINT16S = 48
-    """An array of 5 unsigned 16-bit integers"""
+    """An array of 5 unsigned 16-bit integers."""
     FIVE_INT16S = 49
-    """An array of 5 signed 16-bit integers"""
+    """An array of 5 signed 16-bit integers."""
 
     # 11 bytes total
     ELEVEN_BOOLS = 50
-    """An array of 11 8-bit booleans"""
+    """An array of 11 8-bit booleans."""
     ELEVEN_UINT8S = 51
-    """An array of 11 unsigned 8-bit integers"""
+    """An array of 11 unsigned 8-bit integers."""
     ELEVEN_INT8S = 52
-    """An array of 11 signed 8-bit integers"""
+    """An array of 11 signed 8-bit integers."""
 
     # 12 bytes total
     TWELVE_BOOLS = 53
-    """An array of 12 8-bit booleans"""
+    """An array of 12 8-bit booleans."""
     TWELVE_UINT8S = 54
-    """An array of 12 unsigned 8-bit integers"""
+    """An array of 12 unsigned 8-bit integers."""
     TWELVE_INT8S = 55
-    """An array of 12 signed 8-bit integers"""
+    """An array of 12 signed 8-bit integers."""
     SIX_UINT16S = 56
-    """An array of 6 unsigned 16-bit integers"""
+    """An array of 6 unsigned 16-bit integers."""
     SIX_INT16S = 57
-    """An array of 6 signed 16-bit integers"""
+    """An array of 6 signed 16-bit integers."""
     THREE_UINT32S = 58
-    """An array of 3 unsigned 32-bit integers"""
+    """An array of 3 unsigned 32-bit integers."""
     THREE_INT32S = 59
-    """An array of 3 signed 32-bit integers"""
+    """An array of 3 signed 32-bit integers."""
     THREE_FLOAT32S = 60
-    """An array of 3 single-precision 32-bit floating-point numbers"""
+    """An array of 3 single-precision 32-bit floating-point numbers."""
 
     # 13 bytes total
     THIRTEEN_BOOLS = 61
-    """An array of 13 8-bit booleans"""
+    """An array of 13 8-bit booleans."""
     THIRTEEN_UINT8S = 62
-    """An array of 13 unsigned 8-bit integers"""
+    """An array of 13 unsigned 8-bit integers."""
     THIRTEEN_INT8S = 63
-    """An array of 13 signed 8-bit integers"""
+    """An array of 13 signed 8-bit integers."""
 
     # 14 bytes total
     FOURTEEN_BOOLS = 64
-    """An array of 14 8-bit booleans"""
+    """An array of 14 8-bit booleans."""
     FOURTEEN_UINT8S = 65
-    """An array of 14 unsigned 8-bit integers"""
+    """An array of 14 unsigned 8-bit integers."""
     FOURTEEN_INT8S = 66
-    """An array of 14 signed 8-bit integers"""
+    """An array of 14 signed 8-bit integers."""
     SEVEN_UINT16S = 67
-    """An array of 7 unsigned 16-bit integers"""
+    """An array of 7 unsigned 16-bit integers."""
     SEVEN_INT16S = 68
-    """An array of 7 signed 16-bit integers"""
+    """An array of 7 signed 16-bit integers."""
 
     # 15 bytes total
     FIFTEEN_BOOLS = 69
-    """An array of 15 8-bit booleans"""
+    """An array of 15 8-bit booleans."""
     FIFTEEN_UINT8S = 70
-    """An array of 15 unsigned 8-bit integers"""
+    """An array of 15 unsigned 8-bit integers."""
     FIFTEEN_INT8S = 71
-    """An array of 15 signed 8-bit integers"""
+    """An array of 15 signed 8-bit integers."""
 
     # 16 bytes total
     EIGHT_UINT16S = 72
-    """An array of 8 unsigned 16-bit integers"""
+    """An array of 8 unsigned 16-bit integers."""
     EIGHT_INT16S = 73
-    """An array of 8 signed 16-bit integers"""
+    """An array of 8 signed 16-bit integers."""
     FOUR_UINT32S = 74
-    """An array of 4 unsigned 32-bit integers"""
+    """An array of 4 unsigned 32-bit integers."""
     FOUR_INT32S = 75
-    """An array of 4 signed 32-bit integers"""
+    """An array of 4 signed 32-bit integers."""
     FOUR_FLOAT32S = 76
-    """An array of 4 single-precision 32-bit floating-point numbers"""
+    """An array of 4 single-precision 32-bit floating-point numbers."""
     TWO_UINT64S = 77
-    """An array of 2 unsigned 64-bit integers"""
+    """An array of 2 unsigned 64-bit integers."""
     TWO_INT64S = 78
-    """An array of 2 signed 64-bit integers"""
+    """An array of 2 signed 64-bit integers."""
     TWO_FLOAT64S = 79
-    """An array of 2 double-precision 64-bit floating-point numbers"""
+    """An array of 2 double-precision 64-bit floating-point numbers."""
 
     # 18 bytes total
     NINE_UINT16S = 80
-    """An array of 9 unsigned 16-bit integers"""
+    """An array of 9 unsigned 16-bit integers."""
     NINE_INT16S = 81
-    """An array of 9 signed 16-bit integers"""
+    """An array of 9 signed 16-bit integers."""
 
     # 20 bytes total
     TEN_UINT16S = 82
-    """An array of 10 unsigned 16-bit integers"""
+    """An array of 10 unsigned 16-bit integers."""
     TEN_INT16S = 83
-    """An array of 10 signed 16-bit integers"""
+    """An array of 10 signed 16-bit integers."""
     FIVE_UINT32S = 84
-    """An array of 5 unsigned 32-bit integers"""
+    """An array of 5 unsigned 32-bit integers."""
     FIVE_INT32S = 85
-    """An array of 5 signed 32-bit integers"""
+    """An array of 5 signed 32-bit integers."""
     FIVE_FLOAT32S = 86
-    """An array of 5 single-precision 32-bit floating-point numbers"""
+    """An array of 5 single-precision 32-bit floating-point numbers."""
 
     # 22 bytes total
     ELEVEN_UINT16S = 87
-    """An array of 11 unsigned 16-bit integers"""
+    """An array of 11 unsigned 16-bit integers."""
     ELEVEN_INT16S = 88
-    """An array of 11 signed 16-bit integers"""
+    """An array of 11 signed 16-bit integers."""
 
     # 24 bytes total
     TWELVE_UINT16S = 89
-    """An array of 12 unsigned 16-bit integers"""
+    """An array of 12 unsigned 16-bit integers."""
     TWELVE_INT16S = 90
-    """An array of 12 signed 16-bit integers"""
+    """An array of 12 signed 16-bit integers."""
     SIX_UINT32S = 91
-    """An array of 6 unsigned 32-bit integers"""
+    """An array of 6 unsigned 32-bit integers."""
     SIX_INT32S = 92
-    """An array of 6 signed 32-bit integers"""
+    """An array of 6 signed 32-bit integers."""
     SIX_FLOAT32S = 93
-    """An array of 6 single-precision 32-bit floating-point numbers"""
+    """An array of 6 single-precision 32-bit floating-point numbers."""
     THREE_UINT64S = 94
-    """An array of 3 unsigned 64-bit integers"""
+    """An array of 3 unsigned 64-bit integers."""
     THREE_INT64S = 95
-    """An array of 3 signed 64-bit integers"""
+    """An array of 3 signed 64-bit integers."""
     THREE_FLOAT64S = 96
-    """An array of 3 double-precision 64-bit floating-point numbers"""
+    """An array of 3 double-precision 64-bit floating-point numbers."""
 
     # 26 bytes total
     THIRTEEN_UINT16S = 97
-    """An array of 13 unsigned 16-bit integers"""
+    """An array of 13 unsigned 16-bit integers."""
     THIRTEEN_INT16S = 98
-    """An array of 13 signed 16-bit integers"""
+    """An array of 13 signed 16-bit integers."""
 
     # 28 bytes total
     FOURTEEN_UINT16S = 99
-    """An array of 14 unsigned 16-bit integers"""
+    """An array of 14 unsigned 16-bit integers."""
     FOURTEEN_INT16S = 100
-    """An array of 14 signed 16-bit integers"""
+    """An array of 14 signed 16-bit integers."""
     SEVEN_UINT32S = 101
-    """An array of 7 unsigned 32-bit integers"""
+    """An array of 7 unsigned 32-bit integers."""
     SEVEN_INT32S = 102
-    """An array of 7 signed 32-bit integers"""
+    """An array of 7 signed 32-bit integers."""
     SEVEN_FLOAT32S = 103
-    """An array of 7 single-precision 32-bit floating-point numbers"""
+    """An array of 7 single-precision 32-bit floating-point numbers."""
 
     # 30 bytes total
     FIFTEEN_UINT16S = 104
-    """An array of 15 unsigned 16-bit integers"""
+    """An array of 15 unsigned 16-bit integers."""
     FIFTEEN_INT16S = 105
-    """An array of 15 signed 16-bit integers"""
+    """An array of 15 signed 16-bit integers."""
 
     # 32 bytes total
     EIGHT_UINT32S = 106
-    """An array of 8 unsigned 32-bit integers"""
+    """An array of 8 unsigned 32-bit integers."""
     EIGHT_INT32S = 107
-    """An array of 8 signed 32-bit integers"""
+    """An array of 8 signed 32-bit integers."""
     EIGHT_FLOAT32S = 108
-    """An array of 8 single-precision 32-bit floating-point numbers"""
+    """An array of 8 single-precision 32-bit floating-point numbers."""
     FOUR_UINT64S = 109
-    """An array of 4 unsigned 64-bit integers"""
+    """An array of 4 unsigned 64-bit integers."""
     FOUR_INT64S = 110
-    """An array of 4 signed 64-bit integers"""
+    """An array of 4 signed 64-bit integers."""
     FOUR_FLOAT64S = 111
-    """An array of 4 double-precision 64-bit floating-point numbers"""
+    """An array of 4 double-precision 64-bit floating-point numbers."""
 
     # 36 bytes total
     NINE_UINT32S = 112
-    """An array of 9 unsigned 32-bit integers"""
+    """An array of 9 unsigned 32-bit integers."""
     NINE_INT32S = 113
-    """An array of 9 signed 32-bit integers"""
+    """An array of 9 signed 32-bit integers."""
     NINE_FLOAT32S = 114
-    """An array of 9 single-precision 32-bit floating-point numbers"""
+    """An array of 9 single-precision 32-bit floating-point numbers."""
 
     # 40 bytes total
     TEN_UINT32S = 115
-    """An array of 10 unsigned 32-bit integers"""
+    """An array of 10 unsigned 32-bit integers."""
     TEN_INT32S = 116
-    """An array of 10 signed 32-bit integers"""
+    """An array of 10 signed 32-bit integers."""
     TEN_FLOAT32S = 117
-    """An array of 10 single-precision 32-bit floating-point numbers"""
+    """An array of 10 single-precision 32-bit floating-point numbers."""
     FIVE_UINT64S = 118
-    """An array of 5 unsigned 64-bit integers"""
+    """An array of 5 unsigned 64-bit integers."""
     FIVE_INT64S = 119
-    """An array of 5 signed 64-bit integers"""
+    """An array of 5 signed 64-bit integers."""
     FIVE_FLOAT64S = 120
-    """An array of 5 double-precision 64-bit floating-point numbers"""
+    """An array of 5 double-precision 64-bit floating-point numbers."""
 
     # 44 bytes total
     ELEVEN_UINT32S = 121
-    """An array of 11 unsigned 32-bit integers"""
+    """An array of 11 unsigned 32-bit integers."""
     ELEVEN_INT32S = 122
-    """An array of 11 signed 32-bit integers"""
+    """An array of 11 signed 32-bit integers."""
     ELEVEN_FLOAT32S = 123
-    """An array of 11 single-precision 32-bit floating-point numbers"""
+    """An array of 11 single-precision 32-bit floating-point numbers."""
 
     # 48 bytes total
     TWELVE_UINT32S = 124
-    """An array of 12 unsigned 32-bit integers"""
+    """An array of 12 unsigned 32-bit integers."""
     TWELVE_INT32S = 125
-    """An array of 12 signed 32-bit integers"""
+    """An array of 12 signed 32-bit integers."""
     TWELVE_FLOAT32S = 126
-    """An array of 12 single-precision 32-bit floating-point numbers"""
+    """An array of 12 single-precision 32-bit floating-point numbers."""
     SIX_UINT64S = 127
-    """An array of 6 unsigned 64-bit integers"""
+    """An array of 6 unsigned 64-bit integers."""
     SIX_INT64S = 128
-    """An array of 6 signed 64-bit integers"""
+    """An array of 6 signed 64-bit integers."""
     SIX_FLOAT64S = 129
-    """An array of 6 double-precision 64-bit floating-point numbers"""
+    """An array of 6 double-precision 64-bit floating-point numbers."""
 
     # 52 bytes total
     THIRTEEN_UINT32S = 130
-    """An array of 13 unsigned 32-bit integers"""
+    """An array of 13 unsigned 32-bit integers."""
     THIRTEEN_INT32S = 131
-    """An array of 13 signed 32-bit integers"""
+    """An array of 13 signed 32-bit integers."""
     THIRTEEN_FLOAT32S = 132
-    """An array of 13 single-precision 32-bit floating-point numbers"""
+    """An array of 13 single-precision 32-bit floating-point numbers."""
 
     # 56 bytes total
     FOURTEEN_UINT32S = 133
-    """An array of 14 unsigned 32-bit integers"""
+    """An array of 14 unsigned 32-bit integers."""
     FOURTEEN_INT32S = 134
-    """An array of 14 signed 32-bit integers"""
+    """An array of 14 signed 32-bit integers."""
     FOURTEEN_FLOAT32S = 135
-    """An array of 14 single-precision 32-bit floating-point numbers"""
+    """An array of 14 single-precision 32-bit floating-point numbers."""
     SEVEN_UINT64S = 136
-    """An array of 7 unsigned 64-bit integers"""
+    """An array of 7 unsigned 64-bit integers."""
     SEVEN_INT64S = 137
-    """An array of 7 signed 64-bit integers"""
+    """An array of 7 signed 64-bit integers."""
     SEVEN_FLOAT64S = 138
-    """An array of 7 double-precision 64-bit floating-point numbers"""
+    """An array of 7 double-precision 64-bit floating-point numbers."""
 
     # 60 bytes total
     FIFTEEN_UINT32S = 139
-    """An array of 15 unsigned 32-bit integers"""
+    """An array of 15 unsigned 32-bit integers."""
     FIFTEEN_INT32S = 140
-    """An array of 15 signed 32-bit integers"""
+    """An array of 15 signed 32-bit integers."""
     FIFTEEN_FLOAT32S = 141
-    """An array of 15 single-precision 32-bit floating-point numbers"""
+    """An array of 15 single-precision 32-bit floating-point numbers."""
 
     # 64 bytes total
     EIGHT_UINT64S = 142
-    """An array of 8 unsigned 64-bit integers"""
+    """An array of 8 unsigned 64-bit integers."""
     EIGHT_INT64S = 143
-    """An array of 8 signed 64-bit integers"""
+    """An array of 8 signed 64-bit integers."""
     EIGHT_FLOAT64S = 144
-    """An array of 8 double-precision 64-bit floating-point numbers"""
+    """An array of 8 double-precision 64-bit floating-point numbers."""
 
     # 72 bytes total
     NINE_UINT64S = 145
-    """An array of 9 unsigned 64-bit integers"""
+    """An array of 9 unsigned 64-bit integers."""
     NINE_INT64S = 146
-    """An array of 9 signed 64-bit integers"""
+    """An array of 9 signed 64-bit integers."""
     NINE_FLOAT64S = 147
-    """An array of 9 double-precision 64-bit floating-point numbers"""
+    """An array of 9 double-precision 64-bit floating-point numbers."""
 
     # 80 bytes total
     TEN_UINT64S = 148
-    """An array of 10 unsigned 64-bit integers"""
+    """An array of 10 unsigned 64-bit integers."""
     TEN_INT64S = 149
-    """An array of 10 signed 64-bit integers"""
+    """An array of 10 signed 64-bit integers."""
     TEN_FLOAT64S = 150
-    """An array of 10 double-precision 64-bit floating-point numbers"""
+    """An array of 10 double-precision 64-bit floating-point numbers."""
 
     # 88 bytes total
     ELEVEN_UINT64S = 151
-    """An array of 11 unsigned 64-bit integers"""
+    """An array of 11 unsigned 64-bit integers."""
     ELEVEN_INT64S = 152
-    """An array of 11 signed 64-bit integers"""
+    """An array of 11 signed 64-bit integers."""
     ELEVEN_FLOAT64S = 153
-    """An array of 11 double-precision 64-bit floating-point numbers"""
+    """An array of 11 double-precision 64-bit floating-point numbers."""
 
     # 96 bytes total
     TWELVE_UINT64S = 154
-    """An array of 12 unsigned 64-bit integers"""
+    """An array of 12 unsigned 64-bit integers."""
     TWELVE_INT64S = 155
-    """An array of 12 signed 64-bit integers"""
+    """An array of 12 signed 64-bit integers."""
     TWELVE_FLOAT64S = 156
-    """An array of 12 double-precision 64-bit floating-point numbers"""
+    """An array of 12 double-precision 64-bit floating-point numbers."""
 
     # 104 bytes total
     THIRTEEN_UINT64S = 157
-    """An array of 13 unsigned 64-bit integers"""
+    """An array of 13 unsigned 64-bit integers."""
     THIRTEEN_INT64S = 158
-    """An array of 13 signed 64-bit integers"""
+    """An array of 13 signed 64-bit integers."""
     THIRTEEN_FLOAT64S = 159
-    """An array of 13 double-precision 64-bit floating-point numbers"""
+    """An array of 13 double-precision 64-bit floating-point numbers."""
 
     # 112 bytes total
     FOURTEEN_UINT64S = 160
-    """An array of 14 unsigned 64-bit integers"""
+    """An array of 14 unsigned 64-bit integers."""
     FOURTEEN_INT64S = 161
-    """An array of 14 signed 64-bit integers"""
+    """An array of 14 signed 64-bit integers."""
     FOURTEEN_FLOAT64S = 162
-    """An array of 14 double-precision 64-bit floating-point numbers"""
+    """An array of 14 double-precision 64-bit floating-point numbers."""
 
     # 120 bytes total
     FIFTEEN_UINT64S = 163
-    """An array of 15 unsigned 64-bit integers"""
+    """An array of 15 unsigned 64-bit integers."""
     FIFTEEN_INT64S = 164
-    """An array of 15 signed 64-bit integers"""
+    """An array of 15 signed 64-bit integers."""
     FIFTEEN_FLOAT64S = 165
-    """An array of 15 double-precision 64-bit floating-point numbers"""
+    """An array of 15 double-precision 64-bit floating-point numbers."""
 
     def as_uint8(self) -> np.uint8:
-        """Returns the specified the enumeration value as a numpy uint8 type."""
+        """Returns the enumeration value as a numpy uint8 type."""
         return np.uint8(self.value)
 
     # noinspection PyTypeHints
@@ -755,7 +763,7 @@ class SerialPrototypes(IntEnum):
             return None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RepeatedModuleCommand:
     """Instructs the addressed Module instance to run the specified command repeatedly (recurrently)."""
 
@@ -793,15 +801,15 @@ class RepeatedModuleCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the RepeatedModuleCommand instance."""
         return (
             f"RepeatedModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, command={self.command}, return_code={self.return_code}, "
-            f"noblock={self.noblock}, cycle_delay={self.cycle_delay} us)."
+            f"noblock={self.noblock}, cycle_delay={self.cycle_delay} us)"
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OneOffModuleCommand:
     """Instructs the addressed Module instance to run the specified command exactly once (non-recurrently)."""
 
@@ -836,15 +844,15 @@ class OneOffModuleCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the OneOffModuleCommand instance."""
         return (
             f"OneOffModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, command={self.command}, return_code={self.return_code}, "
-            f"noblock={self.noblock})."
+            f"noblock={self.noblock})"
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DequeueModuleCommand:
     """Instructs the addressed Module instance to clear (empty) its command queue."""
 
@@ -872,14 +880,14 @@ class DequeueModuleCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the DequeueModuleCommand instance."""
         return (
             f"DequeueModuleCommand(protocol_code={self.protocol_code}, module_type={self.module_type}, "
-            f"module_id={self.module_id}, return_code={self.return_code})."
+            f"module_id={self.module_id}, return_code={self.return_code})"
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class KernelCommand:
     """Instructs the Kernel to run the specified command exactly once."""
 
@@ -904,14 +912,13 @@ class KernelCommand:
         object.__setattr__(self, "packed_data", packed)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the KernelCommand instance."""
         return (
-            f"KernelCommand(protocol_code={self.protocol_code}, command={self.command}, "
-            f"return_code={self.return_code})."
+            f"KernelCommand(protocol_code={self.protocol_code}, command={self.command}, return_code={self.return_code})"
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ModuleParameters:
     """Instructs the addressed Module instance to update its parameters with the included data."""
 
@@ -965,15 +972,15 @@ class ModuleParameters:
         object.__setattr__(self, "packed_data", packed_data)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the ModuleParameters instance."""
         return (
             f"ModuleParameters(protocol_code={self.protocol_code}, module_type={self.module_type}, "
             f"module_id={self.module_id}, return_code={self.return_code}, "
-            f"parameter_object_size={self.parameters_size} bytes)."
+            f"parameter_object_size={self.parameters_size} bytes)"
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class ModuleData:
     """Communicates that the Module has encountered a notable event and includes an additional data object.
 
@@ -988,10 +995,10 @@ class ModuleData:
     """The parsed data object transmitted with the message."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the ModuleData instance."""
         return (
             f"ModuleData(module_type={self.message[0]}, module_id={self.message[1]}, command={self.message[2]}, "
-            f"event={self.message[3]}, data_object={self.data_object})."
+            f"event={self.message[3]}, data_object={self.data_object})"
         )
 
     @property
@@ -1020,7 +1027,7 @@ class ModuleData:
         return np.uint8(self.message[4])
 
 
-@dataclass
+@dataclass(slots=True)
 class KernelData:
     """Communicates that the Kernel has encountered a notable event and includes an additional data object.
 
@@ -1035,8 +1042,8 @@ class KernelData:
     """The parsed data object transmitted with the message."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
-        return f"KernelData(command={self.message[0]}, event={self.message[1]}, data_object={self.data_object})."
+        """Returns a string representation of the KernelData instance."""
+        return f"KernelData(command={self.message[0]}, event={self.message[1]}, data_object={self.data_object})"
 
     @property
     def command(self) -> np.uint8:
@@ -1054,7 +1061,7 @@ class KernelData:
         return np.uint8(self.message[2])
 
 
-@dataclass
+@dataclass(slots=True)
 class ModuleState:
     """Communicates that the Module has encountered a notable event.
 
@@ -1067,10 +1074,10 @@ class ModuleState:
     """The parsed message header data."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the ModuleState instance."""
         return (
             f"ModuleState(module_type={self.message[0]}, module_id={self.message[1]}, "
-            f"command={self.message[2]}, event={self.message[3]})."
+            f"command={self.message[2]}, event={self.message[3]})"
         )
 
     @property
@@ -1094,7 +1101,7 @@ class ModuleState:
         return np.uint8(self.message[3])
 
 
-@dataclass
+@dataclass(slots=True)
 class KernelState:
     """Communicates that the Kernel has encountered a notable event.
 
@@ -1107,8 +1114,8 @@ class KernelState:
     """The parsed message header data."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
-        return f"KernelState(command={self.message[0]}, event={self.message[1]})."
+        """Returns a string representation of the KernelState instance."""
+        return f"KernelState(command={self.message[0]}, event={self.message[1]})"
 
     @property
     def command(self) -> np.uint8:
@@ -1121,7 +1128,7 @@ class KernelState:
         return np.uint8(self.message[1])
 
 
-@dataclass
+@dataclass(slots=True)
 class ReceptionCode:
     """Communicates the reception code originally received with the message sent by the PC to indicate that the message
     was received and parsed by the microcontroller.
@@ -1131,8 +1138,8 @@ class ReceptionCode:
     """The parsed message header data."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
-        return f"ReceptionCode(reception_code={self.message[0]})."
+        """Returns a string representation of the ReceptionCode instance."""
+        return f"ReceptionCode(reception_code={self.message[0]})"
 
     @property
     def reception_code(self) -> np.uint8:
@@ -1140,7 +1147,7 @@ class ReceptionCode:
         return np.uint8(self.message[0])
 
 
-@dataclass
+@dataclass(slots=True)
 class ControllerIdentification:
     """Communicates the unique identifier code of the microcontroller."""
 
@@ -1148,8 +1155,8 @@ class ControllerIdentification:
     """The parsed message header data."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
-        return f"ControllerIdentification(controller_id={self.message[0]})."
+        """Returns a string representation of the ControllerIdentification instance."""
+        return f"ControllerIdentification(controller_id={self.message[0]})"
 
     @property
     def controller_id(self) -> np.uint8:
@@ -1157,7 +1164,7 @@ class ControllerIdentification:
         return np.uint8(self.message[0])
 
 
-@dataclass
+@dataclass(slots=True)
 class ModuleIdentification:
     """Identifies a hardware module instance by communicating its combined type and id code."""
 
@@ -1165,8 +1172,8 @@ class ModuleIdentification:
     """The unique uint16 code that results from combining the type and ID codes of the module instance."""
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
-        return f"ModuleIdentification(module_type_id={self.module_type_id})."
+        """Returns a string representation of the ModuleIdentification instance."""
+        return f"ModuleIdentification(module_type_id={self.module_type_id})"
 
 
 class SerialCommunication:
@@ -1254,8 +1261,8 @@ class SerialCommunication:
         self._usb_port: str = port
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
-        return f"SerialCommunication(usb_port={self._usb_port}, controller_id={self._source_id})."
+        """Returns a string representation of the SerialCommunication instance."""
+        return f"SerialCommunication(usb_port={self._usb_port}, controller_id={self._source_id})"
 
     def send_message(
         self,
@@ -1274,7 +1281,7 @@ class SerialCommunication:
         # Constructs and sends the data message to the connected system.
         self._transport_layer.send_data()
 
-        # Logs the transmitted data to disk
+        # Logs the transmitted data to disk.
         self._log_data(self._timestamp_timer.elapsed, message.packed_data)  # type: ignore[arg-type]
 
     def receive_message(
@@ -1337,10 +1344,10 @@ class SerialCommunication:
                     f"{self._module_data.module_type}. All messages must use one of the valid prototype "
                     f"codes available from the SerialPrototypes enumeration."
                 )
-                console.error(message, ValueError)
-            else:
-                # Otherwise, uses the retrieved prototype to parse the data object
-                self._module_data.data_object = self._transport_layer.read_data(data_object=prototype)
+                console.error(message=message, error=ValueError)
+
+            # Uses the retrieved prototype to parse the data object.
+            self._module_data.data_object = self._transport_layer.read_data(data_object=prototype)
 
             return self._module_data
 
@@ -1359,11 +1366,10 @@ class SerialCommunication:
                     f"object from the received KernelData message. All messages must use one of the valid prototype "
                     f"codes available from the SerialPrototypes enumeration."
                 )
-                console.error(message, ValueError)
+                console.error(message=message, error=ValueError)
 
-            else:
-                # Otherwise, uses the retrieved prototype to parse the data object
-                self._kernel_data.data_object = self._transport_layer.read_data(data_object=prototype)
+            # Uses the retrieved prototype to parse the data object.
+            self._kernel_data.data_object = self._transport_layer.read_data(data_object=prototype)
 
             return self._kernel_data
 
@@ -1400,7 +1406,7 @@ class SerialCommunication:
             f"microcontroller. All incoming messages have to use one of the valid incoming message protocol codes "
             f"available from the SerialProtocols enumeration."
         )
-        console.error(message, error=ValueError)
+        console.error(message=message, error=ValueError)
         # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
         # noinspection PyUnreachableCode
         raise ValueError(message)  # pragma: no cover
@@ -1413,10 +1419,10 @@ class SerialCommunication:
                 microseconds relative to the 'onset' timestamp at the time of data acquisition.
             data: The serialized message payload to be logged.
         """
-        # Packages the data to be logged into the appropriate tuple format (with ID variables)
-        package = LogPackage(self._source_id, np.uint64(timestamp), data)
+        # Packages the data to be logged into the appropriate tuple format (with ID variables).
+        package = LogPackage(source_id=self._source_id, acquisition_time=np.uint64(timestamp), serialized_data=data)
 
-        # Sends the data to the logger
+        # Sends the data to the logger.
         self._logger_queue.put(package)
 
 
@@ -1470,10 +1476,10 @@ class MQTTCommunication:
         )
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the MQTTCommunication instance."""
         return (
             f"MQTTCommunication(broker_ip={self._ip}, socket_port={self._port}, connected={self._connected}, "
-            f"subscribed_topics={self._monitored_topics}"
+            f"subscribed_topics={self._monitored_topics})"
         )
 
     def __del__(self) -> None:
@@ -1481,9 +1487,7 @@ class MQTTCommunication:
         self.disconnect()
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:  # pragma: no cover
-        """The custom callback method used to receive data from the MQTT broker.
-
-        This method records the topic and payload of each received message and puts them into the output_queue.
+        """Receives data from the MQTT broker and buffers it in the output queue.
 
         Args:
             _client: The MQTT client that received the message. Currently not used.
@@ -1522,11 +1526,11 @@ class MQTTCommunication:
                 f"broker at {self._ip}:{self._port}. This likely indicates that the broker is not running or that "
                 f"there is an issue with the provided IP and socket port."
             )
-            console.error(message, error=ConnectionError)
+            console.error(message=message, error=ConnectionError)
 
         # If the class is configured to connect to any topics, enables the connection callback and starts the monitoring
         # thread.
-        if len(self._monitored_topics) != 0:
+        if self._monitored_topics:
             # Adds the callback function and starts the monitoring loop.
             self._client.on_message = self._on_message
             self._client.loop_start()
@@ -1536,7 +1540,7 @@ class MQTTCommunication:
         for topic in self._monitored_topics:
             self._client.subscribe(topic=topic, qos=0)
 
-        # Sets the connected flag
+        # Sets the connected flag.
         self._connected = True
 
     def send_data(self, topic: str, payload: str | bytes | bytearray | float | None = None) -> None:
@@ -1563,7 +1567,7 @@ class MQTTCommunication:
         """Returns True if the instance's get_data() method can be used to retrieve a message received from another
         MQTT client.
         """
-        return bool(not self._output_queue.empty())
+        return not self._output_queue.empty()
 
     def get_data(self) -> tuple[str, bytes | bytearray] | None:
         """Extracts and returns the first available message stored inside the instance's buffer queue.
@@ -1596,13 +1600,13 @@ class MQTTCommunication:
             return
 
         # Stops the listener thread if the client was subscribed to receive topic data.
-        if len(self._monitored_topics) != 0:
+        if self._monitored_topics:
             self._client.loop_stop()
 
         # Disconnects from the client.
         self._client.disconnect()
 
-        # Sets the connection flag
+        # Sets the connection flag.
         self._connected = False
 
 
@@ -1617,7 +1621,7 @@ def check_mqtt_connectivity(host: str = "127.0.0.1", port: int = 1883) -> None:
         port: The socket port used by the MQTT broker.
     """
     with console.temporarily_enabled():
-        console.echo(f"Checking MQTT broker connectivity at {host}:{port}...")
+        console.echo(message=f"Checking MQTT broker connectivity at {host}:{port}...")
 
         # Creates a temporary MQTTCommunication instance to test connectivity.
         mqtt_client = MQTTCommunication(ip=host, port=port)
@@ -1625,11 +1629,11 @@ def check_mqtt_connectivity(host: str = "127.0.0.1", port: int = 1883) -> None:
         # Attempts to connect to the MQTT broker.
         try:
             mqtt_client.connect()
-            console.echo(f"MQTT broker at {host}:{port} is reachable.")
+            console.echo(message=f"MQTT broker at {host}:{port} is reachable.")
             mqtt_client.disconnect()
         except ConnectionError:
             console.echo(
-                f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
+                message=f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
                 f"host/port are correct.",
                 level=LogLevel.ERROR,
             )

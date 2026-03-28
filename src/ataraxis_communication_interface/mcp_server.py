@@ -1576,9 +1576,7 @@ def _group_worker(jobs: list[_PendingJob], workers: int, state: _JobExecutionSta
                 continue
 
             if controller_config is None:
-                tracker.fail_job(
-                    job_id=job.job_id, error_message=f"No controller config for source '{job.source_id}'."
-                )
+                tracker.fail_job(job_id=job.job_id, error_message=f"No controller config for source '{job.source_id}'.")
                 continue
 
             # execute_job already calls tracker.fail_job on exception, so the tracker state is updated.
@@ -1666,9 +1664,7 @@ def _job_execution_manager() -> None:  # pragma: no cover
                 if parallel_pending and available >= _WORKER_MULTIPLE:
                     worker_tiers: dict[int, list[_PendingJob]] = {}
                     for job in parallel_pending:
-                        tier = _compute_sqrt_minimum(
-                            message_count=state.job_message_counts.get(job.dispatch_key, 0)
-                        )
+                        tier = _compute_sqrt_minimum(message_count=state.job_message_counts.get(job.dispatch_key, 0))
                         worker_tiers.setdefault(tier, []).append(job)
 
                     # Dispatches tiers from largest to smallest so large archives get budget priority.

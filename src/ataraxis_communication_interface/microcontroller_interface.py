@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 import sys
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
-from pathlib import Path
 from functools import partial, lru_cache
 from threading import Thread
 from multiprocessing import (
@@ -41,6 +40,7 @@ from .communication import (
 
 # Prevents typing-related imports from executing at runtime.
 if TYPE_CHECKING:
+    from pathlib import Path
     from multiprocessing.managers import SyncManager
 
     from serial.tools.list_ports_common import ListPortInfo
