@@ -50,6 +50,10 @@ dependencies = [
 
     # Data Processing
     "numpy>=2,<3",
+    "polars>=1,<2",
+
+    # CLI
+    "click>=8,<9",
 
     # Communication
     "paho-mqtt>=2,<3",
@@ -61,11 +65,9 @@ dependencies = [
 Homepage = "https://github.com/Sun-Lab-NBB/ataraxis-communication-interface"
 Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
 
-# Exports CLI commands for microcontroller discovery, MQTT connectivity checking, and MCP server.
+# Exports the unified CLI entry point for microcontroller discovery, MQTT checking, log processing, and MCP server.
 [project.scripts]
-axci-id = "ataraxis_communication_interface.microcontroller_interface:print_microcontroller_ids"
-axci-mqtt = "ataraxis_communication_interface.communication:check_mqtt_connectivity"
-axci-mcp = "ataraxis_communication_interface.mcp_server:run_mcp_server"
+axci = "ataraxis_communication_interface.cli:axci_cli"
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]

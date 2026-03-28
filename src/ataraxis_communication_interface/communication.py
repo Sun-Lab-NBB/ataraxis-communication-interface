@@ -975,7 +975,12 @@ class ModuleParameters:
 
 @dataclass
 class ModuleData:
-    """Communicates that the Module has encountered a notable event and includes an additional data object."""
+    """Communicates that the Module has encountered a notable event and includes an additional data object.
+
+    Notes:
+        Event codes are unique within each module -- the same code always carries the same semantic meaning
+        regardless of the command that was executing when the message was sent.
+    """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=5, dtype=np.uint8))
     """The parsed message header data."""
@@ -1017,7 +1022,12 @@ class ModuleData:
 
 @dataclass
 class KernelData:
-    """Communicates that the Kernel has encountered a notable event and includes an additional data object."""
+    """Communicates that the Kernel has encountered a notable event and includes an additional data object.
+
+    Notes:
+        Event codes are unique within the kernel -- the same code always carries the same semantic meaning
+        regardless of the command that was executing when the message was sent.
+    """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=3, dtype=np.uint8))
     """The parsed message header data."""
@@ -1046,7 +1056,12 @@ class KernelData:
 
 @dataclass
 class ModuleState:
-    """Communicates that the Module has encountered a notable event."""
+    """Communicates that the Module has encountered a notable event.
+
+    Notes:
+        Event codes are unique within each module -- the same code always carries the same semantic meaning
+        regardless of the command that was executing when the message was sent.
+    """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=4, dtype=np.uint8))
     """The parsed message header data."""
@@ -1081,7 +1096,12 @@ class ModuleState:
 
 @dataclass
 class KernelState:
-    """Communicates that the Kernel has encountered a notable event."""
+    """Communicates that the Kernel has encountered a notable event.
+
+    Notes:
+        Event codes are unique within the kernel -- the same code always carries the same semantic meaning
+        regardless of the command that was executing when the message was sent.
+    """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=2, dtype=np.uint8))
     """The parsed message header data."""

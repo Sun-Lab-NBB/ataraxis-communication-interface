@@ -5,20 +5,20 @@ MicroControllerInterface log archives.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from pathlib import Path
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
+import polars as pl
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
 from ataraxis_data_structures import LogArchiveReader, ProcessingTracker
 
 from .manifest import MICROCONTROLLER_MANIFEST_FILENAME, MicroControllerManifest
 from .communication import SerialProtocols, SerialPrototypes
+from .extraction_config import ExtractionConfig, ControllerExtractionConfig
 
 if TYPE_CHECKING:
-    from pathlib import Path
-    from collections.abc import Callable
-
     from numpy.typing import NDArray
 
 LOG_ARCHIVE_SUFFIX: str = "_log.npz"
@@ -35,6 +35,18 @@ PARALLEL_PROCESSING_THRESHOLD: int = 2000
 """The minimum number of messages in a log archive required to enable parallel processing. Archives with fewer messages
 are processed sequentially to avoid multiprocessing overhead."""
 
+CONTROLLER_FEATHER_PREFIX: str = "controller_"
+"""Filename prefix for controller feather output files."""
+
+MODULE_FEATHER_INFIX: str = "_module_"
+"""Filename infix separating the controller source ID from the module type and ID."""
+
+KERNEL_FEATHER_INFIX: str = "_kernel"
+"""Filename infix identifying kernel message feather files."""
+
+FEATHER_SUFFIX: str = ".feather"
+"""Filename suffix for all feather (IPC) output files."""
+
 _EXTRACTION_JOB_NAME: str = "microcontroller_data_extraction"
 """The job name used by the processing pipeline for microcontroller data extraction."""
 
@@ -49,6 +61,10 @@ class ExtractedMessageData:
     """The number of microseconds elapsed since the UTC epoch onset when the message was received by the PC."""
     command: np.uint8
     """The code of the command that the module or kernel was executing when it sent the message to the PC."""
+    event: np.uint8
+    """The event code of the message."""
+    prototype: np.uint8 | None
+    """The SerialPrototypes code identifying the data layout, or None for state-only messages."""
     data: None | np.number | NDArray[np.number]
     """The parsed data object transmitted with the message (or None, for state-only messages)."""
 
@@ -56,7 +72,7 @@ class ExtractedMessageData:
 @dataclass(slots=True)
 class ExtractedModuleData:
     """Stores the data parsed from all messages sent to the PC by a hardware module instance during runtime that
-    matched the caller's event code filter (and optional command code pre-filter).
+    matched the caller's event code filter.
     """
 
     module_type: int
@@ -68,27 +84,31 @@ class ExtractedModuleData:
     """A dictionary that uses message event codes as keys and tuples of ExtractedMessageData instances as values."""
 
 
+type _BatchResult = tuple[
+    dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]],
+    list[ExtractedMessageData],
+]
+"""Describes the return type of _process_message_batch: a module data dictionary mapping (type, id) tuples to
+event-grouped message lists, and a chronological list of kernel messages."""
+
+
 def run_log_processing_pipeline(
     log_directory: Path,
     output_directory: Path,
+    config: ExtractionConfig | Path,
     job_id: str | None = None,
     log_ids: list[str] | None = None,
-    module_callbacks: dict[tuple[int, int], Callable[[ExtractedModuleData, Path], None]] | None = None,
-    module_event_codes: frozenset[int] | None = None,
-    module_command_codes: frozenset[int] | None = None,
-    kernel_callback: Callable[[tuple[ExtractedMessageData, ...], Path], None] | None = None,
-    kernel_event_codes: frozenset[int] | None = None,
-    kernel_command_codes: frozenset[int] | None = None,
     *,
     workers: int = -1,
     display_progress: bool = True,
 ) -> None:
     """Processes the requested MicroControllerInterface log archives from a single DataLogger output directory.
 
-    Supports both local and remote processing modes. In local mode (job_id is None), resolves each requested log
-    archive by source ID, initializes a processing tracker in the output directory, and executes all requested jobs
-    sequentially. In remote mode (job_id is provided), generates all possible job IDs for the requested source IDs
-    and executes only the matching job.
+    Extracts hardware module and kernel message data as specified by the extraction configuration and writes the
+    results to feather (IPC) files. Supports both local and remote processing modes. In local mode (job_id is None),
+    resolves each requested log archive by source ID, initializes a processing tracker in the output directory, and
+    executes all requested jobs sequentially. In remote mode (job_id is provided), generates all possible job IDs for
+    the requested source IDs and executes only the matching job.
 
     All resolved archives must reside in the same directory. If the log_directory contains archives from multiple
     DataLogger instances (in separate subdirectories), each must be processed independently. Use the MCP batch
@@ -99,25 +119,14 @@ def run_log_processing_pipeline(
             recursively, so archives may be nested at any depth below this path.
         output_directory: The path to the root output directory. A ``microcontroller_data/`` subdirectory is created
             automatically under this path, and all tracker and output files are written there.
+        config: The extraction configuration specifying which controllers, modules, events, and commands to extract.
+            Accepts an ExtractionConfig instance or a Path to an extraction_config.yaml file.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed (remote mode). If not provided, all requested jobs are run sequentially
             with automatic tracker management (local mode).
         log_ids: A list of source log IDs to process. Each ID must correspond to exactly one archive under the
             log directory, and all archives must reside in the same parent directory. If not provided, reads the
             microcontroller_manifest.yaml file from the log directory to resolve all registered source IDs.
-        module_callbacks: An optional dictionary mapping (module_type, module_id) tuples to callback functions. Each
-            callback receives the ExtractedModuleData for that module and the output directory path, and is responsible
-            for both processing the data and saving results. When provided, module_event_codes must also be specified.
-        module_event_codes: The event codes to extract for hardware module messages. Required when module_callbacks
-            is provided. Only messages with matching event codes are extracted and passed to callbacks.
-        module_command_codes: An optional pre-filter for hardware module messages. When provided, only messages sent
-            while executing one of the specified commands are extracted.
-        kernel_callback: An optional callback function for processing kernel messages. Receives a tuple of
-            ExtractedMessageData instances and the output directory path. When provided, kernel_event_codes must
-            also be specified.
-        kernel_event_codes: The event codes to extract for kernel messages. Required when kernel_callback is provided.
-        kernel_command_codes: An optional pre-filter for kernel messages. When provided, only messages sent while
-            executing one of the specified commands are extracted.
         workers: The number of worker processes to use for parallel processing. Setting this to a value less than 1
             uses all available CPU cores. Setting this to 1 conducts processing sequentially.
         display_progress: Determines whether to display progress bars during extraction. Defaults to True for
@@ -128,19 +137,25 @@ def run_log_processing_pipeline(
             microcontroller manifest is found when log_ids is not provided.
         ValueError: If the provided job_id does not match any discoverable job, if no source IDs can be resolved,
             if a requested log ID matches multiple archives, if resolved archives span multiple directories, or if
-            callbacks are provided without their corresponding event_codes.
+            the extraction config has empty event codes.
     """
     if not log_directory.exists() or not log_directory.is_dir():
         message = f"Unable to process logs in '{log_directory}'. The path does not exist or is not a directory."
         console.error(message=message, error=FileNotFoundError)
 
-    # Validates that callbacks are paired with their required event_codes.
-    if module_callbacks is not None and module_event_codes is None:
-        message = "module_callbacks requires module_event_codes to be specified."
-        console.error(message=message, error=ValueError)
-    if kernel_callback is not None and kernel_event_codes is None:
-        message = "kernel_callback requires kernel_event_codes to be specified."
-        console.error(message=message, error=ValueError)
+    # Resolves the extraction configuration from a file path if needed.
+    if isinstance(config, Path):
+        if not config.exists() or not config.is_file():
+            message = f"Unable to load extraction config from '{config}'. The path does not exist or is not a file."
+            console.error(message=message, error=FileNotFoundError)
+        resolved_config = ExtractionConfig.from_yaml(file_path=config)
+    else:
+        resolved_config = config
+
+    # Builds a lookup from controller ID to its extraction configuration.
+    controller_configs: dict[str, ControllerExtractionConfig] = {
+        str(controller.controller_id): controller for controller in resolved_config.controllers
+    }
 
     # Locates the microcontroller manifest to resolve or validate source IDs. The manifest ensures only
     # axci-produced log archives are processed, preventing accidental processing of logs from other libraries.
@@ -183,6 +198,15 @@ def run_log_processing_pipeline(
 
     source_ids = sorted(log_ids)
 
+    # Validates that each source ID has a matching controller extraction configuration.
+    for source_id in source_ids:
+        if source_id not in controller_configs:
+            message = (
+                f"Unable to process logs in '{log_directory}'. Source ID '{source_id}' has no matching controller "
+                f"in the extraction config. Configured controller IDs: {sorted(controller_configs.keys())}."
+            )
+            console.error(message=message, error=ValueError)
+
     # Resolves all archive paths upfront and validates they belong to the same DataLogger output directory.
     archive_paths = {
         source_id: find_log_archive(log_directory=log_directory, source_id=source_id) for source_id in source_ids
@@ -223,12 +247,7 @@ def run_log_processing_pipeline(
             job_id=job_id,
             workers=workers,
             tracker=tracker,
-            module_callbacks=module_callbacks,
-            module_event_codes=module_event_codes,
-            module_command_codes=module_command_codes,
-            kernel_callback=kernel_callback,
-            kernel_event_codes=kernel_event_codes,
-            kernel_command_codes=kernel_command_codes,
+            controller_config=controller_configs[source_id],
             display_progress=display_progress,
         )
     else:
@@ -249,12 +268,7 @@ def run_log_processing_pipeline(
                     job_id=job_ids[source_id],
                     workers=resolved_workers,
                     tracker=tracker,
-                    module_callbacks=module_callbacks,
-                    module_event_codes=module_event_codes,
-                    module_command_codes=module_command_codes,
-                    kernel_callback=kernel_callback,
-                    kernel_event_codes=kernel_event_codes,
-                    kernel_command_codes=kernel_command_codes,
+                    controller_config=controller_configs[source_id],
                     display_progress=display_progress,
                     executor=shared_executor,
                 )
@@ -272,83 +286,99 @@ def execute_job(
     job_id: str,
     workers: int,
     tracker: ProcessingTracker,
-    module_callbacks: dict[tuple[int, int], Callable[[ExtractedModuleData, Path], None]] | None = None,
-    module_event_codes: frozenset[int] | None = None,
-    module_command_codes: frozenset[int] | None = None,
-    kernel_callback: Callable[[tuple[ExtractedMessageData, ...], Path], None] | None = None,
-    kernel_event_codes: frozenset[int] | None = None,
-    kernel_command_codes: frozenset[int] | None = None,
+    controller_config: ControllerExtractionConfig,
     *,
     display_progress: bool = True,
     executor: ProcessPoolExecutor | None = None,
 ) -> None:
     """Executes a single data extraction job for the target log archive.
 
-    Extracts hardware module and kernel data from the log archive in a single pass, then invokes any registered
-    callbacks for post-extraction processing.
+    Extracts hardware module and kernel data from the log archive in a single pass as specified by the controller
+    extraction configuration, then writes the results to feather (IPC) files in the output directory. Each module
+    produces a separate feather file, and kernel messages (when configured) produce an additional feather file.
 
     Args:
         log_path: The path to the .npz log archive to process.
-        output_directory: The path to the directory where the output files are written.
+        output_directory: The path to the directory where feather output files and the tracker are written.
         source_id: The source ID string identifying the log archive.
         job_id: The unique hexadecimal identifier for this processing job.
         workers: The number of worker processes to use for parallel processing.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
-        module_callbacks: An optional dictionary mapping (module_type, module_id) tuples to callback functions. Each
-            callback receives the ExtractedModuleData for that module and the output directory path. When provided,
-            module_event_codes must also be specified.
-        module_event_codes: The event codes to extract for hardware module messages. Required when module_callbacks
-            is provided.
-        module_command_codes: An optional command code pre-filter for hardware module messages.
-        kernel_callback: An optional callback function for processing kernel messages. Receives a tuple of
-            ExtractedMessageData instances and the output directory path. When provided, kernel_event_codes must
-            also be specified.
-        kernel_event_codes: The event codes to extract for kernel messages. Required when kernel_callback is provided.
-        kernel_command_codes: An optional command code pre-filter for kernel messages.
+        controller_config: The extraction configuration for the controller whose archive is being processed.
         display_progress: Determines whether to display a progress bar during extraction.
         executor: An optional pre-created ProcessPoolExecutor to reuse for parallel processing.
 
     Raises:
-        ValueError: If callbacks are provided without their corresponding event_codes.
+        ValueError: If the controller config has modules with empty event codes.
     """
-    # Validates that callbacks are paired with their required event_codes.
-    if module_callbacks is not None and module_event_codes is None:
-        message = "module_callbacks requires module_event_codes to be specified."
-        console.error(message=message, error=ValueError)
-    if kernel_callback is not None and kernel_event_codes is None:
-        message = "kernel_callback requires kernel_event_codes to be specified."
+    # Converts the controller config into the parameters expected by extract_log_data.
+    module_type_id: tuple[tuple[int, int], ...] | None = None
+    module_event_codes: frozenset[int] | None = None
+    kernel_event_codes: frozenset[int] | None = None
+
+    if controller_config.modules:
+        module_type_id = tuple(
+            (module.module_type, module.module_id) for module in controller_config.modules
+        )
+        # Collects all event codes across all modules into a single frozenset for extract_log_data.
+        all_module_events: set[int] = set()
+        for module in controller_config.modules:
+            if not module.event_codes:
+                message = (
+                    f"Unable to execute the data extraction job for source '{source_id}'. Module "
+                    f"({module.module_type}, {module.module_id}) has empty event_codes."
+                )
+                console.error(message=message, error=ValueError)
+            all_module_events.update(module.event_codes)
+        module_event_codes = frozenset(all_module_events)
+
+    if controller_config.kernel is not None:
+        if not controller_config.kernel.event_codes:
+            message = (
+                f"Unable to execute the data extraction job for source '{source_id}'. Kernel extraction "
+                f"has empty event_codes."
+            )
+            console.error(message=message, error=ValueError)
+        kernel_event_codes = frozenset(controller_config.kernel.event_codes)
+
+    # Validates that at least one extraction target is configured.
+    if module_type_id is None and kernel_event_codes is None:
+        message = (
+            f"Unable to execute the data extraction job for source '{source_id}'. The controller config "
+            f"has no modules and no kernel extraction configured."
+        )
         console.error(message=message, error=ValueError)
 
     console.echo(message=f"Running '{_EXTRACTION_JOB_NAME}' job for source '{source_id}' (ID: {job_id})...")
     tracker.start_job(job_id=job_id)
 
     try:
-        # Derives module_type_id from the callback keys when module extraction is requested.
-        module_type_id = tuple(module_callbacks.keys()) if module_callbacks is not None else None
-
         # Extracts both module and kernel data in a single pass through the archive.
         module_data, kernel_messages = extract_log_data(
             log_path=log_path,
             module_type_id=module_type_id,
             module_event_codes=module_event_codes,
-            module_command_codes=module_command_codes,
             kernel_event_codes=kernel_event_codes,
-            kernel_command_codes=kernel_command_codes,
             n_workers=workers,
             display_progress=display_progress,
             executor=executor,
         )
 
-        # Invokes the registered callback for each extracted module's data.
-        if module_callbacks is not None:
-            for extracted_module in module_data:
-                callback_key = (extracted_module.module_type, extracted_module.module_id)
-                if callback_key in module_callbacks:
-                    module_callbacks[callback_key](extracted_module, output_directory)
+        # Writes each extracted module's data to a separate feather file.
+        for extracted_module in module_data:
+            _write_module_feather(
+                module_data=extracted_module,
+                source_id=source_id,
+                output_directory=output_directory,
+            )
 
-        # Invokes the kernel callback with the extracted kernel messages.
-        if kernel_callback is not None and kernel_messages:
-            kernel_callback(kernel_messages, output_directory)
+        # Writes kernel messages to a feather file when kernel extraction was configured.
+        if kernel_messages:
+            _write_kernel_feather(
+                kernel_messages=kernel_messages,
+                source_id=source_id,
+                output_directory=output_directory,
+            )
 
         tracker.complete_job(job_id=job_id)
 
@@ -361,9 +391,7 @@ def extract_log_data(
     log_path: Path,
     module_type_id: tuple[tuple[int, int], ...] | None = None,
     module_event_codes: frozenset[int] | None = None,
-    module_command_codes: frozenset[int] | None = None,
     kernel_event_codes: frozenset[int] | None = None,
-    kernel_command_codes: frozenset[int] | None = None,
     n_workers: int = -1,
     *,
     display_progress: bool = True,
@@ -373,8 +401,8 @@ def extract_log_data(
     pass.
 
     Reads the archive once and routes each incoming message (MODULE_DATA, MODULE_STATE, KERNEL_DATA, KERNEL_STATE)
-    through the appropriate filters. Only messages whose event codes match the caller's filter (and optional command
-    code pre-filter) are extracted.
+    through event code filters. Only messages whose event codes match the caller's filter are extracted. Event codes
+    are guaranteed to be unique within each module and the kernel, so command code filtering is not required.
 
     Notes:
         At this time, the function exclusively works with incoming messages sent by the microcontroller to the PC.
@@ -393,11 +421,7 @@ def extract_log_data(
             provided. Set to None to skip module extraction.
         module_event_codes: The event codes to extract for hardware module messages. Required when module_type_id is
             provided. Only messages with matching event codes are extracted.
-        module_command_codes: An optional command code pre-filter for hardware module messages. When provided, only
-            messages sent while executing one of the specified commands are extracted.
         kernel_event_codes: The event codes to extract for kernel messages. Set to None to skip kernel extraction.
-        kernel_command_codes: An optional command code pre-filter for kernel messages. When provided, only messages
-            sent while executing one of the specified commands are extracted.
         n_workers: The number of parallel worker processes (CPU cores) to use for processing. Setting this to a value
             below 1 uses all available CPU cores. Setting this to a value of 1 conducts the processing sequentially.
         display_progress: Determines whether to display a progress bar during parallel batch processing.
@@ -419,13 +443,17 @@ def extract_log_data(
     has_kernel = kernel_event_codes is not None
 
     if module_type_id is not None and module_event_codes is None:
-        message = "module_type_id requires module_event_codes to be specified."
+        message = (
+            "Unable to extract log data. The module_type_id parameter requires module_event_codes to also be specified."
+        )
         console.error(message=message, error=ValueError)
     if module_event_codes is not None and module_type_id is None:
-        message = "module_event_codes requires module_type_id to be specified."
+        message = (
+            "Unable to extract log data. The module_event_codes parameter requires module_type_id to also be specified."
+        )
         console.error(message=message, error=ValueError)
     if not has_module and not has_kernel:
-        message = "At least one of module or kernel extraction must be requested."
+        message = "Unable to extract log data. At least one of module or kernel extraction must be requested."
         console.error(message=message, error=ValueError)
 
     # Validates the log archive path.
@@ -455,9 +483,7 @@ def extract_log_data(
             onset_us=onset_us,
             module_type_id=module_type_id,
             module_event_codes=module_event_codes,
-            module_command_codes=module_command_codes,
             kernel_event_codes=kernel_event_codes,
-            kernel_command_codes=kernel_command_codes,
         )
 
         # Converts the lists of ExtractedMessageData instances to tuples for the final data structure.
@@ -473,7 +499,7 @@ def extract_log_data(
                 event_data=module_event_data[module],
             )
             for module in (module_type_id or ())
-            if module in module_event_data and module_event_data[module]
+            if module_event_data.get(module)
         )
 
         return module_results, tuple(kernel_batch)
@@ -485,9 +511,15 @@ def extract_log_data(
     # Uses LogArchiveReader to create batches optimized for parallel processing. The batch multiplier of 4
     # creates many smaller batches for better load distribution across workers.
     batch_keys = reader.get_batches(workers=n_workers, batch_multiplier=4)
-    batches = [
-        (log_path, keys, onset_us, module_type_id, module_event_codes, module_command_codes,
-         kernel_event_codes, kernel_command_codes)
+    batch_arguments = [
+        {
+            "log_path": log_path,
+            "file_names": keys,
+            "onset_us": onset_us,
+            "module_type_id": module_type_id,
+            "module_event_codes": module_event_codes,
+            "kernel_event_codes": kernel_event_codes,
+        }
         for keys in batch_keys
     ]
 
@@ -495,25 +527,19 @@ def extract_log_data(
     managed = executor is None
     active_executor = executor if executor is not None else ProcessPoolExecutor(max_workers=n_workers)
 
-    # Type alias for the batch result tuple.
-    _BatchResult = tuple[
-        dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]],
-        list[ExtractedMessageData],
-    ]
-
     try:
         # Submits all tasks.
         future_to_index = {
-            active_executor.submit(_process_message_batch, *batch_args): idx
-            for idx, batch_args in enumerate(batches)
+            active_executor.submit(_process_message_batch, **batch_kwargs): index
+            for index, batch_kwargs in enumerate(batch_arguments)
         }
 
         # Collects results while maintaining message order.
-        results: list[_BatchResult | None] = [None] * len(batches)
+        results: list[_BatchResult | None] = [None] * len(batch_arguments)
 
         if display_progress:
             with console.progress(
-                total=len(batches), description="Extracting microcontroller log data", unit="batch"
+                total=len(batch_arguments), description="Extracting microcontroller log data", unit="batch"
             ) as pbar:
                 for future in as_completed(future_to_index):
                     results[future_to_index[future]] = future.result()
@@ -671,19 +697,15 @@ def _process_message_batch(
     onset_us: np.uint64,
     module_type_id: tuple[tuple[int, int], ...] | None,
     module_event_codes: frozenset[int] | None,
-    module_command_codes: frozenset[int] | None,
     kernel_event_codes: frozenset[int] | None,
-    kernel_command_codes: frozenset[int] | None,
-) -> tuple[
-    dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]],
-    list[ExtractedMessageData],
-]:  # pragma: no cover
+) -> _BatchResult:  # pragma: no cover
     """Processes a batch of messages from a MicroControllerInterface log archive, extracting both hardware module
     and kernel messages in a single pass.
 
     This worker function is used by extract_log_data() to process multiple message batches in parallel. Each message
-    is routed to module or kernel results based on its protocol code, then filtered by the caller's event codes
-    (required) and optional command code pre-filter.
+    is routed to module or kernel results based on its protocol code, then filtered by the caller's event codes.
+    Event codes are guaranteed to be unique within each module and the kernel, so command code filtering is not
+    required.
 
     Args:
         log_path: The path to the processed .npz log file.
@@ -691,9 +713,7 @@ def _process_message_batch(
         onset_us: The onset of the data acquisition, in microseconds elapsed since UTC epoch onset.
         module_type_id: The module type and ID codes to extract, or None to skip module extraction.
         module_event_codes: The event codes to extract for module messages, or None to skip module extraction.
-        module_command_codes: An optional command code pre-filter for module messages.
         kernel_event_codes: The event codes to extract for kernel messages, or None to skip kernel extraction.
-        kernel_command_codes: An optional command code pre-filter for kernel messages.
 
     Returns:
         A tuple of (module_results, kernel_results). module_results maps module (type, id) tuples to dicts of
@@ -716,8 +736,8 @@ def _process_message_batch(
         payload = log_msg.payload
         protocol = payload[0]
 
-        # --- Module messages (MODULE_DATA / MODULE_STATE) ---
-        if extract_modules and (protocol == SerialProtocols.MODULE_DATA or protocol == SerialProtocols.MODULE_STATE):
+        # Routes module messages (MODULE_DATA / MODULE_STATE) through the extraction pipeline.
+        if extract_modules and protocol in {SerialProtocols.MODULE_DATA, SerialProtocols.MODULE_STATE}:
             # Checks if this message comes from one of the requested modules.
             current_module = None
             for module in module_type_id:  # type: ignore[union-attr]
@@ -728,11 +748,7 @@ def _process_message_batch(
             if current_module is None:
                 continue
 
-            # Command code pre-filter: skip early if command doesn't match.
-            if module_command_codes is not None and int(payload[3]) not in module_command_codes:
-                continue
-
-            # Event code filter: extract only requested events.
+            # Extracts only messages with requested event codes.
             event_code_int = int(payload[4])
             if event_code_int not in module_event_codes:  # type: ignore[operator]
                 continue
@@ -743,18 +759,22 @@ def _process_message_batch(
 
             # Extracts the data object for MODULE_DATA messages (protocol code distinguishes DATA from STATE).
             data: None | np.number | NDArray[np.number] = None
+            prototype_code: np.uint8 | None = None
             if protocol == SerialProtocols.MODULE_DATA:
+                prototype_code = np.uint8(payload[5])
                 # noinspection PyTypeChecker
-                prototype = SerialPrototypes.get_prototype_for_code(code=payload[5])
+                prototype_object = SerialPrototypes.get_prototype_for_code(code=payload[5])
 
-                if isinstance(prototype, np.ndarray):
-                    data = payload[6:].view(prototype.dtype)[:].copy()  # type: ignore[assignment]
-                elif prototype is not None:
-                    data = payload[6:].view(prototype.dtype)[0].copy()
+                if isinstance(prototype_object, np.ndarray):
+                    data = payload[6:].view(prototype_object.dtype)[:].copy()  # type: ignore[assignment]
+                elif prototype_object is not None:
+                    data = payload[6:].view(prototype_object.dtype)[0].copy()
 
             message_data = ExtractedMessageData(
                 timestamp=log_msg.timestamp_us,
                 command=command_code,
+                event=event,
+                prototype=prototype_code,
                 data=data,
             )
 
@@ -764,33 +784,34 @@ def _process_message_batch(
             else:
                 module_data[current_module][event].append(message_data)
 
-        # --- Kernel messages (KERNEL_DATA / KERNEL_STATE) ---
-        elif extract_kernel and (protocol == SerialProtocols.KERNEL_DATA or protocol == SerialProtocols.KERNEL_STATE):
-            # Command code pre-filter.
-            if kernel_command_codes is not None and int(payload[1]) not in kernel_command_codes:
-                continue
-
-            # Event code filter.
+        # Routes kernel messages (KERNEL_DATA / KERNEL_STATE) through the extraction pipeline.
+        elif extract_kernel and protocol in {SerialProtocols.KERNEL_DATA, SerialProtocols.KERNEL_STATE}:
+            # Extracts only messages with requested event codes.
             if int(payload[2]) not in kernel_event_codes:  # type: ignore[operator]
                 continue
 
             command_code = np.uint8(payload[1])
+            kernel_event = np.uint8(payload[2])
 
             # Extracts the data object for KERNEL_DATA messages.
             data = None
+            prototype_code = None
             if protocol == SerialProtocols.KERNEL_DATA:
+                prototype_code = np.uint8(payload[3])
                 # noinspection PyTypeChecker
-                prototype = SerialPrototypes.get_prototype_for_code(code=payload[3])
+                prototype_object = SerialPrototypes.get_prototype_for_code(code=payload[3])
 
-                if isinstance(prototype, np.ndarray):
-                    data = payload[4:].view(prototype.dtype)[:].copy()  # type: ignore[assignment]
-                elif prototype is not None:
-                    data = payload[4:].view(prototype.dtype)[0].copy()
+                if isinstance(prototype_object, np.ndarray):
+                    data = payload[4:].view(prototype_object.dtype)[:].copy()  # type: ignore[assignment]
+                elif prototype_object is not None:
+                    data = payload[4:].view(prototype_object.dtype)[0].copy()
 
             kernel_messages.append(
                 ExtractedMessageData(
                     timestamp=log_msg.timestamp_us,
                     command=command_code,
+                    event=kernel_event,
+                    prototype=prototype_code,
                     data=data,
                 )
             )
@@ -855,3 +876,97 @@ def _generate_job_ids(source_ids: list[str]) -> dict[str, str]:
         source_id: ProcessingTracker.generate_job_id(job_name=_EXTRACTION_JOB_NAME, specifier=source_id)
         for source_id in source_ids
     }
+
+
+def _write_module_feather(
+    module_data: ExtractedModuleData,
+    source_id: str,
+    output_directory: Path,
+) -> None:
+    """Serializes extracted module data to a feather (IPC) file.
+
+    Converts the event-grouped message data for a single hardware module into a columnar feather file with
+    timestamp, command, event, prototype, and binary payload columns. Writes the file to the output directory
+    using the ``controller_{source_id}_module_{type}_{id}.feather`` naming convention.
+
+    Args:
+        module_data: The extracted data for a single hardware module.
+        source_id: The source ID string identifying the originating log archive.
+        output_directory: The path to the directory where the feather file is written.
+    """
+    # Flattens the event-grouped structure into columnar arrays.
+    timestamps: list[int] = []
+    commands: list[int] = []
+    events: list[int] = []
+    prototypes: list[int | None] = []
+    data_bytes_column: list[bytes | None] = []
+
+    for messages in module_data.event_data.values():
+        for message in messages:
+            timestamps.append(int(message.timestamp))
+            commands.append(int(message.command))
+            events.append(int(message.event))
+            prototypes.append(int(message.prototype) if message.prototype is not None else None)
+            if message.data is not None:
+                data_bytes_column.append(np.asarray(message.data).tobytes())
+            else:
+                data_bytes_column.append(None)
+
+    dataframe = pl.DataFrame({
+        "timestamp_us": pl.Series(name="timestamp_us", values=timestamps, dtype=pl.UInt64),
+        "command": pl.Series(name="command", values=commands, dtype=pl.UInt8),
+        "event": pl.Series(name="event", values=events, dtype=pl.UInt8),
+        "prototype": pl.Series(name="prototype", values=prototypes, dtype=pl.UInt8),
+        "data": pl.Series(name="data", values=data_bytes_column, dtype=pl.Binary),
+    })
+
+    filename = (
+        f"{CONTROLLER_FEATHER_PREFIX}{source_id}"
+        f"{MODULE_FEATHER_INFIX}{module_data.module_type}_{module_data.module_id}"
+        f"{FEATHER_SUFFIX}"
+    )
+    dataframe.write_ipc(file=output_directory / filename)
+
+
+def _write_kernel_feather(
+    kernel_messages: tuple[ExtractedMessageData, ...],
+    source_id: str,
+    output_directory: Path,
+) -> None:
+    """Serializes extracted kernel messages to a feather (IPC) file.
+
+    Converts the kernel message tuple into a columnar feather file with timestamp, command, event, prototype,
+    and binary payload columns. Writes the file to the output directory using the
+    ``controller_{source_id}_kernel.feather`` naming convention.
+
+    Args:
+        kernel_messages: The extracted kernel messages in chronological order.
+        source_id: The source ID string identifying the originating log archive.
+        output_directory: The path to the directory where the feather file is written.
+    """
+    timestamps: list[int] = []
+    commands: list[int] = []
+    events: list[int] = []
+    prototypes: list[int | None] = []
+    data_bytes_column: list[bytes | None] = []
+
+    for message in kernel_messages:
+        timestamps.append(int(message.timestamp))
+        commands.append(int(message.command))
+        events.append(int(message.event))
+        prototypes.append(int(message.prototype) if message.prototype is not None else None)
+        if message.data is not None:
+            data_bytes_column.append(np.asarray(message.data).tobytes())
+        else:
+            data_bytes_column.append(None)
+
+    dataframe = pl.DataFrame({
+        "timestamp_us": pl.Series(name="timestamp_us", values=timestamps, dtype=pl.UInt64),
+        "command": pl.Series(name="command", values=commands, dtype=pl.UInt8),
+        "event": pl.Series(name="event", values=events, dtype=pl.UInt8),
+        "prototype": pl.Series(name="prototype", values=prototypes, dtype=pl.UInt8),
+        "data": pl.Series(name="data", values=data_bytes_column, dtype=pl.Binary),
+    })
+
+    filename = f"{CONTROLLER_FEATHER_PREFIX}{source_id}{KERNEL_FEATHER_INFIX}{FEATHER_SUFFIX}"
+    dataframe.write_ipc(file=output_directory / filename)

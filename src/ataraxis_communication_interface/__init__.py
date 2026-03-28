@@ -13,45 +13,57 @@ from .manifest import (
     MicroControllerSourceData,
     write_microcontroller_manifest,
 )
-from .mcp_server import (
-    run_server,
-    run_mcp_server,
-)
 from .communication import (
     ModuleData,
     ModuleState,
     MQTTCommunication,
-    check_mqtt_connectivity,
 )
 from .log_processing import (
+    FEATHER_SUFFIX,
+    KERNEL_FEATHER_INFIX,
+    MODULE_FEATHER_INFIX,
+    CONTROLLER_FEATHER_PREFIX,
     ExtractedModuleData,
     ExtractedMessageData,
     extract_log_data,
     run_log_processing_pipeline,
 )
+from .extraction_config import (
+    EXTRACTION_CONFIG_FILENAME,
+    ExtractionConfig,
+    KernelExtractionConfig,
+    ModuleExtractionConfig,
+    ControllerExtractionConfig,
+    create_extraction_config,
+)
 from .microcontroller_interface import (
     ModuleInterface,
     MicroControllerInterface,
-    print_microcontroller_ids,
 )
 
 __all__ = [
+    "CONTROLLER_FEATHER_PREFIX",
+    "EXTRACTION_CONFIG_FILENAME",
+    "FEATHER_SUFFIX",
+    "KERNEL_FEATHER_INFIX",
     "MICROCONTROLLER_MANIFEST_FILENAME",
+    "MODULE_FEATHER_INFIX",
+    "ControllerExtractionConfig",
     "ExtractedMessageData",
     "ExtractedModuleData",
+    "ExtractionConfig",
+    "KernelExtractionConfig",
     "MQTTCommunication",
     "MicroControllerInterface",
     "MicroControllerManifest",
     "MicroControllerSourceData",
     "ModuleData",
+    "ModuleExtractionConfig",
     "ModuleInterface",
     "ModuleSourceData",
     "ModuleState",
-    "check_mqtt_connectivity",
+    "create_extraction_config",
     "extract_log_data",
-    "print_microcontroller_ids",
     "run_log_processing_pipeline",
-    "run_mcp_server",
-    "run_server",
     "write_microcontroller_manifest",
 ]

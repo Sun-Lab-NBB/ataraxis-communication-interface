@@ -19,9 +19,11 @@ MICROCONTROLLER_MANIFEST_FILENAME: str = "microcontroller_manifest.yaml"
 class ModuleSourceData:
     """Stores the identification data for a single hardware module registered in a log manifest."""
 
-    type_id: int = 0
-    """The combined type+id code (type << 8 | id) used by the module when communicating with the PC."""
-    name: str = ""
+    module_type: int
+    """The type (family) code of the hardware module."""
+    module_id: int
+    """The unique identifier code of the hardware module."""
+    name: str
     """A colloquial human-readable name for the hardware module (e.g., 'encoder', 'lick_sensor')."""
 
 
@@ -33,12 +35,12 @@ class MicroControllerSourceData:
     output directory. The ``modules`` tuple enumerates all hardware module interfaces bound to this controller.
     """
 
-    id: int = 0
+    id: int
     """The controller_id used by the MicroControllerInterface instance when logging to the DataLogger."""
-    name: str = ""
+    name: str
     """A colloquial human-readable name for the microcontroller (e.g., 'actor_controller')."""
-    modules: tuple[ModuleSourceData, ...] = ()
-    """The hardware modules managed by this microcontroller, identified by their combined type+id codes and names."""
+    modules: tuple[ModuleSourceData, ...]
+    """The hardware modules managed by this microcontroller, identified by their type, id, and name."""
 
 
 @dataclass

@@ -678,7 +678,8 @@ class MicroControllerInterface:  # pragma: no cover
         # Writes the controller and its modules to the manifest file in the DataLogger output directory. This enables
         # downstream log processing tools to identify which archives were produced by this library.
         module_sources = tuple(
-            ModuleSourceData(type_id=int(module.type_id), name=module.name) for module in self._modules
+            ModuleSourceData(module_type=int(module.module_type), module_id=int(module.module_id), name=module.name)
+            for module in self._modules
         )
         write_microcontroller_manifest(
             log_directory=self._log_directory,
