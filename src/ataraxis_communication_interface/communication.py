@@ -322,6 +322,28 @@ class SerialProtocols(IntEnum):
         return np.uint8(self.value)
 
 
+_PROTOCOL_MODULE_DATA: np.uint8 = SerialProtocols.MODULE_DATA.as_uint8()
+"""Cached uint8 value for the MODULE_DATA protocol code, used in receive_message dispatch."""
+
+_PROTOCOL_KERNEL_DATA: np.uint8 = SerialProtocols.KERNEL_DATA.as_uint8()
+"""Cached uint8 value for the KERNEL_DATA protocol code, used in receive_message dispatch."""
+
+_PROTOCOL_MODULE_STATE: np.uint8 = SerialProtocols.MODULE_STATE.as_uint8()
+"""Cached uint8 value for the MODULE_STATE protocol code, used in receive_message dispatch."""
+
+_PROTOCOL_KERNEL_STATE: np.uint8 = SerialProtocols.KERNEL_STATE.as_uint8()
+"""Cached uint8 value for the KERNEL_STATE protocol code, used in receive_message dispatch."""
+
+_PROTOCOL_RECEPTION_CODE: np.uint8 = SerialProtocols.RECEPTION_CODE.as_uint8()
+"""Cached uint8 value for the RECEPTION_CODE protocol code, used in receive_message dispatch."""
+
+_PROTOCOL_CONTROLLER_IDENTIFICATION: np.uint8 = SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8()
+"""Cached uint8 value for the CONTROLLER_IDENTIFICATION protocol code, used in receive_message dispatch."""
+
+_PROTOCOL_MODULE_IDENTIFICATION: np.uint8 = SerialProtocols.MODULE_IDENTIFICATION.as_uint8()
+"""Cached uint8 value for the MODULE_IDENTIFICATION protocol code, used in receive_message dispatch."""
+
+
 class SerialPrototypes(IntEnum):
     """Defines the prototype codes used during data transmission to specify the layout of additional data objects
     transmitted by KernelData and ModuleData messages.
@@ -745,8 +767,8 @@ class SerialPrototypes(IntEnum):
         return _PROTOTYPE_FACTORIES[self.value]()
 
     # noinspection PyTypeHints
-    @classmethod
-    def get_prototype_for_code(cls, code: np.uint8) -> PrototypeType | None:
+    @staticmethod
+    def get_prototype_for_code(code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.
 
         Args:
@@ -756,11 +778,10 @@ class SerialPrototypes(IntEnum):
             The prototype object that is either a numpy scalar or shallow array type. If the input code is not one of
             the supported codes, returns None to indicate a matching error.
         """
-        try:
-            enum_value = cls(int(code))
-            return enum_value.get_prototype()
-        except ValueError:
+        factory = _PROTOTYPE_FACTORIES.get(int(code))
+        if factory is None:
             return None
+        return factory()
 
 
 @dataclass(frozen=True, slots=True)
@@ -943,11 +964,8 @@ class ModuleParameters:
 
     def __post_init__(self) -> None:
         """Serializes the instance's data."""
-        # Converts scalar parameter values to byte arrays (serializes them)
-        byte_parameters = [np.frombuffer(np.array([param]), dtype=np.uint8).copy() for param in self.parameter_data]
-
-        # Calculates the total size of serialized parameters in bytes and adds it to the parameters_size attribute
-        parameters_size = np.uint8(sum(param.size for param in byte_parameters))
+        # Calculates the total size of serialized parameters in bytes directly from item sizes
+        parameters_size = np.uint8(sum(param.itemsize for param in self.parameter_data))
         object.__setattr__(self, "parameters_size", parameters_size)
 
         # Pre-allocates the full array with the exact size (header and parameters object)
@@ -961,9 +979,10 @@ class ModuleParameters:
             self.return_code,
         ]
 
-        # Loops over and sequentially appends parameter data to the array.
+        # Loops over and sequentially serializes each parameter directly into the pre-allocated array.
         current_position = 4
-        for param_bytes in byte_parameters:
+        for param in self.parameter_data:
+            param_bytes = np.frombuffer(param.tobytes(), dtype=np.uint8)
             param_size = param_bytes.size
             packed_data[current_position : current_position + param_size] = param_bytes
             current_position += param_size
@@ -1328,7 +1347,7 @@ class SerialCommunication:
         protocol = self._transport_layer.read_data(data_object=np.uint8(0))
 
         # Uses the extracted protocol code to determine the type of the received message and process the received data.
-        if protocol == SerialProtocols.MODULE_DATA.as_uint8():
+        if protocol == _PROTOCOL_MODULE_DATA:
             # Parses the static header data from the extracted message
             self._module_data.message = self._transport_layer.read_data(data_object=self._module_data.message)
 
@@ -1351,7 +1370,7 @@ class SerialCommunication:
 
             return self._module_data
 
-        if protocol == SerialProtocols.KERNEL_DATA.as_uint8():
+        if protocol == _PROTOCOL_KERNEL_DATA:
             # Parses the static header data from the extracted message
             self._kernel_data.message = self._transport_layer.read_data(data_object=self._kernel_data.message)
 
@@ -1373,25 +1392,25 @@ class SerialCommunication:
 
             return self._kernel_data
 
-        if protocol == SerialProtocols.MODULE_STATE.as_uint8():
+        if protocol == _PROTOCOL_MODULE_STATE:
             self._module_state.message = self._transport_layer.read_data(data_object=self._module_state.message)
             return self._module_state
 
-        if protocol == SerialProtocols.KERNEL_STATE.as_uint8():
+        if protocol == _PROTOCOL_KERNEL_STATE:
             self._kernel_state.message = self._transport_layer.read_data(data_object=self._kernel_state.message)
             return self._kernel_state
 
-        if protocol == SerialProtocols.RECEPTION_CODE.as_uint8():
+        if protocol == _PROTOCOL_RECEPTION_CODE:
             self._reception_code.message = self._transport_layer.read_data(data_object=self._reception_code.message)
             return self._reception_code
 
-        if protocol == SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8():
+        if protocol == _PROTOCOL_CONTROLLER_IDENTIFICATION:
             self._controller_identification.message = self._transport_layer.read_data(
                 data_object=self._controller_identification.message
             )
             return self._controller_identification
 
-        if protocol == SerialProtocols.MODULE_IDENTIFICATION.as_uint8():
+        if protocol == _PROTOCOL_MODULE_IDENTIFICATION:
             # Since the entire message payload is the uint16 type-id value, read the value directly into the
             # module_type_id attribute.
             self._module_identification.module_type_id = self._transport_layer.read_data(
