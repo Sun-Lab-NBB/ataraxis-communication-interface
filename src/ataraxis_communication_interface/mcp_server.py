@@ -32,11 +32,16 @@ from ataraxis_data_structures import (
 )  # pragma: no cover
 from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
 
-from .manifest import (
+from .dataclasses import (
     MICROCONTROLLER_MANIFEST_FILENAME,
     ModuleSourceData,
     MicroControllerManifest,
+    ExtractionConfig,
+    KernelExtractionConfig,
+    ModuleExtractionConfig,
+    ControllerExtractionConfig,
     write_microcontroller_manifest,
+    create_extraction_config,
 )  # pragma: no cover
 from .communication import MQTTCommunication  # pragma: no cover
 from .log_processing import (
@@ -48,13 +53,6 @@ from .log_processing import (
     find_log_archive,
     resolve_recording_roots,
     initialize_processing_tracker,
-)  # pragma: no cover
-from .extraction_config import (
-    ExtractionConfig,
-    KernelExtractionConfig,
-    ModuleExtractionConfig,
-    ControllerExtractionConfig,
-    create_extraction_config,
 )  # pragma: no cover
 from .microcontroller_interface import _evaluate_port  # pragma: no cover
 

@@ -21,7 +21,7 @@ from ataraxis_base_utilities import console
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
 from ataraxis_transport_layer_pc import list_available_ports
 
-from .manifest import ModuleSourceData, write_microcontroller_manifest
+from .dataclasses import ModuleSourceData, write_microcontroller_manifest
 from .communication import (
     KernelData,
     ModuleData,

@@ -1,21 +1,66 @@
-"""Provides configuration data classes for the microcontroller log data extraction pipeline."""
+"""Provides data classes, configuration structures, and helper functions for managing microcontroller log manifests and
+extraction configurations.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import YamlConfig
-
-from .manifest import MICROCONTROLLER_MANIFEST_FILENAME, MicroControllerManifest
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-EXTRACTION_CONFIG_FILENAME: str = "extraction_config.yaml"
+MICROCONTROLLER_MANIFEST_FILENAME: str = "microcontroller_manifest.yaml"
+"""The filename used for microcontroller log manifest files within DataLogger output directories."""
+
+EXTRACTION_CONFIGURATION_FILENAME: str = "extraction_configuration.yaml"
 """The default filename used for extraction configuration files."""
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleSourceData:
+    """Stores the identification data for a single hardware module registered in a log manifest."""
+
+    module_type: int
+    """The type (family) code of the hardware module."""
+    module_id: int
+    """The unique identifier code of the hardware module."""
+    name: str
+    """A colloquial human-readable name for the hardware module (e.g., 'encoder', 'lick_sensor')."""
+
+
+@dataclass(frozen=True, slots=True)
+class MicroControllerSourceData:
+    """Stores the identification data for a single microcontroller registered in a log manifest.
+
+    Each entry corresponds to one MicroControllerInterface instance that logs communication data to the same DataLogger
+    output directory. The ``modules`` tuple enumerates all hardware module interfaces bound to this controller.
+    """
+
+    id: int
+    """The controller_id used by the MicroControllerInterface instance when logging to the DataLogger."""
+    name: str
+    """A colloquial human-readable name for the microcontroller (e.g., 'actor_controller')."""
+    modules: tuple[ModuleSourceData, ...]
+    """The hardware modules managed by this microcontroller, identified by their type, id, and name."""
+
+
+@dataclass
+class MicroControllerManifest(YamlConfig):
+    """Stores microcontroller source identification data for all MicroControllerInterface instances sharing a
+    DataLogger.
+
+    Each entry in the ``controllers`` list corresponds to one MicroControllerInterface instance that logs data to the
+    same DataLogger output directory. The manifest file enables downstream tools to identify which log archives were
+    produced by ataraxis-communication-interface and to associate controller IDs with human-readable names.
+    """
+
+    controllers: list[MicroControllerSourceData] = field(default_factory=list)
+    """The list of microcontroller source entries registered in this manifest."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +69,7 @@ class ModuleExtractionConfig:
 
     Notes:
         Event codes must be globally unique within each module -- the same event code must not be reused with
-        different semantics across commands. This invariant is enforced by the microcontroller firmware and enables
+        different semantics across commands. This invariance is enforced by the microcontroller firmware and enables
         extraction to filter by event code alone without requiring command code disambiguation.
     """
 
@@ -73,6 +118,39 @@ class ExtractionConfig(YamlConfig):
 
     controllers: list[ControllerExtractionConfig]
     """The list of controller extraction configurations."""
+
+
+def write_microcontroller_manifest(
+    log_directory: Path,
+    controller_id: int,
+    controller_name: str,
+    modules: tuple[ModuleSourceData, ...],
+) -> None:
+    """Writes or updates the microcontroller manifest file in the specified log directory.
+
+    If the manifest file already exists (another MicroControllerInterface instance has already registered), reads the
+    existing manifest, appends the new controller entry, and writes it back. Otherwise, creates a new manifest with a
+    single entry.
+
+    Args:
+        log_directory: The path to the DataLogger output directory where the manifest file is stored.
+        controller_id: The controller_id of the MicroControllerInterface instance to register.
+        controller_name: The colloquial human-readable name for the microcontroller.
+        modules: A tuple of ModuleSourceData instances describing the hardware modules managed by this controller.
+    """
+    manifest_path = log_directory / MICROCONTROLLER_MANIFEST_FILENAME
+
+    # Reads the existing manifest if one has already been written by another MicroControllerInterface instance sharing
+    # this DataLogger.
+    manifest = (
+        MicroControllerManifest.from_yaml(file_path=manifest_path)
+        if manifest_path.exists()
+        else MicroControllerManifest()
+    )
+
+    # Appends the new controller entry and writes the updated manifest back to disk.
+    manifest.controllers.append(MicroControllerSourceData(id=controller_id, name=controller_name, modules=modules))
+    manifest.to_yaml(file_path=manifest_path)
 
 
 def create_extraction_config(manifest_path: Path) -> ExtractionConfig:

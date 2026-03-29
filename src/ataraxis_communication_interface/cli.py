@@ -11,7 +11,7 @@ from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
 from .mcp_server import run_server as run_mcp  # pragma: no cover
 from .communication import MQTTCommunication  # pragma: no cover
 from .log_processing import run_log_processing_pipeline  # pragma: no cover
-from .extraction_config import ExtractionConfig, create_extraction_config  # pragma: no cover
+from .dataclasses import ExtractionConfig, create_extraction_config  # pragma: no cover
 from .microcontroller_interface import _evaluate_port  # pragma: no cover
 
 # Enables console output.

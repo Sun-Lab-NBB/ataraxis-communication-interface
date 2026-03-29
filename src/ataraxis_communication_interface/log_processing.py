@@ -14,9 +14,8 @@ import polars as pl
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
 from ataraxis_data_structures import LogArchiveReader, ProcessingTracker
 
-from .manifest import MICROCONTROLLER_MANIFEST_FILENAME, MicroControllerManifest
+from .dataclasses import MICROCONTROLLER_MANIFEST_FILENAME, MicroControllerManifest, ExtractionConfig, ControllerExtractionConfig
 from .communication import SerialProtocols, SerialPrototypes
-from .extraction_config import ExtractionConfig, ControllerExtractionConfig
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

@@ -6,12 +6,18 @@ API documentation: https://ataraxis-communication-interface-api.netlify.app/
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
-from .manifest import (
+from .dataclasses import (
     MICROCONTROLLER_MANIFEST_FILENAME,
+    EXTRACTION_CONFIGURATION_FILENAME,
     ModuleSourceData,
     MicroControllerManifest,
     MicroControllerSourceData,
+    ExtractionConfig,
+    KernelExtractionConfig,
+    ModuleExtractionConfig,
+    ControllerExtractionConfig,
     write_microcontroller_manifest,
+    create_extraction_config,
 )
 from .communication import (
     ModuleData,
@@ -28,14 +34,6 @@ from .log_processing import (
     extract_log_data,
     run_log_processing_pipeline,
 )
-from .extraction_config import (
-    EXTRACTION_CONFIG_FILENAME,
-    ExtractionConfig,
-    KernelExtractionConfig,
-    ModuleExtractionConfig,
-    ControllerExtractionConfig,
-    create_extraction_config,
-)
 from .microcontroller_interface import (
     ModuleInterface,
     MicroControllerInterface,
@@ -43,7 +41,7 @@ from .microcontroller_interface import (
 
 __all__ = [
     "CONTROLLER_FEATHER_PREFIX",
-    "EXTRACTION_CONFIG_FILENAME",
+    "EXTRACTION_CONFIGURATION_FILENAME",
     "FEATHER_SUFFIX",
     "KERNEL_FEATHER_INFIX",
     "MICROCONTROLLER_MANIFEST_FILENAME",
