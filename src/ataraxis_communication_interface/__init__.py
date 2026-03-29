@@ -7,17 +7,17 @@ Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
 from .dataclasses import (
-    MICROCONTROLLER_MANIFEST_FILENAME,
     EXTRACTION_CONFIGURATION_FILENAME,
-    ModuleSourceData,
-    MicroControllerManifest,
-    MicroControllerSourceData,
+    MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig,
+    ModuleSourceData,
     KernelExtractionConfig,
     ModuleExtractionConfig,
+    MicroControllerManifest,
+    MicroControllerSourceData,
     ControllerExtractionConfig,
-    write_microcontroller_manifest,
     create_extraction_config,
+    write_microcontroller_manifest,
 )
 from .communication import (
     ModuleData,

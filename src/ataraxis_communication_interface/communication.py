@@ -12,7 +12,7 @@ from dataclasses import field, dataclass
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, get_timestamp
 import paho.mqtt.client as mqtt
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import console
 from ataraxis_data_structures import LogPackage
 from ataraxis_transport_layer_pc import TransportLayer
 
@@ -1627,32 +1627,3 @@ class MQTTCommunication:
 
         # Sets the connection flag.
         self._connected = False
-
-
-def check_mqtt_connectivity(host: str = "127.0.0.1", port: int = 1883) -> None:
-    """Checks whether an MQTT broker is reachable at the specified host and port.
-
-    This function attempts to connect to the MQTT broker and reports the result. It is intended to be used as a CLI
-    command to verify MQTT broker availability before running code that depends on MQTT communication.
-
-    Args:
-        host: The IP address or hostname of the MQTT broker.
-        port: The socket port used by the MQTT broker.
-    """
-    with console.temporarily_enabled():
-        console.echo(message=f"Checking MQTT broker connectivity at {host}:{port}...")
-
-        # Creates a temporary MQTTCommunication instance to test connectivity.
-        mqtt_client = MQTTCommunication(ip=host, port=port)
-
-        # Attempts to connect to the MQTT broker.
-        try:
-            mqtt_client.connect()
-            console.echo(message=f"MQTT broker at {host}:{port} is reachable.")
-            mqtt_client.disconnect()
-        except ConnectionError:
-            console.echo(
-                message=f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
-                f"host/port are correct.",
-                level=LogLevel.ERROR,
-            )

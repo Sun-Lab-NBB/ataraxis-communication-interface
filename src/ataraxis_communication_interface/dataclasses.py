@@ -44,9 +44,7 @@ def write_microcontroller_manifest(
     # Reads the existing manifest if one has already been written by another MicroControllerInterface instance sharing
     # this DataLogger.
     manifest = (
-        MicroControllerManifest.load(file_path=manifest_path)
-        if manifest_path.exists()
-        else MicroControllerManifest()
+        MicroControllerManifest.load(file_path=manifest_path) if manifest_path.exists() else MicroControllerManifest()
     )
 
     # Appends the new controller entry and writes the updated manifest back to disk.

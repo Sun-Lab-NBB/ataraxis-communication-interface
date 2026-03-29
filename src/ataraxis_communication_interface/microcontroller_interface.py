@@ -13,13 +13,11 @@ from multiprocessing import (
     Manager,
     Process,
 )
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
-from ataraxis_transport_layer_pc import list_available_ports
 
 from .dataclasses import ModuleSourceData, write_microcontroller_manifest
 from .communication import (
@@ -43,18 +41,25 @@ if TYPE_CHECKING:
     from pathlib import Path
     from multiprocessing.managers import SyncManager
 
-    from serial.tools.list_ports_common import ListPortInfo
-
 # Defines static constants used by this module.
 _MAXIMUM_BYTE_VALUE = 255
 _ZERO_BYTE = np.uint8(0)
-_ZERO_BOOL = np.bool_(False)  # noqa: FBT003
 _ZERO_LONG = np.uint32(0)
 
 
 class _RuntimeParameters(IntEnum):
     """Defines hardcoded runtime parameter constants used throughout this module."""
 
+    RESET_COMMAND = 2
+    """The Kernel command code that resets the microcontroller to the default state."""
+    IDENTIFY_CONTROLLER_COMMAND = 3
+    """The Kernel command code that requests the microcontroller to return its ID."""
+    IDENTIFY_MODULES_COMMAND = 4
+    """The Kernel command code that requests the microcontroller to return the IDs of all managed modules."""
+    KEEPALIVE_COMMAND = 5
+    """The Kernel command code that sends a keepalive message to the microcontroller."""
+    DEFAULT_RETURN_CODE = 0
+    """The default return code used by Kernel command messages."""
     KEEPALIVE_RETURN_CODE = 255
     """The Return code used in keepalive command messages."""
     SERVICE_CODE_THRESHOLD = 50
@@ -378,7 +383,7 @@ class ModuleInterface(ABC):  # pragma: no cover
             parameter_data=parameter_data,
         )
 
-    def send_command(self, command: np.uint8, noblock: np.bool, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
+    def send_command(self, command: np.uint8, noblock: np.bool_, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
         """Packages the input command data into the appropriate message structure and sends it to the managed hardware
         module.
 
@@ -411,7 +416,7 @@ class ModuleInterface(ABC):  # pragma: no cover
 
     # noinspection PyTypeHints
     def send_parameters(
-        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any] | np.bool | np.floating[Any], ...]
+        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any] | np.bool_ | np.floating[Any], ...]
     ) -> None:
         """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
         hardware module.
@@ -450,10 +455,8 @@ class ModuleInterface(ABC):  # pragma: no cover
             )
             console.error(message=message, error=RuntimeError)
 
-        # Packages the data into a dequeue command message and submits it for execution.
-        self._input_queue.put(
-            DequeueModuleCommand(module_type=self._module_type, module_id=self._module_id, return_code=np.uint8(0))
-        )
+        # Submits the pre-created dequeue command for execution.
+        self._input_queue.put(self._dequeue_command)
 
     def set_input_queue(self, input_queue: MPQueue) -> None:  # type: ignore[type-arg]
         """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object.
@@ -561,8 +564,8 @@ class MicroControllerInterface:  # pragma: no cover
     # Pre-packages user-addressable Kernel commands into attributes. Since Kernel commands are known and fixed at class
     # initialization, they only need to be defined once.
     _reset_command = KernelCommand(
-        command=np.uint8(2),
-        return_code=np.uint8(0),
+        command=np.uint8(_RuntimeParameters.RESET_COMMAND.value),
+        return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
     )
 
     def __init__(
@@ -593,14 +596,15 @@ class MicroControllerInterface:  # pragma: no cover
         if not isinstance(module_interfaces, tuple) or not module_interfaces:
             message = (
                 f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
-                f"{controller_id}. Expected a non-empty tuple of ModuleInterface instances for 'modules' argument, but "
-                f"encountered {module_interfaces} of type {type(module_interfaces).__name__}."
+                f"{controller_id}. Expected a non-empty tuple of ModuleInterface instances for "
+                f"'module_interfaces' argument, but encountered {module_interfaces} of type "
+                f"{type(module_interfaces).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not all(isinstance(module, ModuleInterface) for module in module_interfaces):
             message = (
                 f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
-                f"{controller_id}. All items in 'modules' tuple must be ModuleInterface instances."
+                f"{controller_id}. All items in 'module_interfaces' tuple must be ModuleInterface instances."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(data_logger, DataLogger):
@@ -664,7 +668,7 @@ class MicroControllerInterface:  # pragma: no cover
                     f"Unable to initialize the MicroControllerInterface instance for the microcontroller with "
                     f"id {controller_id}. Encountered two module interface instances with the same type-code "
                     f"({module.module_type}) and id-code ({module.module_id}), which is not allowed. Each type and id "
-                    f"combination can only used by a single module interface instance."
+                    f"combination can only be used by a single module interface instance."
                 )
                 console.error(message=message, error=ValueError)
 
@@ -906,12 +910,12 @@ class MicroControllerInterface:  # pragma: no cover
         # Constructs Kernel-addressed commands used to verify that the interface and the
         # microcontroller have matching configurations.
         identify_controller_command = KernelCommand(
-            command=np.uint8(3),
-            return_code=np.uint8(0),
+            command=np.uint8(_RuntimeParameters.IDENTIFY_CONTROLLER_COMMAND.value),
+            return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
         )
         identify_modules_command = KernelCommand(
-            command=np.uint8(4),
-            return_code=np.uint8(0),
+            command=np.uint8(_RuntimeParameters.IDENTIFY_MODULES_COMMAND.value),
+            return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
         )
 
         # Blocks until the microcontroller responds with its identification code.
@@ -939,7 +943,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"microcontroller did not respond to the identification request after "
                 f"{_RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value} attempts."
             )
-            console.error(message=message, error=TypeError)
+            console.error(message=message, error=RuntimeError)
 
         # If a response is received, but the ID contained in the received message does not match the expected ID,
         # raises an error
@@ -1026,7 +1030,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kReceptionError
-        if in_data.event == _KernelStatusCodes.RECEPTION_ERROR and isinstance(in_data, KernelData):
+        elif in_data.event == _KernelStatusCodes.RECEPTION_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1039,7 +1043,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kTransmissionError
-        if in_data.event == _KernelStatusCodes.TRANSMISSION_ERROR and isinstance(in_data, KernelData):
+        elif in_data.event == _KernelStatusCodes.TRANSMISSION_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1051,7 +1055,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kInvalidMessageProtocol
-        if in_data.event == _KernelStatusCodes.INVALID_MESSAGE_PROTOCOL and isinstance(in_data, KernelData):
+        elif in_data.event == _KernelStatusCodes.INVALID_MESSAGE_PROTOCOL and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1061,7 +1065,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kModuleParametersError
-        if in_data.event == _KernelStatusCodes.MODULE_PARAMETERS_ERROR and isinstance(in_data, KernelData):
+        elif in_data.event == _KernelStatusCodes.MODULE_PARAMETERS_ERROR and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1072,7 +1076,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kCommandNotRecognized
-        if in_data.event == _KernelStatusCodes.COMMAND_NOT_RECOGNIZED:
+        elif in_data.event == _KernelStatusCodes.COMMAND_NOT_RECOGNIZED:
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1082,7 +1086,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kTargetModuleNotFound
-        if in_data.event == _KernelStatusCodes.TARGET_MODULE_NOT_FOUND and isinstance(in_data, KernelData):
+        elif in_data.event == _KernelStatusCodes.TARGET_MODULE_NOT_FOUND and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1094,7 +1098,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kKeepaliveTimeout
-        if in_data.event == _KernelStatusCodes.KEEPALIVE_TIMEOUT and isinstance(in_data, KernelData):
+        elif in_data.event == _KernelStatusCodes.KEEPALIVE_TIMEOUT and isinstance(in_data, KernelData):
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{in_data.command}. Error code: {in_data.event}. "
@@ -1128,7 +1132,7 @@ class MicroControllerInterface:  # pragma: no cover
             console.error(message=message, error=RuntimeError)
 
         # kCommandNotRecognized
-        if in_data.event == _ModuleStatusCodes.COMMAND_NOT_RECOGNIZED and isinstance(in_data, ModuleData):
+        elif in_data.event == _ModuleStatusCodes.COMMAND_NOT_RECOGNIZED and isinstance(in_data, ModuleData):
             message = (
                 f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {in_data.command}. "
@@ -1171,7 +1175,7 @@ class MicroControllerInterface:  # pragma: no cover
         # Constructs Kernel-addressed command used to verify that the microcontroller-PC communication is active during
         # runtime. This is used to detect communication issues and problems with the microcontroller during runtime.
         keepalive_command = KernelCommand(
-            command=np.uint8(5),
+            command=np.uint8(_RuntimeParameters.KEEPALIVE_COMMAND.value),
             return_code=np.uint8(_RuntimeParameters.KEEPALIVE_RETURN_CODE.value),
         )
 
@@ -1193,7 +1197,7 @@ class MicroControllerInterface:  # pragma: no cover
             # If the interface is configured to process incoming data or raise runtime errors, maps its type+id combined
             # code to the interface instance. This is used to quickly find the module interface instance addressed by
             # incoming data, so that it can handle the data or error message.
-            if len(module.data_codes) != 0 or len(module.error_codes) != 0:
+            if module.data_codes or module.error_codes:
                 processing_map[module.type_id] = module
 
         # Initializes the serial communication class and connects to the target microcontroller.
@@ -1271,60 +1275,55 @@ class MicroControllerInterface:  # pragma: no cover
                 # Converts valid KernelData and State messages into errors. This is used to raise runtime errors when
                 # an appropriate error message is transmitted from the microcontroller. This clause does not evaluate
                 # non-error codes.
-                if isinstance(in_data, (KernelData, KernelState)):
+                elif isinstance(in_data, (KernelData, KernelState)):
                     MicroControllerInterface._parse_kernel_data(in_data=in_data, controller_id=controller_id)
 
-                # Event codes from 0 through 50 are reserved for system use. These codes are handled by this clause,
-                # which translates error messages sent by the base Module class into error codes, similar as to
-                # how it is done by the Kernel.
-                if (
-                    isinstance(in_data, (ModuleState, ModuleData))
-                    and in_data.event <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
-                ):
-                    MicroControllerInterface._parse_service_module_data(in_data=in_data, controller_id=controller_id)
+                # Handles Module-addressed messages. Event codes from 0 through 50 are reserved for system use and are
+                # translated into error codes similar to how it is done by the Kernel. Event codes 51 or above are used
+                # by module developers to communicate states and errors.
+                elif isinstance(in_data, (ModuleState, ModuleData)):
+                    if in_data.event <= _RuntimeParameters.SERVICE_CODE_THRESHOLD.value:
+                        MicroControllerInterface._parse_service_module_data(
+                            in_data=in_data, controller_id=controller_id
+                        )
+                    else:
+                        # Computes the combined type and id code for the incoming data. This is used to find the
+                        # specific ModuleInterface to which the message is addressed and, if necessary, invoke
+                        # interface-specific additional processing methods.
+                        target_type_id: np.uint16 = np.uint16(
+                            (in_data.module_type.astype(np.uint16) << 8) | in_data.module_id.astype(np.uint16)
+                        )
 
-                # Event codes 51 or above are used by the module developers to communicate states and errors.
-                if (
-                    isinstance(in_data, (ModuleState, ModuleData))
-                    and in_data.event > _RuntimeParameters.SERVICE_CODE_THRESHOLD.value
-                ):
-                    # Computes the combined type and id code for the incoming data. This is used to find the specific
-                    # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
-                    # additional processing methods.
-                    target_type_id: np.uint16 = np.uint16(
-                        (in_data.module_type.astype(np.uint16) << 8) | in_data.module_id.astype(np.uint16)
-                    )
+                        # If the interface addressed by the message is not configured to raise errors or process
+                        # the data, ends processing
+                        if target_type_id not in processing_map:
+                            continue
 
-                    # If the interface addressed by the message is not configured to raise errors or process the data,
-                    # ends processing
-                    if target_type_id not in processing_map:
-                        continue
+                        # Otherwise, gets the reference to the targeted interface.
+                        module = processing_map[target_type_id]
 
-                    # Otherwise, gets the reference to the targeted interface.
-                    module = processing_map[target_type_id]
+                        # If the incoming message contains an event code matching one of the interface's
+                        # error-codes, raises an error message.
+                        if in_data.event in module.error_codes:
+                            if isinstance(in_data, ModuleData):
+                                message = (
+                                    f"The module with type {in_data.module_type} and id {in_data.module_id} "
+                                    f"managed by the {controller_id} encountered an error when executing "
+                                    f"command {in_data.command}. Error code: {in_data.event}. The error "
+                                    f"message also contained the following data object: {in_data.data_object}."
+                                )
+                            else:
+                                message = (
+                                    f"The module with type {in_data.module_type} and id {in_data.module_id} "
+                                    f"managed by the {controller_id} encountered an error when executing "
+                                    f"command {in_data.command}. Error code: {in_data.event}."
+                                )
+                            console.error(message=message, error=RuntimeError)
 
-                    # If the incoming message contains an event code matching one of the interface's error-codes,
-                    # raises an error message.
-                    if in_data.event in module.error_codes:
-                        if isinstance(in_data, ModuleData):
-                            message = (
-                                f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
-                                f"{controller_id} encountered an error when executing command {in_data.command}. "
-                                f"Error code: {in_data.event}. The error message also contained the following data "
-                                f"object: {in_data.data_object}."
-                            )
-                        else:
-                            message = (
-                                f"The module with type {in_data.module_type} and id {in_data.module_id} managed by the "
-                                f"{controller_id} encountered an error when executing command {in_data.command}. "
-                                f"Error code: {in_data.event}."
-                            )
-                        console.error(message=message, error=RuntimeError)
-
-                    # Otherwise, if the incoming message is not an error and contains an event-code matching one of the
-                    # interface's data-codes, calls the data processing method.
-                    if in_data.event in module.data_codes:
-                        module.process_received_data(message=in_data)
+                        # Otherwise, if the incoming message is not an error and contains an event-code matching
+                        # one of the interface's data-codes, calls the data processing method.
+                        if in_data.event in module.data_codes:
+                            module.process_received_data(message=in_data)
 
         # If an unknown and unhandled exception occurs, prints and flushes the exception message to the terminal
         # before re-raising the exception to terminate the process.
@@ -1373,8 +1372,8 @@ def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
         # Requests the microcontroller to identify itself. A valid microcontroller would respond with its ID. Any other
         # asset would either ignore the command or err.
         identify_controller_command = KernelCommand(
-            command=np.uint8(3),
-            return_code=np.uint8(0),
+            command=np.uint8(_RuntimeParameters.IDENTIFY_CONTROLLER_COMMAND.value),
+            return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
         )
 
         # Blocks until the microcontroller responds with its identification code.
@@ -1409,69 +1408,3 @@ def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
         error_type = type(e).__name__
         error_msg = str(e) or error_type
         return -1, f"{error_type}: {error_msg}"
-
-
-def print_microcontroller_ids(baudrate: int = 115200) -> None:
-    """Prints all available serial ports and identifies which ones are connected to Arduino or Teensy microcontrollers
-    running the ataraxis-micro-controller library.
-
-    Uses parallel processing to simultaneously query all ports for microcontroller identification.
-
-    Args:
-        baudrate: The baudrate to use for communication during identification. Note, the same baudrate value is used to
-            evaluate all available microcontrollers. The baudrate is only used by the microcontrollers that communicate
-            via the UART serial interface and is ignored by microcontrollers that use the USB interface.
-    """
-    with console.temporarily_enabled():
-        # Gets all available serial ports
-        available_ports = list_available_ports()
-
-        # Filters out invalid ports (PID == None) - primarily for Linux systems
-        valid_ports = [port for port in available_ports if port.pid is not None]
-
-        # If there are no valid candidates to evaluate, aborts the runtime early
-        if not valid_ports:
-            console.echo("No valid serial ports detected.")
-            return
-
-        console.echo(f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
-
-        # Prepares the parallel evaluation tasks
-        port_names = [port.device for port in valid_ports]
-
-        # Uses ProcessPoolExecutor to evaluate all ports in parallel
-        results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
-
-        with ProcessPoolExecutor() as executor:
-            # Submits all port evaluation tasks
-            future_to_port = {
-                executor.submit(_evaluate_port, port_name, baudrate): (port_name, port_info)
-                for port_name, port_info in zip(port_names, valid_ports, strict=True)
-            }
-
-            # Collects results as they complete
-            for future in as_completed(future_to_port):
-                port_name, port_info = future_to_port[future]
-                controller_id, error_msg = future.result()
-                results[port_name] = (port_info, controller_id, error_msg)
-
-        # Prints the results in the original port order (matching print_available_ports style)
-        count = 0
-        for port_name in port_names:
-            if port_name in results:
-                port_info, controller_id, error_msg = results[port_name]
-                count += 1
-
-                if error_msg is not None:
-                    # Port encountered a connection error
-                    console.echo(
-                        f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_msg}]"
-                    )
-                elif controller_id == -1:
-                    # Port did not respond or is not a valid microcontroller
-                    console.echo(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
-                else:
-                    # Port is connected to a valid microcontroller with identified ID
-                    console.echo(
-                        f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
-                    )

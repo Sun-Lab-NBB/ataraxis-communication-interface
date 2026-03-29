@@ -34,14 +34,14 @@ from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
 
 from .dataclasses import (
     MICROCONTROLLER_MANIFEST_FILENAME,
-    ModuleSourceData,
-    MicroControllerManifest,
     ExtractionConfig,
+    ModuleSourceData,
     KernelExtractionConfig,
     ModuleExtractionConfig,
+    MicroControllerManifest,
     ControllerExtractionConfig,
-    write_microcontroller_manifest,
     create_extraction_config,
+    write_microcontroller_manifest,
 )  # pragma: no cover
 from .communication import MQTTCommunication  # pragma: no cover
 from .log_processing import (

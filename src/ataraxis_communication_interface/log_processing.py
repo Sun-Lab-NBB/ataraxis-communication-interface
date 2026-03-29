@@ -14,7 +14,12 @@ import polars as pl
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
 from ataraxis_data_structures import LogArchiveReader, ProcessingTracker
 
-from .dataclasses import MICROCONTROLLER_MANIFEST_FILENAME, MicroControllerManifest, ExtractionConfig, ControllerExtractionConfig
+from .dataclasses import (
+    MICROCONTROLLER_MANIFEST_FILENAME,
+    ExtractionConfig,
+    MicroControllerManifest,
+    ControllerExtractionConfig,
+)
 from .communication import SerialProtocols, SerialPrototypes
 
 if TYPE_CHECKING:
@@ -508,35 +513,32 @@ def extract_log_data(
     # Uses LogArchiveReader to create batches optimized for parallel processing. The batch multiplier of 4
     # creates many smaller batches for better load distribution across workers.
     batch_keys = reader.get_batches(workers=n_workers, batch_multiplier=4)
-    batch_arguments = [
-        {
-            "log_path": log_path,
-            "file_names": keys,
-            "onset_us": onset_us,
-            "module_type_id": module_type_id,
-            "module_event_codes": module_event_codes,
-            "kernel_event_codes": kernel_event_codes,
-        }
-        for keys in batch_keys
-    ]
 
     # Uses the provided executor or creates a managed one for this invocation.
     managed = executor is None
     active_executor = executor if executor is not None else ProcessPoolExecutor(max_workers=n_workers)
 
     try:
-        # Submits all tasks.
+        # Submits all tasks with explicit typed arguments to avoid dict unpacking type inference issues.
         future_to_index = {
-            active_executor.submit(_process_message_batch, **batch_kwargs): index
-            for index, batch_kwargs in enumerate(batch_arguments)
+            active_executor.submit(
+                _process_message_batch,
+                log_path=log_path,
+                file_names=keys,
+                onset_us=onset_us,
+                module_type_id=module_type_id,
+                module_event_codes=module_event_codes,
+                kernel_event_codes=kernel_event_codes,
+            ): index
+            for index, keys in enumerate(batch_keys)
         }
 
         # Collects results while maintaining message order.
-        results: list[_BatchResult | None] = [None] * len(batch_arguments)
+        results: list[_BatchResult | None] = [None] * len(batch_keys)
 
         if display_progress:
             with console.progress(
-                total=len(batch_arguments), description="Extracting microcontroller log data", unit="batch"
+                total=len(batch_keys), description="Extracting microcontroller log data", unit="batch"
             ) as pbar:
                 for future in as_completed(future_to_index):
                     results[future_to_index[future]] = future.result()
@@ -578,10 +580,10 @@ def extract_log_data(
         ExtractedModuleData(
             module_type=module[0],
             module_id=module[1],
-            event_data={event: tuple(msg_list) for event, msg_list in event_dict.items()},
+            event_data={event: tuple(msg_list) for event, msg_list in combined_module_data[module].items()},
         )
         for module in (module_type_id or ())
-        if (event_dict := combined_module_data.get(module)) and event_dict
+        if module in combined_module_data
     )
 
     return module_results, tuple(all_kernel_messages)
@@ -722,7 +724,7 @@ def _process_message_batch(
     extract_kernel = kernel_event_codes is not None
 
     module_data: dict[tuple[int, int], dict[np.uint8, list[ExtractedMessageData]]] = (
-        {module: {} for module in module_type_id} if extract_modules else {}
+        {module: {} for module in (module_type_id or ())} if extract_modules else {}
     )
     kernel_messages: list[ExtractedMessageData] = []
 

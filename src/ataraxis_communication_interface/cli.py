@@ -1,17 +1,20 @@
 """Provides the Command Line Interface (CLI) installed into the Python environment together with the library."""
 
-from typing import Literal  # pragma: no cover
+from typing import TYPE_CHECKING, Literal  # pragma: no cover
 from pathlib import Path  # pragma: no cover
 from concurrent.futures import ProcessPoolExecutor, as_completed  # pragma: no cover
+
+if TYPE_CHECKING:  # pragma: no cover
+    from serial.tools.list_ports_common import ListPortInfo  # pragma: no cover
 
 import click  # pragma: no cover
 from ataraxis_base_utilities import LogLevel, console  # pragma: no cover
 from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
 
 from .mcp_server import run_server as run_mcp  # pragma: no cover
+from .dataclasses import ExtractionConfig, create_extraction_config  # pragma: no cover
 from .communication import MQTTCommunication  # pragma: no cover
 from .log_processing import run_log_processing_pipeline  # pragma: no cover
-from .dataclasses import ExtractionConfig, create_extraction_config  # pragma: no cover
 from .microcontroller_interface import _evaluate_port  # pragma: no cover
 
 # Enables console output.
@@ -61,7 +64,7 @@ def identify(baudrate: int) -> None:  # pragma: no cover
     port_names = [port.device for port in valid_ports]
 
     # Uses ProcessPoolExecutor to evaluate all ports in parallel.
-    results: dict[str, tuple[object, int, str | None]] = {}
+    results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
     with ProcessPoolExecutor() as executor:
         # Submits all port evaluation tasks.
@@ -195,7 +198,7 @@ def config_show(config_path: Path) -> None:  # pragma: no cover
         console.echo(message=f"  Controller ID: {controller.controller_id}")
         for module in controller.modules:
             console.echo(
-                message=(f"    Module ({module.module_type}, {module.module_id}): events={list(module.event_codes)}")
+                message=f"    Module ({module.module_type}, {module.module_id}): events={list(module.event_codes)}"
             )
         if controller.kernel is not None:
             console.echo(message=f"    Kernel: events={list(controller.kernel.event_codes)}")
