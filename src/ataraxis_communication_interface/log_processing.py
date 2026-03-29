@@ -147,7 +147,7 @@ def run_log_processing_pipeline(
         if not config.exists() or not config.is_file():
             message = f"Unable to load extraction config from '{config}'. The path does not exist or is not a file."
             console.error(message=message, error=FileNotFoundError)
-        resolved_config = ExtractionConfig.from_yaml(file_path=config)
+        resolved_config = ExtractionConfig.load(file_path=config)
     else:
         resolved_config = config
 
@@ -168,7 +168,7 @@ def run_log_processing_pipeline(
         console.error(message=message, error=FileNotFoundError)
 
     manifest_path = candidates[0]
-    manifest = MicroControllerManifest.from_yaml(file_path=manifest_path)
+    manifest = MicroControllerManifest.load(file_path=manifest_path)
     manifest_ids = {str(controller.id) for controller in manifest.controllers} | {
         controller.name for controller in manifest.controllers
     }

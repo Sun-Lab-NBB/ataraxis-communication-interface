@@ -334,7 +334,7 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:  #
         return {"error": f"Path is not a file: {manifest_path}"}
 
     try:
-        manifest = MicroControllerManifest.from_yaml(file_path=path)
+        manifest = MicroControllerManifest.load(file_path=path)
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to read manifest: {error}"}
 
@@ -453,7 +453,7 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:  
             log_dir = manifest_path.parent
 
             try:
-                manifest = MicroControllerManifest.from_yaml(file_path=manifest_path)
+                manifest = MicroControllerManifest.load(file_path=manifest_path)
             except Exception:  # noqa: BLE001, S112
                 continue
 
@@ -547,7 +547,7 @@ def create_extraction_config_tool(manifest_path: str, output_path: str) -> dict[
     output = Path(output_path)
 
     try:
-        config.to_yaml(file_path=output)
+        config.save(file_path=output)
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to write extraction config: {error}"}
 
@@ -583,7 +583,7 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:  # pragma: 
         return {"error": f"Path is not a file: {config_path}"}
 
     try:
-        config = ExtractionConfig.from_yaml(file_path=path)
+        config = ExtractionConfig.load(file_path=path)
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to read extraction config: {error}"}
 
@@ -674,7 +674,7 @@ def write_extraction_config_tool(  # pragma: no cover
     output = Path(config_path)
 
     try:
-        config.to_yaml(file_path=output)
+        config.save(file_path=output)
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to write extraction config: {error}"}
 
@@ -1564,7 +1564,7 @@ def _group_worker(jobs: list[_PendingJob], workers: int, state: _JobExecutionSta
 
             # Loads the extraction config and finds the matching controller configuration.
             try:
-                config = ExtractionConfig.from_yaml(file_path=job.config_path)
+                config = ExtractionConfig.load(file_path=job.config_path)
                 controller_configs = {str(c.controller_id): c for c in config.controllers}
                 controller_config = controller_configs.get(job.source_id)
             except Exception:  # noqa: BLE001

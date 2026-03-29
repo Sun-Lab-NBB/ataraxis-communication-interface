@@ -167,7 +167,7 @@ def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no
     specify the event codes for each module and kernel entry.
     """
     config = create_extraction_config(manifest_path=manifest_path)
-    config.to_yaml(file_path=output_path)
+    config.save(file_path=output_path)
     console.echo(
         message=f"Extraction config written to {output_path}. Fill in event_codes before processing.",
         level=LogLevel.SUCCESS,
@@ -188,7 +188,7 @@ def config_show(config_path: Path) -> None:  # pragma: no cover
     Reads the extraction_config.yaml and prints each controller's modules, event codes, command codes,
     and kernel settings.
     """
-    config = ExtractionConfig.from_yaml(file_path=config_path)
+    config = ExtractionConfig.load(file_path=config_path)
 
     console.echo(message=f"Extraction config: {config_path}", level=LogLevel.INFO)
     for controller in config.controllers:
