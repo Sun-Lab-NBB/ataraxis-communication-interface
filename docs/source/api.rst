@@ -1,5 +1,5 @@
 .. This file provides the instructions for how to display the API documentation generated using sphinx autodoc
-   extension. Use it to declare Python documentation sub-directories via appropriate modules (autodoc, etc.).
+   extension. Use it to declare Python documentation sub-directories via appropriate modules (automodule, etc.).
 
 Communication
 =============
@@ -15,9 +15,22 @@ MicroController Interface
    :undoc-members:
    :show-inheritance:
 
-MCP Server
-==========
-.. automodule:: ataraxis_communication_interface.mcp_server
+Dataclasses
+===========
+.. automodule:: ataraxis_communication_interface.dataclasses
    :members:
    :undoc-members:
    :show-inheritance:
+
+Log Processing
+==============
+.. automodule:: ataraxis_communication_interface.log_processing
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+CLI
+===
+.. click:: ataraxis_communication_interface.cli:axci_cli
+   :prog: axci
+   :nested: full
