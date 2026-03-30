@@ -22,7 +22,7 @@ from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_base_utilities import console, LogLevel
 import tempfile
 
-from ataraxis_communication_interface import MicroControllerInterface, extract_log_data
+from ataraxis_communication_interface import MicroControllerInterface, run_log_processing_pipeline
 
 # Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
 if __name__ == "__main__":
@@ -154,26 +154,16 @@ if __name__ == "__main__":
     console.echo("Assembling the message log archive...")
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
-    # To process the data logged during runtime, it must be extracted from the archive created above. This can be
-    # done with the help of the `extract_log_data` function, which extracts both module and kernel data in a single
-    # pass through the archive. The caller must specify which event codes to extract.
-    console.echo("Extracting the logged message data...")
-    log_data, _kernel_data = extract_log_data(
-        log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
-        module_type_id=(
-            (int(interface_1.module_type), int(interface_1.module_id)),
-            (int(interface_2.module_type), int(interface_2.module_id)),
-        ),
-        module_event_codes=frozenset({2, 52, 53, 54}),
+    # To process the data logged during runtime, use the run_log_processing_pipeline function with an extraction
+    # configuration file. The pipeline reads the extraction config to determine which controllers, modules, and event
+    # codes to extract, validates them against the microcontroller manifest, and writes the results to feather files.
+    # Use 'axci config create' to generate an extraction config from the manifest, then fill in event codes.
+    console.echo("Processing the logged message data...")
+    config_path = data_logger.output_directory / "extraction_config.yaml"
+    output_path = Path(tempfile.mkdtemp())
+    run_log_processing_pipeline(
+        log_directory=data_logger.output_directory,
+        output_directory=output_path,
+        config=config_path,
     )
-    # Uses pulse off and echo event codes to determine the total number of TestModule 1 pulses and TestModule 2 echo
-    # values encountered during runtime according to the processed log data.
-    module_1_pulses = len(log_data[0].event_data[np.uint8(53)])
-    module_2_echo_values = len(log_data[1].event_data[np.uint8(54)])
-    console.echo(
-        message=(
-            f"According to the extracted data, during runtime the TestModule 1 emitted a total of {module_1_pulses} "
-            f"pulses and the TestModule 2 sent {module_2_echo_values} echo values."
-        ),
-        level=LogLevel.SUCCESS,
-    )
+    console.echo(message=f"Processing complete. Feather output written to: {output_path}", level=LogLevel.SUCCESS)

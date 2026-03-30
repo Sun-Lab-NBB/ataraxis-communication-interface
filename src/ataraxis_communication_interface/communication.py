@@ -267,6 +267,12 @@ _PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]] = {
 }
 """Maps prototype integer codes to factory callables that produce the corresponding numpy prototype objects."""
 
+_PROTOTYPE_DTYPE_STRINGS: dict[int, str] = {
+    code: str(factory().dtype) for code, factory in _PROTOTYPE_FACTORIES.items()
+}
+"""Maps prototype integer codes to their numpy dtype strings (e.g., ``'float32'``, ``'uint16'``). Built once at module
+load by calling each factory and caching the dtype, avoiding per-message object allocation during log processing."""
+
 
 class SerialProtocols(IntEnum):
     """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
@@ -782,6 +788,21 @@ class SerialPrototypes(IntEnum):
         if factory is None:
             return None
         return factory()
+
+    @staticmethod
+    def get_dtype_for_code(code: int) -> str | None:
+        """Returns the numpy dtype string associated with the input prototype code.
+
+        Uses a pre-built lookup table to avoid instantiating a prototype object, making this suitable for hot paths
+        where only the dtype string is needed (e.g., log processing serialization).
+
+        Args:
+            code: The prototype integer code for which to retrieve the dtype string.
+
+        Returns:
+            The numpy dtype string (e.g., ``'float32'``, ``'uint16'``), or None if the code is not recognized.
+        """
+        return _PROTOTYPE_DTYPE_STRINGS.get(code)
 
 
 @dataclass(frozen=True, slots=True)

@@ -238,14 +238,6 @@ def config_show(config_path: Path) -> None:  # pragma: no cover
     "job (remote mode).",
 )
 @click.option(
-    "-li",
-    "--log-id",
-    type=str,
-    multiple=True,
-    help="Source log ID to process. Repeat to specify multiple IDs. If not provided, resolves all source IDs from "
-    "the microcontroller_manifest.yaml file in the log directory.",
-)
-@click.option(
     "-w",
     "--workers",
     type=int,
@@ -265,7 +257,6 @@ def process(
     output_directory: Path,
     config: Path,
     job_id: str | None,
-    log_id: tuple[str, ...],
     *,
     workers: int,
     progress: bool,
@@ -273,7 +264,7 @@ def process(
     """Processes MicroControllerInterface log archives to extract hardware module and kernel message data.
 
     Extracts data as specified by the extraction configuration and writes the results to feather (IPC) files.
-    Each specified log ID must correspond to exactly one archive under the log directory. Requires an
+    Controller IDs in the extraction config determine which archives are processed. Requires an
     extraction_config.yaml file -- use 'axci config create' to generate one from a manifest.
     """
     run_log_processing_pipeline(
@@ -281,7 +272,6 @@ def process(
         output_directory=output_directory,
         config=config,
         job_id=job_id,
-        log_ids=list(log_id) if log_id else None,
         workers=workers,
         display_progress=progress,
     )

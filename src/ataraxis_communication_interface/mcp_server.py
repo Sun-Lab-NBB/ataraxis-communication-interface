@@ -359,8 +359,8 @@ def write_microcontroller_manifest_tool(  # pragma: no cover
     """Registers a microcontroller source in the manifest file within a DataLogger output directory.
 
     If the manifest already exists (another MicroControllerInterface has already registered), appends the new
-    controller entry. Otherwise, creates a new manifest. Each module entry must have 'module_type' (int),
-    'module_id' (int), and 'name' (str) keys.
+    controller entry. Otherwise, creates a new manifest. Each module entry must have 'module_type' (int type code),
+    'module_id' (int ID code), and 'name' (str) keys.
 
     Important:
         The AI agent calling this tool MUST know the controller ID, name, and module details. Do not guess
@@ -370,7 +370,8 @@ def write_microcontroller_manifest_tool(  # pragma: no cover
         log_directory: The absolute path to the DataLogger output directory where the manifest file is stored.
         controller_id: The controller_id used by the MicroControllerInterface instance.
         controller_name: A colloquial human-readable name for the microcontroller.
-        modules: A list of module descriptors, each with 'module_type' (int), 'module_id' (int), and 'name' (str) keys.
+        modules: A list of module descriptors, each with 'module_type' (int type code), 'module_id' (int ID code),
+            and 'name' (str) keys.
 
     Returns:
         A dictionary containing a 'success' flag, the manifest path, and a summary of the registered entry.
@@ -395,8 +396,8 @@ def write_microcontroller_manifest_tool(  # pragma: no cover
     except (KeyError, TypeError, ValueError) as error:
         return {
             "error": (
-                f"Invalid module descriptor: {error}. Each module must have 'module_type', 'module_id', "
-                f"and 'name' keys."
+                f"Invalid module descriptor: {error}. Each module must have 'module_type' (type code), "
+                f"'module_id' (ID code), and 'name' keys."
             ),
         }
 
@@ -627,13 +628,13 @@ def write_extraction_config_tool(  # pragma: no cover
 
     Accept a list of controller dictionaries, construct an ExtractionConfig instance, and serialize it
     to the specified YAML file path. Each controller dictionary must contain 'controller_id' and 'modules'
-    keys. Each module must have 'module_type', 'module_id', and 'event_codes' keys.
+    keys. Each module must have 'module_type' (type code), 'module_id' (ID code), and 'event_codes' keys.
     An optional 'kernel' key may contain a dictionary with 'event_codes'.
 
     Args:
         config_path: The absolute path where the extraction configuration YAML file will be written.
         controllers: A list of controller dictionaries, each with 'controller_id', 'modules' (list of
-            dicts with 'module_type', 'module_id', 'event_codes'), and optionally
+            dicts with 'module_type' (type code), 'module_id' (ID code), 'event_codes'), and optionally
             'kernel' (dict with 'event_codes').
 
     Returns:

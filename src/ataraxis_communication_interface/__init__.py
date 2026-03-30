@@ -29,9 +29,6 @@ from .log_processing import (
     KERNEL_FEATHER_INFIX,
     MODULE_FEATHER_INFIX,
     CONTROLLER_FEATHER_PREFIX,
-    ExtractedModuleData,
-    ExtractedMessageData,
-    extract_log_data,
     run_log_processing_pipeline,
 )
 from .microcontroller_interface import (
@@ -47,8 +44,6 @@ __all__ = [
     "MICROCONTROLLER_MANIFEST_FILENAME",
     "MODULE_FEATHER_INFIX",
     "ControllerExtractionConfig",
-    "ExtractedMessageData",
-    "ExtractedModuleData",
     "ExtractionConfig",
     "KernelExtractionConfig",
     "MQTTCommunication",
@@ -61,7 +56,6 @@ __all__ = [
     "ModuleSourceData",
     "ModuleState",
     "create_extraction_config",
-    "extract_log_data",
     "run_log_processing_pipeline",
     "write_microcontroller_manifest",
 ]
