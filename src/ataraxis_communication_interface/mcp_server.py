@@ -70,11 +70,12 @@ push it lower. With a factor of 1,000, a 648,000-message archive has a saturatio
 workers."""  # pragma: no cover
 
 _WORKER_MULTIPLE: int = 5  # pragma: no cover
-"""Worker counts above 1 are rounded down to the nearest multiple of this value for clean allocation."""
+"""Worker counts above 1 are rounded down to the nearest multiple of this value for clean
+allocation."""  # pragma: no cover
 
 _RESERVED_CORES: int = 2  # pragma: no cover
 """The number of CPU cores reserved for system operations. The worker budget is computed as available cores minus this
-value, with a minimum of 1."""
+value, with a minimum of 1."""  # pragma: no cover
 
 
 @dataclass(slots=True)  # pragma: no cover

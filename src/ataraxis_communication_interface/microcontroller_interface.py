@@ -1341,7 +1341,7 @@ class MicroControllerInterface:  # pragma: no cover
                 module.terminate_remote_assets()
 
 
-def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
+def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:  # pragma: no cover
     """Determines whether the target serial port is connected to an Ataraxis MicroController.
 
     Args:

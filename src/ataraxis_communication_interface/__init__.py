@@ -24,25 +24,15 @@ from .communication import (
     ModuleState,
     MQTTCommunication,
 )
-from .log_processing import (
-    FEATHER_SUFFIX,
-    KERNEL_FEATHER_INFIX,
-    MODULE_FEATHER_INFIX,
-    CONTROLLER_FEATHER_PREFIX,
-    run_log_processing_pipeline,
-)
+from .log_processing import run_log_processing_pipeline
 from .microcontroller_interface import (
     ModuleInterface,
     MicroControllerInterface,
 )
 
 __all__ = [
-    "CONTROLLER_FEATHER_PREFIX",
     "EXTRACTION_CONFIGURATION_FILENAME",
-    "FEATHER_SUFFIX",
-    "KERNEL_FEATHER_INFIX",
     "MICROCONTROLLER_MANIFEST_FILENAME",
-    "MODULE_FEATHER_INFIX",
     "ControllerExtractionConfig",
     "ExtractionConfig",
     "KernelExtractionConfig",

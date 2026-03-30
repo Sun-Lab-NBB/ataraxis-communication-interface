@@ -458,7 +458,7 @@ def execute_job(
             combined_kernel = _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
 
             for batch_result in results:
-                if batch_result is None:
+                if batch_result is None:  # pragma: no cover
                     continue
 
                 module_batch, kernel_accumulator = batch_result

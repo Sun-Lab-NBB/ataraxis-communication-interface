@@ -22,7 +22,16 @@ from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_base_utilities import console, LogLevel
 import tempfile
 
-from ataraxis_communication_interface import MicroControllerInterface, run_log_processing_pipeline
+from ataraxis_communication_interface import (
+    MICROCONTROLLER_MANIFEST_FILENAME,
+    MicroControllerInterface,
+    ModuleExtractionConfig,
+    KernelExtractionConfig,
+    ControllerExtractionConfig,
+    ExtractionConfig,
+    create_extraction_config,
+    run_log_processing_pipeline,
+)
 
 # Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
 if __name__ == "__main__":
@@ -55,6 +64,7 @@ if __name__ == "__main__":
         port="/dev/ttyACM1",
         data_logger=data_logger,
         module_interfaces=interfaces,
+        name="test_controller",
         baudrate=115200,
         keepalive_interval=5000,
     )
@@ -154,12 +164,31 @@ if __name__ == "__main__":
     console.echo("Assembling the message log archive...")
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
-    # To process the data logged during runtime, use the run_log_processing_pipeline function with an extraction
-    # configuration file. The pipeline reads the extraction config to determine which controllers, modules, and event
-    # codes to extract, validates them against the microcontroller manifest, and writes the results to feather files.
-    # Use 'axci config create' to generate an extraction config from the manifest, then fill in event codes.
-    console.echo("Processing the logged message data...")
+    # To process the data logged during runtime, first generate a precursor extraction configuration from the
+    # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during start().
+    console.echo("Creating extraction configuration from manifest...")
+    manifest_path = data_logger.output_directory / MICROCONTROLLER_MANIFEST_FILENAME
+    config = create_extraction_config(manifest_path=manifest_path)
+
+    # The generated config has empty event_codes for each module. Fill in the event codes that should be extracted.
+    # Event codes 52 (kHigh), 53 (kLow), and 54 (kEcho) are the TestModule event codes demonstrated above.
+    config.controllers[0] = ControllerExtractionConfig(
+        controller_id=222,
+        modules=(
+            ModuleExtractionConfig(module_type=1, module_id=1, event_codes=(52, 53, 54)),
+            ModuleExtractionConfig(module_type=1, module_id=2, event_codes=(52, 53, 54)),
+        ),
+        kernel=KernelExtractionConfig(event_codes=(2,)),  # Extracts kernel status code 2 (module setup) events.
+    )
+
+    # Save the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
     config_path = data_logger.output_directory / "extraction_config.yaml"
+    config.save(file_path=config_path)
+    console.echo(message=f"Extraction config written to: {config_path}", level=LogLevel.SUCCESS)
+
+    # Run the log processing pipeline. This extracts hardware module and kernel message data from the log archives
+    # and writes the results to feather (IPC) files for downstream analysis.
+    console.echo("Processing the logged message data...")
     output_path = Path(tempfile.mkdtemp())
     run_log_processing_pipeline(
         log_directory=data_logger.output_directory,
