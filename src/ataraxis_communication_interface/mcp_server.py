@@ -465,10 +465,7 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:  
             for controller in manifest.controllers:
                 archive_path = log_dir / f"{controller.id}{LOG_ARCHIVE_SUFFIX}"
                 if not archive_path.exists():
-                    # Also check by name as the source ID may be the controller name.
-                    archive_path = log_dir / f"{controller.name}{LOG_ARCHIVE_SUFFIX}"
-                    if not archive_path.exists():
-                        continue
+                    continue
 
                 module_entries = [
                     {
@@ -692,19 +689,21 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
     log_directories: list[str],
     source_ids: list[str],
     output_directories: list[str],
+    config_path: str,
 ) -> dict[str, Any]:
     """Prepares an execution manifest for batch log processing without starting execution.
 
-    Accepts log directories, source IDs, and output directories from the caller and initializes a
-    ProcessingTracker with one data-extraction job per source ID for each log directory. Idempotent: if a
-    tracker already exists for a log directory, returns the existing manifest with current job statuses instead
-    of reinitializing. Requires prior discovery -- the caller must provide confirmed source IDs rather than
-    relying on implicit archive or manifest discovery.
+    Accepts log directories, source IDs, output directories, and an extraction configuration path from the caller
+    and initializes a ProcessingTracker with one data-extraction job per source ID for each log directory. The
+    configuration path is validated up front and embedded in every job descriptor so that downstream execution
+    tools receive a self-contained manifest. Idempotent: if a tracker already exists for a log directory, returns
+    the existing manifest with current job statuses instead of reinitializing. Requires prior discovery -- the
+    caller must provide confirmed source IDs rather than relying on implicit archive or manifest discovery.
 
     Important:
         The AI agent calling this tool MUST run discover_microcontroller_data_tool first to obtain log directory
-        paths and confirmed source IDs. The agent MUST ask the user for the output directory paths before calling
-        this tool. Do not assume or guess directory paths or source IDs.
+        paths and confirmed source IDs. The agent MUST ask the user for the output directory paths and extraction
+        configuration path before calling this tool. Do not assume or guess directory paths or source IDs.
 
     Args:
         log_directories: The list of absolute paths to DataLogger output directories containing log archives.
@@ -715,11 +714,23 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
         output_directories: The list of absolute paths for per-log-directory output. Must match the length of
             log_directories. Each output directory receives a ``microcontroller_data/`` subdirectory containing
             the processing tracker and output files.
+        config_path: The absolute path to the ExtractionConfig YAML file that specifies which events to extract
+            for each controller. Validated before batch preparation and embedded in every job descriptor.
 
     Returns:
         A dictionary containing per-log-directory manifests in 'log_directories' with tracker paths and job
         lists, total counts, and any invalid paths.
     """
+    # Validates the extraction configuration up front.
+    config_file = Path(config_path)
+    if not config_file.exists() or not config_file.is_file():
+        return {"error": f"Extraction config not found: {config_path}"}
+
+    try:
+        ExtractionConfig.load(file_path=config_file)
+    except Exception as error:  # noqa: BLE001
+        return {"error": f"Invalid extraction config: {error}"}
+
     if len(output_directories) != len(log_directories):
         return {
             "error": (
@@ -784,6 +795,7 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
                     "log_directory": log_dir_str,
                     "output_directory": str(data_path),
                     "tracker_path": str(tracker_path),
+                    "config_path": config_path,
                 }
                 for source_id in filtered_ids
             ]
@@ -819,27 +831,26 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
 @mcp.tool()  # pragma: no cover
 def execute_log_processing_jobs_tool(  # pragma: no cover
     jobs: list[dict[str, str]],
-    config_path: str,
     *,
     worker_budget: int = -1,
 ) -> dict[str, Any]:
     """Dispatches log processing jobs for background execution with budget-based worker allocation.
 
     Takes job descriptors from the manifest produced by prepare_log_processing_batch_tool and starts a background
-    execution manager that allocates CPU cores to each job based on its archive size. The worker budget directly
-    controls memory footprint since each worker spawns a separate process. Large archives (>= 2000 messages) receive
-    more workers, while small archives receive 1 worker since they process sequentially regardless. The manager fills
-    available budget greedily, dispatching smaller jobs alongside large ones when cores are available.
+    execution manager that allocates CPU cores to each job based on its archive size. Each job descriptor must
+    include its own 'config_path' key pointing to the ExtractionConfig YAML file for that job. The worker budget
+    directly controls memory footprint since each worker spawns a separate process. Large archives (>= 2000
+    messages) receive more workers, while small archives receive 1 worker since they process sequentially
+    regardless. The manager fills available budget greedily, dispatching smaller jobs alongside large ones when
+    cores are available.
 
     Important:
         Only one execution session can be active at a time. Use cancel_log_processing_tool to cancel an active
         session before starting a new one.
 
     Args:
-        jobs: The list of job descriptors, each a dictionary with 'log_directory', 'output_directory',
-            'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
-        config_path: The absolute path to the ExtractionConfig YAML file that specifies which events and
-            commands to extract for each controller.
+        jobs: The list of job descriptors from prepare_log_processing_batch_tool. Each dictionary must have
+            'log_directory', 'output_directory', 'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
         worker_budget: The total number of CPU cores available for the execution session. Directly controls memory
             footprint. Set to -1 for automatic resolution via resolve_worker_count.
 
@@ -879,7 +890,7 @@ def execute_log_processing_jobs_tool(  # pragma: no cover
             tracker_path=tracker_path,
             job_id=job_dict["job_id"],
             source_id=job_dict["source_id"],
-            config_path=Path(job_dict.get("config_path", config_path)),
+            config_path=Path(job_dict["config_path"]),
         )
         pending.append(pending_job)
         all_jobs[pending_job.dispatch_key] = pending_job
