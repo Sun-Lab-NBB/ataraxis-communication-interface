@@ -131,7 +131,7 @@ class TestModuleInterface(ModuleInterface):
             repetition_delay=repetition_delay,
         )
 
-    # This helper property returns the shared memory array object of by the interface instance, so that the shared data
+    # This helper property returns the shared memory array object used by the interface instance, so that the shared data
     # can be accessed from the main runtime process.
     @property
     def shared_memory(self) -> SharedMemoryArray:

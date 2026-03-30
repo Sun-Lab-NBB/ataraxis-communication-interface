@@ -28,7 +28,6 @@ from ataraxis_communication_interface import (
     ModuleExtractionConfig,
     KernelExtractionConfig,
     ControllerExtractionConfig,
-    ExtractionConfig,
     create_extraction_config,
     run_log_processing_pipeline,
 )
