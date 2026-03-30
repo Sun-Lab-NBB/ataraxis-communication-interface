@@ -22,7 +22,16 @@ from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_base_utilities import console, LogLevel
 import tempfile
 
-from ataraxis_communication_interface import MicroControllerInterface, extract_logged_hardware_module_data
+from ataraxis_communication_interface import (
+    MICROCONTROLLER_MANIFEST_FILENAME,
+    MicroControllerInterface,
+    ModuleExtractionConfig,
+    KernelExtractionConfig,
+    ControllerExtractionConfig,
+    ExtractionConfig,
+    create_extraction_config,
+    run_log_processing_pipeline,
+)
 
 # Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
 if __name__ == "__main__":
@@ -55,6 +64,7 @@ if __name__ == "__main__":
         port="/dev/ttyACM1",
         data_logger=data_logger,
         module_interfaces=interfaces,
+        name="test_controller",
         baudrate=115200,
         keepalive_interval=5000,
     )
@@ -154,24 +164,35 @@ if __name__ == "__main__":
     console.echo("Assembling the message log archive...")
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
-    # To process the data logged during runtime, it must be extracted from the archive created above. This can be
-    # done with the help of the `extract_logged_hardware_module_data` function:
-    console.echo("Extracting the logged message data...")
-    log_data = extract_logged_hardware_module_data(
-        log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
-        module_type_id=(
-            (int(interface_1.module_type), int(interface_1.module_id)),
-            (int(interface_2.module_type), int(interface_2.module_id)),
+    # To process the data logged during runtime, first generate a precursor extraction configuration from the
+    # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during start().
+    console.echo("Creating extraction configuration from manifest...")
+    manifest_path = data_logger.output_directory / MICROCONTROLLER_MANIFEST_FILENAME
+    config = create_extraction_config(manifest_path=manifest_path)
+
+    # The generated config has empty event_codes for each module. Fill in the event codes that should be extracted.
+    # Event codes 52 (kHigh), 53 (kLow), and 54 (kEcho) are the TestModule event codes demonstrated above.
+    config.controllers[0] = ControllerExtractionConfig(
+        controller_id=222,
+        modules=(
+            ModuleExtractionConfig(module_type=1, module_id=1, event_codes=(52, 53, 54)),
+            ModuleExtractionConfig(module_type=1, module_id=2, event_codes=(52, 53, 54)),
         ),
+        kernel=KernelExtractionConfig(event_codes=(2,)),  # Extracts kernel status code 2 (module setup) events.
     )
-    # Uses pulse off and echo event codes to determine the total number of TestModule 1 pulses and TestModule 2 echo
-    # values encountered during runtime according to the processed log data.
-    module_1_pulses = len(log_data[0].event_data[np.uint8(53)])
-    module_2_echo_values = len(log_data[1].event_data[np.uint8(54)])
-    console.echo(
-        message=(
-            f"According to the extracted data, during runtime the TestModule 1 emitted a total of {module_1_pulses} "
-            f"pulses and the TestModule 2 sent {module_2_echo_values} echo values."
-        ),
-        level=LogLevel.SUCCESS,
+
+    # Save the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
+    config_path = data_logger.output_directory / "extraction_config.yaml"
+    config.save(file_path=config_path)
+    console.echo(message=f"Extraction config written to: {config_path}", level=LogLevel.SUCCESS)
+
+    # Run the log processing pipeline. This extracts hardware module and kernel message data from the log archives
+    # and writes the results to feather (IPC) files for downstream analysis.
+    console.echo("Processing the logged message data...")
+    output_path = Path(tempfile.mkdtemp())
+    run_log_processing_pipeline(
+        log_directory=data_logger.output_directory,
+        output_directory=output_path,
+        config=config_path,
     )
+    console.echo(message=f"Processing complete. Feather output written to: {output_path}", level=LogLevel.SUCCESS)

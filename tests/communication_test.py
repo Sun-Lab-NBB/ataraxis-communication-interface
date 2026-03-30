@@ -164,6 +164,31 @@ def test_serial_prototypes_get_prototype_for_code(code, expected_result) -> None
             assert result == expected_result
 
 
+@pytest.mark.parametrize(
+    "code,expected_dtype",
+    [
+        (1, "bool"),
+        (2, "uint8"),
+        (3, "int8"),
+        (7, "uint16"),
+        (8, "int16"),
+        (17, "uint32"),
+        (18, "int32"),
+        (19, "float32"),
+        (39, "uint64"),
+        (40, "int64"),
+        (41, "float64"),
+        (165, "float64"),
+        (0, None),  # Invalid code
+        (200, None),  # Invalid code
+    ],
+)
+def test_serial_prototypes_get_dtype_for_code(code, expected_dtype) -> None:
+    """Verifies the functioning of the SerialPrototypes enum get_dtype_for_code() method."""
+    result = SerialPrototypes.get_dtype_for_code(code)
+    assert result == expected_dtype
+
+
 def test_repeated_module_command() -> None:
     """Verifies RepeatedModuleCommand initialization and data packing."""
     cmd = RepeatedModuleCommand(
@@ -175,7 +200,7 @@ def test_repeated_module_command() -> None:
         cycle_delay=np.uint32(1000),
     )
 
-    # Test attributes
+    # Verifies attributes.
     assert cmd.module_type == 1
     assert cmd.module_id == 2
     assert cmd.command == 3
@@ -184,16 +209,16 @@ def test_repeated_module_command() -> None:
     assert cmd.cycle_delay == 1000
     assert cmd.protocol_code == SerialProtocols.REPEATED_MODULE_COMMAND.as_uint8()
 
-    # Test packed data
+    # Verifies packed data.
     assert isinstance(cmd.packed_data, np.ndarray)
     assert cmd.packed_data.dtype == np.uint8
     assert cmd.packed_data.size == 10
     assert np.array_equal(cmd.packed_data[0:6], [cmd.protocol_code, 1, 2, 4, 3, False])
 
-    # Test repr
+    # Verifies repr.
     expected_repr = (
         f"RepeatedModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, "
-        f"module_id=2, command=3, return_code=4, noblock=False, cycle_delay=1000 us)."
+        f"module_id=2, command=3, return_code=4, noblock=False, cycle_delay=1000 us)"
     )
     assert repr(cmd) == expected_repr
 
@@ -208,7 +233,7 @@ def test_one_off_module_command() -> None:
         noblock=np.bool_(False),
     )
 
-    # Test attributes
+    # Verifies attributes.
     assert cmd.module_type == 1
     assert cmd.module_id == 2
     assert cmd.command == 3
@@ -216,16 +241,16 @@ def test_one_off_module_command() -> None:
     assert not cmd.noblock
     assert cmd.protocol_code == SerialProtocols.ONE_OFF_MODULE_COMMAND.as_uint8()
 
-    # Test packed data
+    # Verifies packed data.
     assert isinstance(cmd.packed_data, np.ndarray)
     assert cmd.packed_data.dtype == np.uint8
     assert cmd.packed_data.size == 6
     assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 1, 2, 4, 3, False])
 
-    # Test repr
+    # Verifies repr.
     expected_repr = (
         f"OneOffModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, "
-        f"module_id=2, command=3, return_code=4, noblock=False)."
+        f"module_id=2, command=3, return_code=4, noblock=False)"
     )
     assert repr(cmd) == expected_repr
 
@@ -234,21 +259,21 @@ def test_dequeue_module_command() -> None:
     """Verifies DequeueModuleCommand initialization and data packing."""
     cmd = DequeueModuleCommand(module_type=np.uint8(1), module_id=np.uint8(2), return_code=np.uint8(3))
 
-    # Test attributes
+    # Verifies attributes.
     assert cmd.module_type == 1
     assert cmd.module_id == 2
     assert cmd.return_code == 3
     assert cmd.protocol_code == SerialProtocols.DEQUEUE_MODULE_COMMAND.as_uint8()
 
-    # Test packed data
+    # Verifies packed data.
     assert isinstance(cmd.packed_data, np.ndarray)
     assert cmd.packed_data.dtype == np.uint8
     assert cmd.packed_data.size == 4
     assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 1, 2, 3])
 
-    # Test repr
+    # Verifies repr.
     expected_repr = (
-        f"DequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)."
+        f"DequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)"
     )
     assert repr(cmd) == expected_repr
 
@@ -257,19 +282,19 @@ def test_kernel_command() -> None:
     """Verifies KernelCommand initialization and data packing."""
     cmd = KernelCommand(command=np.uint8(1), return_code=np.uint8(2))
 
-    # Test attributes
+    # Verifies attributes.
     assert cmd.command == 1
     assert cmd.return_code == 2
     assert cmd.protocol_code == SerialProtocols.KERNEL_COMMAND.as_uint8()
 
-    # Test packed data
+    # Verifies packed data.
     assert isinstance(cmd.packed_data, np.ndarray)
     assert cmd.packed_data.dtype == np.uint8
     assert cmd.packed_data.size == 3
     assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 2, 1])
 
-    # Test repr
-    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, return_code=2)."
+    # Verifies repr.
+    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, return_code=2)"
     assert repr(cmd) == expected_repr
 
 
@@ -282,22 +307,22 @@ def test_module_parameters() -> None:
         return_code=np.uint8(6),
     )
 
-    # Test attributes
+    # Verifies attributes.
     assert params.module_type == 1
     assert params.module_id == 2
     assert params.return_code == 6
     assert params.protocol_code == SerialProtocols.MODULE_PARAMETERS.as_uint8()
 
-    # Test packed data
+    # Verifies packed data.
     assert isinstance(params.packed_data, np.ndarray)
     assert params.packed_data.dtype == np.uint8
     assert params.packed_data.size > 4  # Header size is 4 bytes
     assert np.array_equal(params.packed_data[0:4], [params.protocol_code, 1, 2, 6])
 
-    # Test repr
+    # Verifies repr.
     expected_repr = (
         f"ModuleParameters(protocol_code={params.protocol_code}, module_type=1, "
-        f"module_id=2, return_code=6, parameter_object_size={params.parameters_size} bytes)."
+        f"module_id=2, return_code=6, parameter_object_size={params.parameters_size} bytes)"
     )
     assert repr(params) == expected_repr
 
@@ -411,7 +436,7 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
         test_mode=True,
     )
 
-    # Test initialization
+    # Verifies initialization.
     assert comm._transport_layer is not None
     assert isinstance(comm._module_data, ModuleData)
     assert isinstance(comm._kernel_data, KernelData)
@@ -423,8 +448,8 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
     assert comm._source_id == 1
     assert comm._usb_port == "TEST"
 
-    # Test string representation
-    expected_repr = "SerialCommunication(usb_port=TEST, controller_id=1)."
+    # Verifies string representation.
+    expected_repr = "SerialCommunication(usb_port=TEST, controller_id=1)"
     assert repr(comm) == expected_repr
 
 
@@ -562,18 +587,18 @@ def test_serial_communication_receive_message_error(logger_queue) -> None:
         microcontroller_serial_buffer_size=300,
     )
 
-    # Test receiving the message with invalid protocol code
+    # Verifies receiving a message with invalid protocol code.
     message_data = np.array([255, 1, 2], dtype=np.uint8)  # Invalid protocol code
 
-    # First 'sends' the message to the SerialMock class, which COBS-encodes and CRC-stamps the message
+    # Sends the message to the SerialMock class, which COBS-encodes and CRC-stamps the message.
     comm._transport_layer.write_data(message_data)
     comm._transport_layer.send_data()
 
-    # Next, transfers the message from the tx_buffer to the rx_buffer. The message then can be 'received' and it now
+    # Transfers the message from the tx_buffer to the rx_buffer. The message then can be 'received' and it now
     # has the correct format to pass TransportLayer verification steps that ensure message integrity.
     comm._transport_layer._port.rx_buffer = comm._transport_layer._port.tx_buffer
 
-    # Ensures that a message with an invalid protocol raises a ValueError
+    # Ensures that a message with an invalid protocol raises a ValueError.
     message = (
         f"Invalid protocol code {255} encountered when attempting to parse a message received from the "
         f"microcontroller. All incoming messages have to use one of the valid incoming message protocol codes "
@@ -593,7 +618,7 @@ def test_serial_communication_module_data_invalid_prototype(logger_queue) -> Non
         microcontroller_serial_buffer_size=300,
     )
 
-    # Setup mock message with invalid prototype (255)
+    # Sets up mock message with invalid prototype (255).
     message_data = np.array([6, 1, 2, 3, 4, 255, 42], dtype=np.uint8)
 
     comm._transport_layer.write_data(message_data)
@@ -620,7 +645,7 @@ def test_serial_communication_kernel_data_invalid_prototype(logger_queue) -> Non
         microcontroller_serial_buffer_size=300,
     )
 
-    # Setup mock message with invalid prototype (255)
+    # Sets up mock message with invalid prototype (255).
     message_data = np.array([7, 1, 2, 255, 42], dtype=np.uint8)
 
     comm._transport_layer.write_data(message_data)
@@ -664,7 +689,7 @@ def test_mqtt_communication_initialization() -> None:
 
     comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
 
-    # Test initialization
+    # Verifies initialization.
     assert comm._ip == BROKER_IP
     assert comm._port == BROKER_PORT
     assert comm._monitored_topics == TEST_TOPICS
@@ -721,7 +746,7 @@ def test_mqtt_communication_send_receive() -> None:
     unity_client.connect(BROKER_IP, BROKER_PORT)
     unity_client.loop_start()
 
-    # Stores received messages in this list
+    # Stores received messages.
     received_messages = []
 
     # Creates Unity client receiver function
@@ -735,7 +760,7 @@ def test_mqtt_communication_send_receive() -> None:
     unity_client.subscribe(test_topic)
     time.sleep(0.1)  # Allow subscription to establish
 
-    # Tests sending data from MQTTCommunication to Unity
+    # Verifies sending data from MQTTCommunication to Unity.
     test_data = [
         ("test message", str),
         (b"binary data", bytes),
@@ -755,7 +780,7 @@ def test_mqtt_communication_send_receive() -> None:
         else:
             assert payload == data
 
-    # Tests sending data from Unity to MQTTCommunication
+    # Verifies sending data from Unity to MQTTCommunication.
     for topic in TEST_TOPICS:
         test_message = f"Unity message for {topic}"
         unity_client.publish(topic, test_message)
@@ -853,7 +878,7 @@ def test_unity_communication_reconnection() -> None:
     assert data is not None
     assert data[1].decode() == test_message
 
-    # Disconnects and reconnects. Also verifies that calling each method the second time has no effect
+    # Disconnects and reconnects. Also verifies that calling each method the second time has no effect.
     unity_comm.disconnect()
     unity_comm.disconnect()
     unity_comm.connect()
