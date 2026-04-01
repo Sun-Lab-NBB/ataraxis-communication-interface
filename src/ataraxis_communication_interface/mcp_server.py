@@ -1,8 +1,8 @@
 """Provides a Model Context Protocol (MCP) server for agentic interaction with the library.
 
-Exposes microcontroller discovery, MQTT broker connectivity checking, and microcontroller data log processing
-functionality through the MCP protocol, enabling AI agents to programmatically interact with the library's
-core features.
+Exposes microcontroller discovery, MQTT broker connectivity checking, extraction configuration management,
+microcontroller data log processing, output verification, and extracted event querying through the MCP protocol,
+enabling AI agents to programmatically interact with the library's core features.
 """
 
 from typing import TYPE_CHECKING, Any, Literal  # pragma: no cover
@@ -13,6 +13,7 @@ from dataclasses import field, dataclass  # pragma: no cover
 from concurrent.futures import ProcessPoolExecutor, as_completed  # pragma: no cover
 
 import numpy as np  # pragma: no cover
+import polars as pl  # pragma: no cover
 from ataraxis_time import (  # pragma: no cover
     TimeUnits,
     PrecisionTimer,
@@ -40,13 +41,15 @@ from .dataclasses import (
     ModuleExtractionConfig,
     MicroControllerManifest,
     ControllerExtractionConfig,
-    create_extraction_config,
     write_microcontroller_manifest,
 )  # pragma: no cover
 from .communication import MQTTCommunication  # pragma: no cover
 from .log_processing import (
+    FEATHER_SUFFIX,
     TRACKER_FILENAME,
     LOG_ARCHIVE_SUFFIX,
+    KERNEL_FEATHER_INFIX,
+    MODULE_FEATHER_INFIX,
     PARALLEL_PROCESSING_THRESHOLD,
     MICROCONTROLLER_DATA_DIRECTORY,
     execute_job,
@@ -76,6 +79,13 @@ allocation."""  # pragma: no cover
 _RESERVED_CORES: int = 2  # pragma: no cover
 """The number of CPU cores reserved for system operations. The worker budget is computed as available cores minus this
 value, with a minimum of 1."""  # pragma: no cover
+
+_MINIMUM_ROWS_FOR_INTERVALS: int = 2  # pragma: no cover
+"""The minimum number of rows required in a feather file to compute inter-event timing intervals."""  # pragma: no cover
+
+_UNIDENTIFIED_CONTROLLER_ID: int = -1  # pragma: no cover
+"""The sentinel value returned by ``_evaluate_port`` when a serial port is not connected to a recognized
+microcontroller."""  # pragma: no cover
 
 
 @dataclass(slots=True)  # pragma: no cover
@@ -142,7 +152,7 @@ class _JobExecutionState:  # pragma: no cover
     manager_thread: Thread | None = None
     """Background execution manager thread reference."""
     canceled: bool = False
-    """Indicates whether the execution session has been canceled."""
+    """Determines whether the execution session has been canceled."""
 
 
 _job_execution_state: _JobExecutionState | None = None  # pragma: no cover
@@ -168,7 +178,7 @@ def list_microcontrollers(baudrate: int = 115200) -> str:  # pragma: no cover
     # Gets all available serial ports.
     available_ports = list_available_ports()
 
-    # Filters out invalid ports (PID == None) - primarily for Linux systems.
+    # Filters out invalid ports (PID is None) — primarily for Linux systems.
     valid_ports = [port for port in available_ports if port.pid is not None]
 
     # If there are no valid candidates to evaluate, returns early.
@@ -203,15 +213,15 @@ def list_microcontrollers(baudrate: int = 115200) -> str:  # pragma: no cover
             count += 1
 
             if error_message is not None:
-                # Port encountered a connection error.
+                # Reports the connection error for this port.
                 lines.append(
                     f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_message}]"
                 )
-            elif controller_id == -1:
-                # Port did not respond or is not a valid microcontroller.
+            elif controller_id == _UNIDENTIFIED_CONTROLLER_ID:
+                # Reports unrecognized ports that did not respond or lack a valid microcontroller.
                 lines.append(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
             else:
-                # Port is connected to a valid microcontroller with identified ID.
+                # Reports identified microcontrollers with their controller ID.
                 lines.append(
                     f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
                 )
@@ -289,6 +299,7 @@ def assemble_log_archives_tool(  # pragma: no cover
     if not directory_path.is_dir():
         return {"error": f"Not a directory: {log_directory}"}
 
+    # Consolidates raw .npy log entries into .npz archives grouped by source ID.
     try:
         assemble_log_archives(
             log_directory=directory_path,
@@ -334,11 +345,13 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:  #
     if not path.is_file():
         return {"error": f"Path is not a file: {manifest_path}"}
 
+    # Loads the manifest from the YAML file.
     try:
         manifest = MicroControllerManifest.load(file_path=path)
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to read manifest: {error}"}
 
+    # Serializes each controller and its modules into a dictionary representation.
     controllers: list[dict[str, Any]] = []
     for controller in manifest.controllers:
         module_entries = [
@@ -385,6 +398,7 @@ def write_microcontroller_manifest_tool(  # pragma: no cover
     if not log_path.is_dir():
         return {"error": f"Path is not a directory: {log_directory}"}
 
+    # Converts the raw module dictionaries into typed ModuleSourceData instances.
     try:
         module_entries = tuple(
             ModuleSourceData(
@@ -402,6 +416,7 @@ def write_microcontroller_manifest_tool(  # pragma: no cover
             ),
         }
 
+    # Writes or appends the controller entry to the manifest file.
     try:
         write_microcontroller_manifest(
             log_directory=log_path,
@@ -465,10 +480,7 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:  
             for controller in manifest.controllers:
                 archive_path = log_dir / f"{controller.id}{LOG_ARCHIVE_SUFFIX}"
                 if not archive_path.exists():
-                    # Also check by name as the source ID may be the controller name.
-                    archive_path = log_dir / f"{controller.name}{LOG_ARCHIVE_SUFFIX}"
-                    if not archive_path.exists():
-                        continue
+                    continue
 
                 module_entries = [
                     {
@@ -518,54 +530,10 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:  
 
 
 @mcp.tool()  # pragma: no cover
-def create_extraction_config_tool(manifest_path: str, output_path: str) -> dict[str, Any]:  # pragma: no cover
-    """Generate a precursor extraction configuration from a microcontroller manifest.
-
-    Read the manifest file and create an ExtractionConfig with placeholder empty event codes for each
-    controller and module. Write the resulting configuration to the specified output path as a YAML file.
-    The user must fill in the actual event codes before the configuration is usable for processing.
-
-    Args:
-        manifest_path: The absolute path to the microcontroller_manifest.yaml file.
-        output_path: The absolute path where the extraction configuration YAML file will be written.
-
-    Returns:
-        A dictionary containing a 'success' flag, the config file path, controller count, and a reminder
-        message to fill in event codes. Returns an error dictionary if the manifest is missing or invalid.
-    """
-    path = Path(manifest_path)
-
-    if not path.exists():
-        return {"error": f"Manifest file not found: {manifest_path}"}
-
-    if not path.is_file():
-        return {"error": f"Path is not a file: {manifest_path}"}
-
-    try:
-        config = create_extraction_config(manifest_path=path)
-    except Exception as error:  # noqa: BLE001
-        return {"error": f"Unable to create extraction config: {error}"}
-
-    output = Path(output_path)
-
-    try:
-        config.save(file_path=output)
-    except Exception as error:  # noqa: BLE001
-        return {"error": f"Unable to write extraction config: {error}"}
-
-    return {
-        "success": True,
-        "config_path": output_path,
-        "controller_count": len(config.controllers),
-        "message": "Precursor config created. Fill in event_codes before processing.",
-    }
-
-
-@mcp.tool()  # pragma: no cover
 def read_extraction_config_tool(config_path: str) -> dict[str, Any]:  # pragma: no cover
-    """Read an extraction configuration from a YAML file and return its contents.
+    """Reads an extraction configuration from a YAML file and returns its contents.
 
-    Parse the ExtractionConfig file and return a structured dictionary representation of all controller,
+    Parses the ExtractionConfig file and returns a structured dictionary representation of all controller,
     module, and kernel extraction settings.
 
     Args:
@@ -584,11 +552,13 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:  # pragma: 
     if not path.is_file():
         return {"error": f"Path is not a file: {config_path}"}
 
+    # Loads the extraction configuration from the YAML file.
     try:
         config = ExtractionConfig.load(file_path=path)
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to read extraction config: {error}"}
 
+    # Serializes each controller's modules, event codes, and optional kernel settings into dictionaries.
     controllers: list[dict[str, Any]] = []
     for controller in config.controllers:
         module_entries = [
@@ -605,6 +575,7 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:  # pragma: 
             "modules": module_entries,
         }
 
+        # Includes kernel event codes when kernel extraction is configured for this controller.
         if controller.kernel is not None:
             controller_entry["kernel"] = {
                 "event_codes": list(controller.kernel.event_codes),
@@ -625,9 +596,9 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:  # pragma: 
 def write_extraction_config_tool(  # pragma: no cover
     config_path: str, controllers: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Write an extraction configuration to a YAML file from structured controller data.
+    """Writes an extraction configuration to a YAML file from structured controller data.
 
-    Accept a list of controller dictionaries, construct an ExtractionConfig instance, and serialize it
+    Accepts a list of controller dictionaries, constructs an ExtractionConfig instance, and serializes it
     to the specified YAML file path. Each controller dictionary must contain 'controller_id' and 'modules'
     keys. Each module must have 'module_type' (type code), 'module_id' (ID code), and 'event_codes' keys.
     An optional 'kernel' key may contain a dictionary with 'event_codes'.
@@ -642,6 +613,7 @@ def write_extraction_config_tool(  # pragma: no cover
         A dictionary containing a 'success' flag, the config file path, and the controller count.
         Returns an error dictionary if the input data is invalid or the file cannot be written.
     """
+    # Converts raw controller dictionaries into typed ExtractionConfig dataclasses.
     try:
         controller_configs: list[ControllerExtractionConfig] = []
         for controller_dict in controllers:
@@ -654,6 +626,7 @@ def write_extraction_config_tool(  # pragma: no cover
                 for module in controller_dict["modules"]
             )
 
+            # Constructs the optional kernel extraction config when present.
             kernel_config = None
             kernel_data = controller_dict.get("kernel")
             if kernel_data is not None:
@@ -673,6 +646,7 @@ def write_extraction_config_tool(  # pragma: no cover
     except (KeyError, TypeError, ValueError) as error:
         return {"error": f"Invalid controller data: {error}"}
 
+    # Serializes the assembled config to the specified YAML file path.
     output = Path(config_path)
 
     try:
@@ -688,23 +662,154 @@ def write_extraction_config_tool(  # pragma: no cover
 
 
 @mcp.tool()  # pragma: no cover
+def validate_extraction_config_tool(  # pragma: no cover
+    config_path: str,
+    manifest_path: str | None = None,
+) -> dict[str, Any]:
+    """Validates an extraction configuration for structural correctness and optionally cross-references it against
+    a microcontroller manifest.
+
+    Checks that every controller has at least one extraction target (modules or kernel). Verifies that all module
+    and kernel entries have non-empty event codes without duplicates. Confirms that module (type, id) pairs are
+    unique within each controller. When a manifest path is provided, additionally verifies that every controller ID
+    and module identifier in the config matches a registered entry in the manifest.
+
+    Args:
+        config_path: The absolute path to the extraction configuration YAML file to validate.
+        manifest_path: An optional absolute path to the microcontroller_manifest.yaml file. When provided, enables
+            cross-referencing controller IDs and module identifiers against the manifest.
+
+    Returns:
+        A dictionary containing a 'valid' flag, a 'config_path' key, a list of 'errors' (empty when valid), and
+        a 'summary' with controller and module counts. Returns an error dictionary if the file cannot be read.
+    """
+    path = Path(config_path)
+
+    if not path.exists():
+        return {"error": f"Config file not found: {config_path}"}
+
+    if not path.is_file():
+        return {"error": f"Path is not a file: {config_path}"}
+
+    try:
+        config = ExtractionConfig.load(file_path=path)
+    except Exception as error:  # noqa: BLE001
+        return {"error": f"Unable to parse extraction config: {error}"}
+
+    errors: list[str] = []
+    total_modules = 0
+
+    if not config.controllers:
+        errors.append("Config contains no controller entries.")
+
+    for controller in config.controllers:
+        controller_label = f"Controller {controller.controller_id}"
+        has_modules = bool(controller.modules)
+        has_kernel = controller.kernel is not None
+
+        if not has_modules and not has_kernel:
+            errors.append(f"{controller_label}: No modules and no kernel configured. At least one is required.")
+
+        # Validates module entries.
+        seen_module_keys: set[tuple[int, int]] = set()
+        for module in controller.modules:
+            total_modules += 1
+            module_label = f"{controller_label}, module ({module.module_type}, {module.module_id})"
+            module_key = (module.module_type, module.module_id)
+
+            if module_key in seen_module_keys:
+                errors.append(f"{module_label}: Duplicate module (type, id) pair within this controller.")
+            seen_module_keys.add(module_key)
+
+            if not module.event_codes:
+                errors.append(f"{module_label}: event_codes is empty.")
+            elif len(module.event_codes) != len(set(module.event_codes)):
+                errors.append(f"{module_label}: event_codes contains duplicates.")
+
+        # Validates kernel entry.
+        if controller.kernel is not None:
+            kernel_label = f"{controller_label}, kernel"
+            if not controller.kernel.event_codes:
+                errors.append(f"{kernel_label}: event_codes is empty.")
+            elif len(controller.kernel.event_codes) != len(set(controller.kernel.event_codes)):
+                errors.append(f"{kernel_label}: event_codes contains duplicates.")
+
+    # Cross-references against the manifest when provided.
+    if manifest_path is not None:
+        manifest_file = Path(manifest_path)
+
+        if not manifest_file.exists():
+            errors.append(f"Manifest file not found: {manifest_path}")
+        elif not manifest_file.is_file():
+            errors.append(f"Manifest path is not a file: {manifest_path}")
+        else:
+            try:
+                manifest = MicroControllerManifest.load(file_path=manifest_file)
+            except Exception as error:  # noqa: BLE001
+                errors.append(f"Unable to read manifest for cross-referencing: {error}")
+                manifest = None
+
+            if manifest is not None:
+                # Builds lookup structures from the manifest.
+                manifest_controller_ids: set[int] = set()
+                manifest_modules: dict[int, set[tuple[int, int]]] = {}
+
+                for manifest_entry in manifest.controllers:
+                    manifest_controller_ids.add(manifest_entry.id)
+                    manifest_modules[manifest_entry.id] = {(m.module_type, m.module_id) for m in manifest_entry.modules}
+
+                # Validates each config controller against the manifest.
+                for config_controller in config.controllers:
+                    controller_label = f"Controller {config_controller.controller_id}"
+
+                    if config_controller.controller_id not in manifest_controller_ids:
+                        errors.append(
+                            f"{controller_label}: Not registered in manifest. "
+                            f"Registered IDs: {sorted(manifest_controller_ids)}."
+                        )
+                        continue
+
+                    registered_modules = manifest_modules.get(config_controller.controller_id, set())
+                    for module in config_controller.modules:
+                        module_key = (module.module_type, module.module_id)
+                        if module_key not in registered_modules:
+                            errors.append(
+                                f"{controller_label}, module ({module.module_type}, {module.module_id}): "
+                                f"Not registered in manifest for this controller."
+                            )
+
+    return {
+        "valid": not errors,
+        "config_path": config_path,
+        "errors": errors,
+        "summary": {
+            "total_controllers": len(config.controllers),
+            "total_modules": total_modules,
+            "controllers_with_kernel": sum(1 for c in config.controllers if c.kernel is not None),
+        },
+    }
+
+
+@mcp.tool()  # pragma: no cover
 def prepare_log_processing_batch_tool(  # pragma: no cover
     log_directories: list[str],
     source_ids: list[str],
     output_directories: list[str],
+    config_path: str,
 ) -> dict[str, Any]:
     """Prepares an execution manifest for batch log processing without starting execution.
 
-    Accepts log directories, source IDs, and output directories from the caller and initializes a
-    ProcessingTracker with one data-extraction job per source ID for each log directory. Idempotent: if a
-    tracker already exists for a log directory, returns the existing manifest with current job statuses instead
-    of reinitializing. Requires prior discovery -- the caller must provide confirmed source IDs rather than
-    relying on implicit archive or manifest discovery.
+    Accepts log directories, source IDs, output directories, and an extraction configuration path from the caller
+    and initializes a ProcessingTracker with one data-extraction job per source ID for each log directory. The
+    configuration path is validated up front and embedded in every job descriptor so that downstream execution
+    tools receive a self-contained manifest. Idempotent: if a tracker already exists for a log directory, returns
+    the existing manifest with current job statuses instead of reinitializing. Requires prior discovery -- the
+    caller must provide confirmed source IDs rather than relying on implicit archive or manifest discovery.
 
     Important:
         The AI agent calling this tool MUST run discover_microcontroller_data_tool first to obtain log directory
-        paths and confirmed source IDs. The agent MUST ask the user for the output directory paths before calling
-        this tool. Do not assume or guess directory paths or source IDs.
+        paths and confirmed source IDs. The agent MUST ask the user for the output directory paths and extraction
+        configuration path before calling this tool. Do not assume or guess directory paths or source IDs.
 
     Args:
         log_directories: The list of absolute paths to DataLogger output directories containing log archives.
@@ -715,11 +820,23 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
         output_directories: The list of absolute paths for per-log-directory output. Must match the length of
             log_directories. Each output directory receives a ``microcontroller_data/`` subdirectory containing
             the processing tracker and output files.
+        config_path: The absolute path to the ExtractionConfig YAML file that specifies which events to extract
+            for each controller. Validated before batch preparation and embedded in every job descriptor.
 
     Returns:
         A dictionary containing per-log-directory manifests in 'log_directories' with tracker paths and job
         lists, total counts, and any invalid paths.
     """
+    # Validates the extraction configuration up front.
+    config_file = Path(config_path)
+    if not config_file.exists() or not config_file.is_file():
+        return {"error": f"Extraction config not found: {config_path}"}
+
+    try:
+        ExtractionConfig.load(file_path=config_file)
+    except Exception as error:  # noqa: BLE001
+        return {"error": f"Invalid extraction config: {error}"}
+
     if len(output_directories) != len(log_directories):
         return {
             "error": (
@@ -784,6 +901,7 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
                     "log_directory": log_dir_str,
                     "output_directory": str(data_path),
                     "tracker_path": str(tracker_path),
+                    "config_path": config_path,
                 }
                 for source_id in filtered_ids
             ]
@@ -819,27 +937,26 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
 @mcp.tool()  # pragma: no cover
 def execute_log_processing_jobs_tool(  # pragma: no cover
     jobs: list[dict[str, str]],
-    config_path: str,
     *,
     worker_budget: int = -1,
 ) -> dict[str, Any]:
     """Dispatches log processing jobs for background execution with budget-based worker allocation.
 
     Takes job descriptors from the manifest produced by prepare_log_processing_batch_tool and starts a background
-    execution manager that allocates CPU cores to each job based on its archive size. The worker budget directly
-    controls memory footprint since each worker spawns a separate process. Large archives (>= 2000 messages) receive
-    more workers, while small archives receive 1 worker since they process sequentially regardless. The manager fills
-    available budget greedily, dispatching smaller jobs alongside large ones when cores are available.
+    execution manager that allocates CPU cores to each job based on its archive size. Each job descriptor must
+    include its own 'config_path' key pointing to the ExtractionConfig YAML file for that job. The worker budget
+    directly controls memory footprint since each worker spawns a separate process. Large archives (>= 2000
+    messages) receive more workers, while small archives receive 1 worker since they process sequentially
+    regardless. The manager fills available budget greedily, dispatching smaller jobs alongside large ones when
+    cores are available.
 
     Important:
         Only one execution session can be active at a time. Use cancel_log_processing_tool to cancel an active
         session before starting a new one.
 
     Args:
-        jobs: The list of job descriptors, each a dictionary with 'log_directory', 'output_directory',
-            'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
-        config_path: The absolute path to the ExtractionConfig YAML file that specifies which events and
-            commands to extract for each controller.
+        jobs: The list of job descriptors from prepare_log_processing_batch_tool. Each dictionary must have
+            'log_directory', 'output_directory', 'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
         worker_budget: The total number of CPU cores available for the execution session. Directly controls memory
             footprint. Set to -1 for automatic resolution via resolve_worker_count.
 
@@ -879,7 +996,7 @@ def execute_log_processing_jobs_tool(  # pragma: no cover
             tracker_path=tracker_path,
             job_id=job_dict["job_id"],
             source_id=job_dict["source_id"],
-            config_path=Path(job_dict.get("config_path", config_path)),
+            config_path=Path(job_dict["config_path"]),
         )
         pending.append(pending_job)
         all_jobs[pending_job.dispatch_key] = pending_job
@@ -890,8 +1007,8 @@ def execute_log_processing_jobs_tool(  # pragma: no cover
     # Resolves the total worker budget.
     resolved_budget = resolve_worker_count(requested_workers=worker_budget, reserved_cores=_RESERVED_CORES)
 
-    # Probes archive message counts for all pending jobs. This reads only the zip directory of each .npz file,
-    # which is fast and does not load message data into memory.
+    # Probes archive message counts for all pending jobs. Reads only the zip directory of each .npz file,
+    # avoiding loading message data into memory.
     job_message_counts: dict[tuple[str, str], int] = {}
     for job in pending:
         job_message_counts[job.dispatch_key] = _probe_archive_message_count(job=job)
@@ -936,6 +1053,8 @@ def get_log_processing_status_tool() -> dict[str, Any]:  # pragma: no cover
         return {"active": False, "message": "No execution session exists."}
 
     state = _job_execution_state
+
+    # Checks whether the background execution manager thread is still running.
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
 
     # Reads status from tracker files for each job.
@@ -1005,8 +1124,11 @@ def get_log_processing_timing_tool() -> dict[str, Any]:  # pragma: no cover
 
     state = _job_execution_state
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
+
+    # Captures the current timestamp for computing elapsed time on running jobs.
     current_us = int(get_timestamp(output_format=TimestampFormats.INTEGER, precision=TimestampPrecisions.MICROSECOND))
 
+    # Collects per-job timing entries and tracks the earliest start for session-level statistics.
     job_timing: list[dict[str, Any]] = []
     earliest_start: int | None = None
     completed_count = 0
@@ -1071,15 +1193,13 @@ def get_log_processing_timing_tool() -> dict[str, Any]:  # pragma: no cover
             2,
         )
 
+    running_count = sum(1 for job_entry in job_timing if "elapsed_seconds" in job_entry)
     session: dict[str, Any] = {
         "total_elapsed_seconds": total_elapsed_seconds,
         "completed_count": completed_count,
         "failed_count": failed_count,
-        "running_count": sum(1 for job_entry in job_timing if "elapsed_seconds" in job_entry),
-        "pending_count": len(state.all_jobs)
-        - completed_count
-        - failed_count
-        - sum(1 for job_entry in job_timing if "elapsed_seconds" in job_entry),
+        "running_count": running_count,
+        "pending_count": len(state.all_jobs) - completed_count - failed_count - running_count,
     }
 
     if completed_count > 0 and earliest_start is not None:
@@ -1111,6 +1231,7 @@ def cancel_log_processing_tool() -> dict[str, Any]:  # pragma: no cover
 
     state = _job_execution_state
 
+    # Sets the canceled flag and clears pending jobs under the lock. Active groups complete naturally.
     with state.lock:
         state.canceled = True
         cleared_count = len(state.pending_queue)
@@ -1225,6 +1346,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:  # pr
     if not root_path.is_dir():
         return {"error": f"Path is not a directory: {root_directory}"}
 
+    # Discovers all tracker files recursively and aggregates their job statuses.
     log_dir_statuses: list[dict[str, Any]] = []
     aggregate_succeeded = 0
     aggregate_failed = 0
@@ -1275,6 +1397,138 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:  # pr
 
 
 @mcp.tool()  # pragma: no cover
+def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:  # pragma: no cover
+    """Verifies the completeness and schema correctness of processed microcontroller data output.
+
+    Scans the ``microcontroller_data/`` subdirectory under the specified output directory for feather files produced
+    by the log processing pipeline. For each feather file, validates the expected 5-column schema (timestamp_us,
+    command, event, dtype, data) and reports row counts. Also reads the processing tracker to report job statuses
+    alongside the output file inventory.
+
+    Args:
+        output_directory: The absolute path to the output directory containing a ``microcontroller_data/``
+            subdirectory with processed output.
+
+    Returns:
+        A dictionary containing a 'verified' flag, per-file results in 'files' (each with path, schema validity,
+        row count, and column names), tracker status in 'tracker', and aggregate counts.
+    """
+    output_path = Path(output_directory)
+
+    if not output_path.exists():
+        return {"error": f"Directory does not exist: {output_directory}"}
+
+    if not output_path.is_dir():
+        return {"error": f"Path is not a directory: {output_directory}"}
+
+    data_path = output_path / MICROCONTROLLER_DATA_DIRECTORY
+
+    if not data_path.exists():
+        return {
+            "error": (
+                f"No '{MICROCONTROLLER_DATA_DIRECTORY}' subdirectory found under '{output_directory}'. "
+                f"Processing may not have been run yet."
+            ),
+        }
+
+    expected_columns = {"timestamp_us", "command", "event", "dtype", "data"}
+    file_results: list[dict[str, Any]] = []
+    all_valid = True
+
+    # Scans for all feather files in the data directory.
+    feather_files = sorted(data_path.glob(f"*{FEATHER_SUFFIX}"))
+
+    for feather_file in feather_files:
+        entry: dict[str, Any] = {"file": str(feather_file), "filename": feather_file.name}
+
+        # Parses source ID and type (module vs kernel) from the filename.
+        name = feather_file.stem
+        if KERNEL_FEATHER_INFIX in name:
+            entry["type"] = "kernel"
+        elif MODULE_FEATHER_INFIX in name:
+            entry["type"] = "module"
+        else:
+            entry["type"] = "unknown"
+
+        try:
+            dataframe = pl.read_ipc(source=feather_file)
+        except Exception as error:  # noqa: BLE001
+            entry["valid"] = False
+            entry["error"] = f"Unable to read feather file: {error}"
+            all_valid = False
+            file_results.append(entry)
+            continue
+
+        actual_columns = set(dataframe.columns)
+        schema_valid = actual_columns == expected_columns
+
+        entry["valid"] = schema_valid
+        entry["columns"] = dataframe.columns
+        entry["row_count"] = dataframe.height
+
+        if not schema_valid:
+            missing = expected_columns - actual_columns
+            extra = actual_columns - expected_columns
+            if missing:
+                entry["missing_columns"] = sorted(missing)
+            if extra:
+                entry["extra_columns"] = sorted(extra)
+            all_valid = False
+
+        file_results.append(entry)
+
+    # Reads tracker status if available.
+    tracker_path = data_path / TRACKER_FILENAME
+    tracker_info: dict[str, Any] = {}
+    if tracker_path.exists():
+        try:
+            tracker_info = _read_tracker_status(tracker_path=tracker_path)
+        except Exception:  # noqa: BLE001
+            tracker_info = {"error": "Unable to read tracker file."}
+
+    return {
+        "verified": all_valid and bool(feather_files),
+        "output_directory": output_directory,
+        "data_path": str(data_path),
+        "files": file_results,
+        "total_files": len(file_results),
+        "tracker": tracker_info,
+    }
+
+
+@mcp.tool()  # pragma: no cover
+def query_extracted_events_tool(  # pragma: no cover
+    feather_files: list[str],
+    max_sample_rows: int = 10,
+) -> dict[str, Any]:
+    """Reads one or more processed microcontroller data feather files and returns event distribution, timing
+    statistics, and sample rows.
+
+    For each file, computes the total row count, time range, per-event-code frequency distribution, per-command-code
+    frequency distribution, and inter-event timing statistics. Also returns a configurable number of sample rows
+    (head of the file) with binary data payloads omitted for readability. Accepts feather file paths from the
+    'files' list returned by verify_processing_output_tool.
+
+    Args:
+        feather_files: The list of absolute paths to feather files produced by the log processing pipeline.
+            Expected filename pattern: ``controller_{source_id}_module_{type}_{id}.feather`` or
+            ``controller_{source_id}_kernel.feather``.
+        max_sample_rows: The maximum number of sample rows to include per file. Defaults to 10.
+
+    Returns:
+        A dictionary containing a 'results' list with per-file statistics (each with 'file', 'summary',
+        'event_distribution', 'command_distribution', 'inter_event_timing', and 'sample_rows' keys) and a
+        'total_files' count. Files that cannot be read produce an entry with 'file' and 'error' keys.
+    """
+    results = [
+        _analyze_single_event_feather(feather_file=feather_file, max_sample_rows=max_sample_rows)
+        for feather_file in feather_files
+    ]
+
+    return {"results": results, "total_files": len(results)}
+
+
+@mcp.tool()  # pragma: no cover
 def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str, Any]:  # pragma: no cover
     """Deletes the microcontroller_data subdirectory under one or more output directories.
 
@@ -1298,8 +1552,8 @@ def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str,
     return {"results": results, "total_cleaned": total_cleaned, "total_directories": len(results)}
 
 
-# Placed after all @mcp.tool() definitions so that all tools are registered with the FastMCP instance before the
-# server run loop is callable.
+# Appears after all @mcp.tool() definitions to ensure all tools are registered with the FastMCP instance before
+# the server run loop becomes callable.
 def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:  # pragma: no cover
     """Starts the MCP server with the specified transport.
 
@@ -1307,17 +1561,17 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
         transport: The transport protocol to use. Supported values are 'stdio' for standard input/output communication
             and 'streamable-http' for HTTP-based communication.
     """
-    # Delegates to the FastMCP run loop, which blocks until the transport connection is closed. For 'stdio' this
-    # means the server runs until the parent process closes stdin; for 'streamable-http' it runs an HTTP server
-    # that accepts connections until explicitly terminated.
+    # Delegates to the FastMCP run loop, which blocks until the transport connection is closed. For 'stdio',
+    # the server runs until the parent process closes stdin. For 'streamable-http', runs an HTTP server that
+    # accepts connections until explicitly terminated.
     mcp.run(transport=transport)
 
 
 def run_mcp_server() -> None:  # pragma: no cover
     """Starts the MCP server with stdio transport.
 
-    This function is intended to be used as a CLI entry point. It starts the MCP server using the stdio transport
-    protocol, which is the recommended transport for Claude Desktop integration.
+    Serves as a CLI entry point, launching the MCP server using the stdio transport protocol recommended for Claude
+    Desktop integration.
     """
     run_server(transport="stdio")
 
@@ -1414,8 +1668,8 @@ def _group_jobs_by_tracker(state: _JobExecutionState) -> dict[Path, list[_Pendin
 def _scan_archive_source_ids(directory: Path) -> list[str]:  # pragma: no cover
     """Scans a directory for assembled log archives and extracts source IDs from their filenames.
 
-    Matches files ending with the log archive suffix and strips the suffix to recover the source ID string. Results
-    are returned in sorted order.
+    Matches files ending with the log archive suffix and strips the suffix to recover the source ID string. Returns
+    results in sorted order.
 
     Args:
         directory: The directory to scan for log archives.
@@ -1579,7 +1833,7 @@ def _group_worker(jobs: list[_PendingJob], workers: int, state: _JobExecutionSta
                 tracker.fail_job(job_id=job.job_id, error_message=f"No controller config for source '{job.source_id}'.")
                 continue
 
-            # execute_job already calls tracker.fail_job on exception, so the tracker state is updated.
+            # Suppresses exceptions because execute_job calls tracker.fail_job internally on failure.
             with contextlib.suppress(Exception):
                 log_path = find_log_archive(log_directory=job.log_directory, source_id=job.source_id)
                 execute_job(
@@ -1712,3 +1966,144 @@ def _job_execution_manager() -> None:  # pragma: no cover
 
         # Polls at 1-second intervals outside the lock to avoid blocking other threads.
         poll_timer.delay(delay=1, allow_sleep=True)
+
+
+def _analyze_single_event_feather(  # pragma: no cover
+    feather_file: str,
+    max_sample_rows: int,
+) -> dict[str, Any]:
+    """Reads a single microcontroller data feather file and computes event statistics.
+
+    Args:
+        feather_file: The absolute path to the feather file.
+        max_sample_rows: The maximum number of sample rows to include.
+
+    Returns:
+        A dictionary containing 'file', 'summary', 'event_distribution', 'command_distribution',
+        'inter_event_timing', and 'sample_rows' keys, or 'file' and 'error' keys if the file cannot be read.
+    """
+    file_path = Path(feather_file)
+
+    if not file_path.exists():
+        return {"file": feather_file, "error": f"File does not exist: {feather_file}"}
+
+    if not file_path.is_file():
+        return {"file": feather_file, "error": f"Path is not a file: {feather_file}"}
+
+    try:
+        dataframe = pl.read_ipc(source=file_path)
+    except Exception as error:  # noqa: BLE001
+        return {"file": feather_file, "error": f"Unable to read feather file: {error}"}
+
+    if "timestamp_us" not in dataframe.columns:
+        return {"file": feather_file, "error": f"Missing required 'timestamp_us' column. Found: {dataframe.columns}"}
+
+    total_rows = dataframe.height
+
+    if total_rows == 0:
+        return {
+            "file": feather_file,
+            "summary": {"total_rows": 0},
+            "event_distribution": [],
+            "command_distribution": [],
+            "inter_event_timing": {},
+            "sample_rows": [],
+        }
+
+    # Extracts the timestamp column and computes basic recording statistics.
+    timestamps = dataframe["timestamp_us"].to_numpy()
+    first_timestamp_us = int(timestamps[0])
+    last_timestamp_us = int(timestamps[-1])
+    duration_us = last_timestamp_us - first_timestamp_us
+    duration_seconds = (
+        round(
+            convert_time(time=duration_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.SECOND, as_float=True),
+            6,
+        )
+        if duration_us > 0
+        else 0.0
+    )
+
+    summary: dict[str, Any] = {
+        "total_rows": total_rows,
+        "first_timestamp_us": first_timestamp_us,
+        "last_timestamp_us": last_timestamp_us,
+        "duration_us": duration_us,
+        "duration_seconds": duration_seconds,
+    }
+
+    # Computes per-event-code frequency distribution.
+    event_distribution: list[dict[str, Any]] = []
+    if "event" in dataframe.columns:
+        event_counts = dataframe.group_by("event").len().sort("event")
+        event_distribution = [
+            {"event_code": int(row["event"]), "count": int(row["len"])} for row in event_counts.iter_rows(named=True)
+        ]
+
+    # Computes per-command-code frequency distribution.
+    command_distribution: list[dict[str, Any]] = []
+    if "command" in dataframe.columns:
+        command_counts = dataframe.group_by("command").len().sort("command")
+        command_distribution = [
+            {"command_code": int(row["command"]), "count": int(row["len"])}
+            for row in command_counts.iter_rows(named=True)
+        ]
+
+    # Computes inter-event timing statistics.
+    inter_event_timing: dict[str, Any] = {}
+    if total_rows >= _MINIMUM_ROWS_FOR_INTERVALS:
+        intervals_us = np.diff(timestamps).astype(np.int64)
+        mean_us = round(float(np.mean(intervals_us)), 2)
+        median_us = round(float(np.median(intervals_us)), 2)
+        std_us = round(float(np.std(intervals_us)), 2)
+        min_us = int(np.min(intervals_us))
+        max_us = int(np.max(intervals_us))
+
+        mean_ms = round(
+            convert_time(time=mean_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.MILLISECOND, as_float=True),
+            4,
+        )
+        median_ms = round(
+            convert_time(
+                time=median_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.MILLISECOND, as_float=True
+            ),
+            4,
+        )
+
+        inter_event_timing = {
+            "mean_us": mean_us,
+            "median_us": median_us,
+            "std_us": std_us,
+            "min_us": min_us,
+            "max_us": max_us,
+            "mean_ms": mean_ms,
+            "median_ms": median_ms,
+        }
+
+    # Builds sample rows with binary data omitted for readability.
+    sample_rows: list[dict[str, Any]] = []
+    sample_count = min(max_sample_rows, total_rows)
+    sample_df = dataframe.head(sample_count)
+
+    for row in sample_df.iter_rows(named=True):
+        sample_entry: dict[str, Any] = {"timestamp_us": int(row["timestamp_us"])}
+
+        if "command" in row:
+            sample_entry["command"] = int(row["command"])
+        if "event" in row:
+            sample_entry["event"] = int(row["event"])
+        if "dtype" in row:
+            sample_entry["dtype"] = row["dtype"]
+        if "data" in row:
+            sample_entry["has_data"] = row["data"] is not None
+
+        sample_rows.append(sample_entry)
+
+    return {
+        "file": feather_file,
+        "summary": summary,
+        "event_distribution": event_distribution,
+        "command_distribution": command_distribution,
+        "inter_event_timing": inter_event_timing,
+        "sample_rows": sample_rows,
+    }
