@@ -1,9 +1,9 @@
-"""This example script demonstrates the use of MicroControllerInterface with custom ModuleInterface classes.
+"""Demonstrates the use of MicroControllerInterface with custom ModuleInterface classes.
 
-Note that this example is intentionally kept simple and does not cover all possible use cases. Overall, this example
-demonstrates how to use the PC client to control custom hardware modules running on the Arduino or Teensy
-microcontroller in real time. It also demonstrates how to access the data received from the microcontroller that is
-saved to disk via the DataLogger instance.
+Showcases how to use the PC client to control custom hardware modules running on the Arduino or Teensy
+microcontroller in real time. Also demonstrates how to access the data received from the microcontroller that is
+saved to disk via the DataLogger instance. The example is intentionally kept simple and does not cover all possible
+use cases.
 
 This example is intended to be used together with a microcontroller running the module_integration.cpp from the
 companion ataraxis-micro-controller library: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart
@@ -13,14 +13,14 @@ API documentation: https://ataraxis-communication-interface-api.netlify.app/
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
+import tempfile
 from pathlib import Path
 
 import numpy as np
+from ataraxis_base_utilities import LogLevel, console
+from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from example_interface import TestModuleInterface
-from ataraxis_data_structures import DataLogger, assemble_log_archives
-from ataraxis_base_utilities import console, LogLevel
-import tempfile
 
 from ataraxis_communication_interface import (
     MICROCONTROLLER_MANIFEST_FILENAME,
@@ -32,20 +32,20 @@ from ataraxis_communication_interface import (
     run_log_processing_pipeline,
 )
 
-# Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
+# Guards the runtime to support MicroControllerInterface's multiprocessing architecture.
 if __name__ == "__main__":
     # Enables the console module to communicate the example's runtime progress via the terminal.
     console.enable()
 
     # Specifies the directory where to save all incoming and outgoing messages processed by the MicroControllerInterface
     # instance for each hardware module.
-    tempdir = tempfile.TemporaryDirectory()  # Creates a temporary directory for illustration purposes
+    tempdir = tempfile.TemporaryDirectory()  # Creates a temporary directory for illustration purposes.
     output_directory = Path(tempdir.name)
 
     # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
     # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
     data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
-    data_logger.start()  # The DataLogger has to be started before it can save any log entries.
+    data_logger.start()  # Starts the DataLogger before it can save any log entries.
 
     # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
     # different module_id codes, but the same type (family) id code.
@@ -53,10 +53,9 @@ if __name__ == "__main__":
     interface_2 = TestModuleInterface(module_type=np.uint8(1), module_id=np.uint8(2))
     interfaces = (interface_1, interface_2)
 
-    # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
-    # ataraxis-micro-controller library and abstracts most inner-workings of the library. Note; example expects a
-    # Teensy 4.1 microcontroller, and the parameters defined below may not be optimal for all supported
-    # microcontrollers!
+    # Instantiates the MicroControllerInterface. Functions similar to the Kernel class from the
+    # ataraxis-micro-controller library and abstracts most inner-workings of the library. Expects a Teensy 4.1
+    # microcontroller, and the parameters defined below may not be optimal for all supported microcontrollers.
     mc_interface = MicroControllerInterface(
         controller_id=np.uint8(222),
         buffer_size=8192,
@@ -67,18 +66,18 @@ if __name__ == "__main__":
         baudrate=115200,
         keepalive_interval=5000,
     )
-    console.echo("Initializing the communication process...")
+    console.echo(message="Initializing the communication process...")
 
     # Starts the serial communication with the microcontroller by initializing a separate process that handles the
     # communication. This method may take up to 15 seconds to execute, as it verifies that the microcontroller is
     # configured correctly, given the MicroControllerInterface configuration.
     mc_interface.start()
 
-    console.echo("Communication process: Initialized.", level=LogLevel.SUCCESS)
-    console.echo("Updating hardware module runtime parameters...")
+    console.echo(message="Communication process: Initialized.", level=LogLevel.SUCCESS)
+    console.echo(message="Updating hardware module runtime parameters...")
 
-    # Due to the current SharedMemoryArray implementation, the SHM instances require additional setup after the
-    # communication process is started.
+    # Due to the current SharedMemoryArray implementation, the shared memory instances require additional setup after
+    # the communication process is started.
     interface_1.start_shared_memory_array()
     interface_2.start_shared_memory_array()
 
@@ -91,9 +90,9 @@ if __name__ == "__main__":
         on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
     )
 
-    console.echo("Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
+    console.echo(message="Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
 
-    console.echo("Sending the 'echo' command to the TestModule 1...")
+    console.echo(message="Sending the 'echo' command to the TestModule 1...")
 
     # Requests instance 1 to return its echo value. By default, the echo command only runs once.
     interface_1.echo()
@@ -107,7 +106,7 @@ if __name__ == "__main__":
     console.echo(message=f"TestModule 1 echo value: {interface_1.shared_memory[2]}.", level=LogLevel.SUCCESS)
 
     # Demonstrates the use of non-blocking recurrent commands.
-    console.echo("Executing the example non-blocking runtime, standby for ~5 seconds...")
+    console.echo(message="Executing the example non-blocking runtime, standby for ~5 seconds...")
 
     # Instructs the first TestModule instance to start pulsing the managed pin (Pin 5 by default). With the parameters
     # sent earlier, it keeps the pin ON for 1 second and keeps it off for ~ 2 seconds (1 from off_duration,
@@ -132,15 +131,15 @@ if __name__ == "__main__":
     # of the microcontroller's clock. For Teensy 4.1, which was used to write this example, the pin is expected to
     # pulse ~2 times and the echo value is expected to be transmitted ~10 times during the test period.
     console.echo(message="Non-blocking runtime: Complete.", level=LogLevel.SUCCESS)
-    console.echo(f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
-    console.echo(f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+    console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+    console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
     # Resets the pulse and echo counters before executing the demonstration below.
     interface_1.shared_memory[0] = 0
     interface_2.shared_memory[1] = 0
 
     # Repeats the example above, but now uses blocking commands instead of non-blocking.
-    console.echo("Executing the example blocking runtime, standby for ~5 seconds...")
+    console.echo(message="Executing the example blocking runtime, standby for ~5 seconds...")
     interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=False)
     interface_2.echo(repetition_delay=np.uint32(500000))
     delay_timer.delay(delay=5, block=False)  # Reuses the same delay timer
@@ -150,22 +149,22 @@ if __name__ == "__main__":
     # This time, since the pin pulsing performed by module 1 interferes with the echo command performed by module 2,
     # both pulse and echo counters are expected to be ~5.
     console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
-    console.echo(f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
-    console.echo(f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+    console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+    console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
     # Stops the communication process and releases all resources used during runtime.
     mc_interface.stop()
-    console.echo("Communication process: Stopped.", level=LogLevel.SUCCESS)
+    console.echo(message="Communication process: Stopped.", level=LogLevel.SUCCESS)
 
     # Stops the DataLogger and assembles all logged data into a single .npz archive file. This step is required to be
     # able to extract the logged message data for further analysis.
     data_logger.stop()
-    console.echo("Assembling the message log archive...")
+    console.echo(message="Assembling the message log archive...")
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # To process the data logged during runtime, first generate a precursor extraction configuration from the
     # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during start().
-    console.echo("Creating extraction configuration from manifest...")
+    console.echo(message="Creating extraction configuration from manifest...")
     manifest_path = data_logger.output_directory / MICROCONTROLLER_MANIFEST_FILENAME
     config = create_extraction_config(manifest_path=manifest_path)
 
@@ -180,14 +179,14 @@ if __name__ == "__main__":
         kernel=KernelExtractionConfig(event_codes=(2,)),  # Extracts kernel status code 2 (module setup) events.
     )
 
-    # Save the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
+    # Saves the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
     config_path = data_logger.output_directory / "extraction_config.yaml"
     config.save(file_path=config_path)
     console.echo(message=f"Extraction config written to: {config_path}", level=LogLevel.SUCCESS)
 
-    # Run the log processing pipeline. This extracts hardware module and kernel message data from the log archives
-    # and writes the results to feather (IPC) files for downstream analysis.
-    console.echo("Processing the logged message data...")
+    # Runs the log processing pipeline. Extracts hardware module and kernel message data from the log archives and
+    # writes the results to feather (IPC) files for downstream analysis.
+    console.echo(message="Processing the logged message data...")
     output_path = Path(tempfile.mkdtemp())
     run_log_processing_pipeline(
         log_directory=data_logger.output_directory,

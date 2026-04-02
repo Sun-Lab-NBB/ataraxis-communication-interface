@@ -21,7 +21,8 @@ running the companion [microcontroller library](https://github.com/Sun-Lab-NBB/a
 the library defines a shared API that can be integrated into user-defined interfaces by subclassing the (base)
 ModuleInterface class. It also provides the MicroControllerInterface class that manages the microcontroller-PC
 communication and the MQTTCommunication class that allows exchanging data between local and remote clients over the
-MQTT (TCP) protocol.
+MQTT (TCP) protocol. This library is part of the
+[Ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) framework for AI-assisted scientific hardware control.
 
 ___
 
@@ -32,11 +33,15 @@ ___
   by the companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller).
 - Abstracts communication and microcontroller runtime management via the centralized microcontroller interface class.
 - Leverages MQTT protocol to support exchanging data between multiple local and remote clients.
-- Uses JIT compilation and LRU caching to optimize the runtime efficiency of all library assets.
+- Uses LRU caching to optimize the runtime efficiency of command and parameter message construction.
 - Contains many sanity checks performed at initialization time to minimize the potential for unexpected
   behavior and data corruption.
+- Provides a log data processing pipeline for extracting hardware module and kernel event data from runtime log
+  archives, with manifest-based discovery and parallel extraction to Feather (IPC) output files.
+- Generates microcontroller manifest files that tag DataLogger output directories with source-to-name mappings,
+  enabling downstream tools to identify which log archives were produced by ataraxis-communication-interface.
 - Includes an MCP server for AI agent integration (compatible with Claude Desktop and other MCP clients).
-- Apache 2 License.
+- Apache 2.0 License.
 
 ___
 
@@ -45,26 +50,35 @@ ___
 - [Dependencies](#dependencies)
 - [Installation](#installation)
 - [Usage](#usage)
-- [CLI Commands](#cli-commands)
-- [MCP Server](#mcp-server-agentic-integration)
+  - [Quickstart](#quickstart)
+  - [User-Defined Variables](#user-defined-variables)
+  - [Keepalive](#keepalive)
+  - [Communication](#communication)
+  - [Data Logging](#data-logging)
+    - [Log Format](#log-format)
+    - [Onset Timestamp](#onset-timestamp)
+    - [Working with MicroControllerInterface Logs](#working-with-microcontrollerinterface-logs)
+  - [Log Processing](#log-processing)
+  - [Custom Module Interfaces](#custom-module-interfaces)
+  - [Implementing Custom Module Interfaces](#implementing-custom-module-interfaces)
+  - [CLI](#cli)
+  - [MCP Server](#mcp-server)
 - [API Documentation](#api-documentation)
 - [Developers](#developers)
 - [Versioning](#versioning)
 - [Authors](#authors)
 - [License](#license)
-- [Acknowledgements](#acknowledgments)
+- [Acknowledgments](#acknowledgments)
 
 ___
 
 ## Dependencies
 
 - **MQTT broker**, if the library is intended to be used for sending and receiving data over the MQTT protocol. The
-  library was tested with a locally running [mosquitto MQTT broker](https://mosquitto.org/) version **2.0.22**.
+  library was tested with a locally running [mosquitto MQTT broker](https://mosquitto.org/) version **2.1.2**.
 
-For users, all other library dependencies are installed automatically by all supported installation methods
-(see [Installation](#installation) section).
-
-***Note!*** Developers should see the [Developers](#developers) section for information on installing additional
+For users, all other library dependencies are installed automatically by all supported installation methods.
+For developers, see the [Developers](#developers) section for information on installing additional
 development dependencies.
 
 ___
@@ -73,20 +87,21 @@ ___
 
 ### Source
 
-Note, installation from source is ***highly discouraged*** for anyone who is not an active project developer.
+***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active
+project developer.
 
-1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the
-   [stable releases](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/releases).
-2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
-3. ```cd``` to the root directory of the prepared project distribution.
-4. Run ```python -m pip install .``` to install the project. Alternatively, if using a distribution with precompiled
-   binaries, use ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file.
+1. Download this repository to the local machine using the preferred method, such as git-cloning.
+   Use one of the [stable releases](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags) that
+   include precompiled binary and source code distribution (sdist) wheels.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the
+   appropriate decompression tool.
+3. `cd` to the root directory of the prepared project distribution.
+4. Run `pip install .` to install the project and its dependencies.
 
 ### pip
-Use the following command to install the library using pip:
-```
-pip install ataraxis-communication-interface
-```
+
+Use the following command to install the library and all of its dependencies via
+[pip](https://pip.pypa.io/en/stable/): `pip install ataraxis-communication-interface`
 
 ___
 
@@ -95,37 +110,46 @@ ___
 ### Quickstart
 This section demonstrates how to use custom hardware module interfaces compatible with this library. See
 [this section](#implementing-custom-module-interfaces) for instructions on how to implement module interface classes.
-Note, the example below should be run together with the companion
+The example below should be run together with the companion
 [microcontroller module](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart) example.
 See the [example_runtime.py](./examples/example_runtime.py) for the .py implementation of this example.
 ```python
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import numpy as np
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger, assemble_log_archives
-from ataraxis_base_utilities import console, LogLevel
-from ataraxis_communication_interface import MicroControllerInterface, extract_logged_hardware_module_data
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 
 # Imports the TestModuleInterface class from the companion example file (examples/example_interface.py).
 # Run this script from the 'examples' directory or adjust the import path accordingly.
 from examples.example_interface import TestModuleInterface
 
-# Since MicroControllerInterface uses multiple processes, it has to be called with the '__main__' guard
+from ataraxis_communication_interface import (
+    MICROCONTROLLER_MANIFEST_FILENAME,
+    MicroControllerInterface,
+    ModuleExtractionConfig,
+    KernelExtractionConfig,
+    ControllerExtractionConfig,
+    create_extraction_config,
+    run_log_processing_pipeline,
+)
+
+# Guards the runtime to support MicroControllerInterface's multiprocessing architecture.
 if __name__ == "__main__":
     # Enables the console module to communicate the example's runtime progress via the terminal.
     console.enable()
 
     # Specifies the directory where to save all incoming and outgoing messages processed by the MicroControllerInterface
     # instance for each hardware module.
-    tempdir = tempfile.TemporaryDirectory()  # Creates a temporary directory for illustration purposes
+    tempdir = tempfile.TemporaryDirectory()  # Creates a temporary directory for illustration purposes.
     output_directory = Path(tempdir.name)
 
     # Instantiates the DataLogger, which is used to save all incoming and outgoing MicroControllerInterface messages
     # to disk. See https://github.com/Sun-Lab-NBB/ataraxis-data-structures for more details on DataLogger class.
     data_logger = DataLogger(output_directory=output_directory, instance_name="AMC")
-    data_logger.start()  # The DataLogger has to be started before it can save any log entries.
+    data_logger.start()  # Starts the DataLogger before it can save any log entries.
 
     # Defines two interface instances, one for each TestModule used at the same time. Note that each instance uses
     # different module_id codes, but the same type (family) id code.
@@ -133,31 +157,31 @@ if __name__ == "__main__":
     interface_2 = TestModuleInterface(module_type=np.uint8(1), module_id=np.uint8(2))
     interfaces = (interface_1, interface_2)
 
-    # Instantiates the MicroControllerInterface. This class functions similar to the Kernel class from the
-    # ataraxis-micro-controller library and abstracts most inner-workings of the library. Note; example expects a
-    # Teensy 4.1 microcontroller, and the parameters defined below may not be optimal for all supported
-    # microcontrollers!
+    # Instantiates the MicroControllerInterface. Functions similar to the Kernel class from the
+    # ataraxis-micro-controller library and abstracts most inner-workings of the library. Expects a Teensy 4.1
+    # microcontroller, and the parameters defined below may not be optimal for all supported microcontrollers.
     mc_interface = MicroControllerInterface(
         controller_id=np.uint8(222),
         buffer_size=8192,
         port="/dev/ttyACM1",
         data_logger=data_logger,
         module_interfaces=interfaces,
+        name="test_controller",
         baudrate=115200,
         keepalive_interval=5000,
     )
-    console.echo("Initializing the communication process...")
+    console.echo(message="Initializing the communication process...")
 
     # Starts the serial communication with the microcontroller by initializing a separate process that handles the
     # communication. This method may take up to 15 seconds to execute, as it verifies that the microcontroller is
     # configured correctly, given the MicroControllerInterface configuration.
     mc_interface.start()
 
-    console.echo("Communication process: Initialized.", level=LogLevel.SUCCESS)
-    console.echo("Updating hardware module runtime parameters...")
+    console.echo(message="Communication process: Initialized.", level=LogLevel.SUCCESS)
+    console.echo(message="Updating hardware module runtime parameters...")
 
-    # Due to the current SharedMemoryArray implementation, the SHM instances require additional setup after the
-    # communication process is started.
+    # Due to the current SharedMemoryArray implementation, the shared memory instances require additional setup after
+    # the communication process is started.
     interface_1.start_shared_memory_array()
     interface_2.start_shared_memory_array()
 
@@ -170,9 +194,9 @@ if __name__ == "__main__":
         on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
     )
 
-    console.echo("Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
+    console.echo(message="Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
 
-    console.echo("Sending the 'echo' command to the TestModule 1...")
+    console.echo(message="Sending the 'echo' command to the TestModule 1...")
 
     # Requests instance 1 to return its echo value. By default, the echo command only runs once.
     interface_1.echo()
@@ -186,7 +210,7 @@ if __name__ == "__main__":
     console.echo(message=f"TestModule 1 echo value: {interface_1.shared_memory[2]}.", level=LogLevel.SUCCESS)
 
     # Demonstrates the use of non-blocking recurrent commands.
-    console.echo("Executing the example non-blocking runtime, standby for ~5 seconds...")
+    console.echo(message="Executing the example non-blocking runtime, standby for ~5 seconds...")
 
     # Instructs the first TestModule instance to start pulsing the managed pin (Pin 5 by default). With the parameters
     # sent earlier, it keeps the pin ON for 1 second and keeps it off for ~ 2 seconds (1 from off_duration,
@@ -211,15 +235,15 @@ if __name__ == "__main__":
     # of the microcontroller's clock. For Teensy 4.1, which was used to write this example, the pin is expected to
     # pulse ~2 times and the echo value is expected to be transmitted ~10 times during the test period.
     console.echo(message="Non-blocking runtime: Complete.", level=LogLevel.SUCCESS)
-    console.echo(f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
-    console.echo(f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+    console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+    console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
     # Resets the pulse and echo counters before executing the demonstration below.
     interface_1.shared_memory[0] = 0
     interface_2.shared_memory[1] = 0
 
     # Repeats the example above, but now uses blocking commands instead of non-blocking.
-    console.echo("Executing the example blocking runtime, standby for ~5 seconds...")
+    console.echo(message="Executing the example blocking runtime, standby for ~5 seconds...")
     interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=False)
     interface_2.echo(repetition_delay=np.uint32(500000))
     delay_timer.delay(delay=5, block=False)  # Reuses the same delay timer
@@ -229,40 +253,51 @@ if __name__ == "__main__":
     # This time, since the pin pulsing performed by module 1 interferes with the echo command performed by module 2,
     # both pulse and echo counters are expected to be ~5.
     console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
-    console.echo(f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
-    console.echo(f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+    console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+    console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
     # Stops the communication process and releases all resources used during runtime.
     mc_interface.stop()
-    console.echo("Communication process: Stopped.", level=LogLevel.SUCCESS)
+    console.echo(message="Communication process: Stopped.", level=LogLevel.SUCCESS)
 
     # Stops the DataLogger and assembles all logged data into a single .npz archive file. This step is required to be
     # able to extract the logged message data for further analysis.
     data_logger.stop()
-    console.echo("Assembling the message log archive...")
+    console.echo(message="Assembling the message log archive...")
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
-    # To process the data logged during runtime, it must be extracted from the archive created above. This can be
-    # done with the help of the `extract_logged_hardware_module_data` function:
-    console.echo("Extracting the logged message data...")
-    log_data = extract_logged_hardware_module_data(
-        log_path=data_logger.output_directory.joinpath(f"222_log.npz"),
-        module_type_id=(
-            (int(interface_1.module_type), int(interface_1.module_id)),
-            (int(interface_2.module_type), int(interface_2.module_id)),
+    # To process the data logged during runtime, first generate a precursor extraction configuration from the
+    # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during start().
+    console.echo(message="Creating extraction configuration from manifest...")
+    manifest_path = data_logger.output_directory / MICROCONTROLLER_MANIFEST_FILENAME
+    config = create_extraction_config(manifest_path=manifest_path)
+
+    # The generated config has empty event_codes for each module. Fill in the event codes that should be extracted.
+    # Event codes 52 (kHigh), 53 (kLow), and 54 (kEcho) are the TestModule event codes demonstrated above.
+    config.controllers[0] = ControllerExtractionConfig(
+        controller_id=222,
+        modules=(
+            ModuleExtractionConfig(module_type=1, module_id=1, event_codes=(52, 53, 54)),
+            ModuleExtractionConfig(module_type=1, module_id=2, event_codes=(52, 53, 54)),
         ),
+        kernel=KernelExtractionConfig(event_codes=(2,)),  # Extracts kernel status code 2 (module setup) events.
     )
-    # Uses pulse off and echo event codes to determine the total number of TestModule 1 pulses and TestModule 2 echo
-    # values encountered during runtime according to the processed log data.
-    module_1_pulses = len(log_data[0].event_data[np.uint8(53)])
-    module_2_echo_values = len(log_data[1].event_data[np.uint8(54)])
-    console.echo(
-        message=(
-            f"According to the extracted data, during runtime the TestModule 1 emitted a total of {module_1_pulses} "
-            f"pulses and the TestModule 2 sent {module_2_echo_values} echo values."
-        ),
-        level=LogLevel.SUCCESS,
+
+    # Saves the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
+    config_path = data_logger.output_directory / "extraction_config.yaml"
+    config.save(file_path=config_path)
+    console.echo(message=f"Extraction config written to: {config_path}", level=LogLevel.SUCCESS)
+
+    # Runs the log processing pipeline. Extracts hardware module and kernel message data from the log archives and
+    # writes the results to feather (IPC) files for downstream analysis.
+    console.echo(message="Processing the logged message data...")
+    output_path = Path(tempfile.mkdtemp())
+    run_log_processing_pipeline(
+        log_directory=data_logger.output_directory,
+        output_directory=output_path,
+        config=config_path,
     )
+    console.echo(message=f"Processing complete. Feather output written to: {output_path}", level=LogLevel.SUCCESS)
 ```
 
 ### User-Defined Variables
@@ -273,9 +308,9 @@ and the PC.**
 
 Two of these variables, the `module_type` and the `module_id` are used by the (base) **ModuleInterface** class. The
 remaining `controller_id` variable is used by the **MicroControllerInterface** class. See the
-[companion library's](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#user-defined-variables) ReadMe for more
+[companion library's](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#user-defined-variables) README for more
 details about each user-defined metadata variable. Typically, these variables are set in the microcontroller code and
-the PC code is adjusted to match the microcontroller code’s state.
+the PC code is adjusted to match the microcontroller code's state.
 
 ### Keepalive
 A major runtime safety feature of this library is the support for keepalive messaging. To work as intended, **both the
@@ -284,25 +319,25 @@ keepalive interval.**
 
 When enabled, the MicroControllerInterface instance sends a 'keepalive' command at regular intervals, specified by the
 `keepalive_interval` initialization argument. If the microcontroller does not receive the command for
-**two consecutive interval windows**, it aborts the runtime by resetting the microcontroller’s hardware and software to
-the default state and sends an error message to the PC. If the PC does not receive the microcontroller’s acknowledgement
-that it has received the keepalive command within **one interval windows from sending the previous command**, it aborts
+**two consecutive interval windows**, it aborts the runtime by resetting the microcontroller's hardware and software to
+the default state and sends an error message to the PC. If the PC does not receive the microcontroller's acknowledgement
+that it has received the keepalive command within **one interval window from sending the previous command**, it aborts
 the communication runtime with an error.
 
 The keepalive functionality is **disabled** (set to 0) by default, but it is recommended to enable it for most use
 cases. See the [API documentation for the MicroControllerInterface class](#api-documentation) for more details on
 configuring the keepalive messaging.
 
-***Note!*** The appropriate keepalive interval depends on the communication speed and the CPU frequency of the
-microcontroller. For a fast microcontroller (teensy4.1) that uses the USB communication interface, an appropriate
-keepalive interval is typically measured in milliseconds (100 to 500). For a slower microcontroller (arduino mega) with
+***Note,*** the appropriate keepalive interval depends on the communication speed and the CPU frequency of the
+microcontroller. For a fast microcontroller (Teensy 4.1) that uses the USB communication interface, an appropriate
+keepalive interval is typically measured in milliseconds (100 to 500). For a slower microcontroller (Arduino Mega) with
 a UART communication interface using the baudrate of 115200, the appropriate keepalive interval is typically measured
 in seconds (2 to 5).
 
 ### Communication
 During runtime, all communication with the microcontroller is routed via the MicroControllerInterface instance that
 implements the centralized communication and control interface for each microcontroller. To optimize runtime
-performance, the communication is managed by a daemonic process running in a separate CPU thread (core).
+performance, the communication is managed by a daemonic process running on a separate CPU core.
 
 When the data is sent to the microcontroller, it is first transferred to the communication process, which then transmits
 it to the microcontroller. When the data is received from the microcontroller, it is mostly handled by the communication
@@ -318,7 +353,14 @@ assets that generate log entries, such as [VideoSystem](https://github.com/Sun-L
 To support using the same logger instance for multiple concurrently active sources,
 **each source has to use a unique identifier value (controller id) when sending data to the logger instance**.
 
-**Note!** Currently, only the MicroControllerInterface supports logging the data to disk.
+Each MicroControllerInterface instance automatically writes a `microcontroller_manifest.yaml` file into the DataLogger
+output directory during initialization. The manifest associates the controller_id with the human-readable `name`
+provided to the MicroControllerInterface constructor, along with the list of module sources. When multiple
+MicroControllerInterface instances share the same DataLogger, each instance appends its entry to the same manifest file.
+The manifest is required by the [log processing](#log-processing) pipeline to validate which `.npz` archives were
+produced by ataraxis-communication-interface and to resolve source IDs for processing.
+
+***Note,*** currently, only the MicroControllerInterface supports logging data to disk.
 
 #### Log Format
 Each message is logged as a one-dimensional numpy uint8 array, saved as an .npy file. Inside the array, the data is
@@ -331,7 +373,7 @@ organized in the following order:
    be deserialized using the appropriate message structure. The payload occupies all remaining bytes, following the
    source ID and the timestamp.
 
-#### Onset timestamp:
+#### Onset Timestamp
 Each MicroControllerInterface generates an `onset` timestamp as part of its `start()` method runtime. This log entry
 uses a modified data order and stores the current UTC time, accurate to microseconds, as the total number of
 microseconds elapsed since the UTC epoch onset. All further log entries for the same source use the timestamp section
@@ -346,18 +388,32 @@ The onset log entry uses the following data organization order:
 
 #### Working with MicroControllerInterface Logs
 
-See the [quickstart](#quickstart) example above for a demonstration on how to assemble and parse the message
+See the [quickstart](#quickstart) example above for a demonstration on how to assemble and process the message
 log archives generated by the MicroControllerInterface instance at runtime.
 
-**Note!** Currently, the log parsing function only works with messages that use event-codes greater than 50 and only
-with messages sent by custom hardware module instances. The only exception to this rule is the **Command Completion**
-events (event code 2), which are also parsed for each hardware module.
+### Log Processing
 
-The logged data is packaged into a hierarchical structure the segments messages by each custom hardware module instance,
-packing each in the **ExtractedModuleData** dataclass instances. Each instance further segments the data into 'events'
-by storing extracted data in a dictionary that uses event-codes as keys and tuples of **ExtractedMessageData** instances
-as values. Each **ExtractedMessageData** stores the data of a single message received from the respective hardware
-module during runtime.
+This library includes a log data processing pipeline for extracting hardware module and kernel event data from the
+`.npz` log archives generated by MicroControllerInterface instances at runtime. The pipeline reads archives produced by
+the [DataLogger](https://github.com/Sun-Lab-NBB/ataraxis-data-structures#datalogger), extracts messages matching the
+event codes specified in an extraction configuration, and writes the results as
+[Polars](https://pola.rs/) DataFrames in Apache Feather (IPC) format.
+
+The pipeline uses the [microcontroller manifest](#data-logging) to validate that `.npz` archives were produced by
+ataraxis-communication-interface. A `microcontroller_manifest.yaml` file must be present in the log directory for
+processing to succeed. Controller IDs to process are resolved directly from the extraction configuration and validated
+against the manifest.
+
+The processing pipeline supports two execution modes. In **local mode**, all requested log archives are processed
+sequentially with automatic job tracking. In **remote mode**, a single job is executed by its unique identifier,
+enabling distributed processing across multiple compute nodes. Both modes use a YAML-based processing tracker to
+manage job lifecycle (scheduled, running, succeeded, or failed). All output files (tracker and Feather) are written
+into a `microcontroller_data/` subdirectory under the specified output directory.
+
+For single-directory processing, use the `axci process` CLI command or the `run_log_processing_pipeline()` function
+directly. For multi-directory batch workflows, use the [MCP server](#mcp-server) log processing tools, which handle
+archive discovery, batch preparation, concurrent execution, and status monitoring across multiple recording
+directories.
 
 ### Custom Module Interfaces
 For this library, an interface is a class that contains the logic for sending the command and parameter data to the
@@ -374,7 +430,7 @@ methods**.
 #### Abstract Methods
 These methods provide the inherited API used by the centralized microcontroller interface to connect hardware module
 interfaces to their hardware modules managed by the companion microcontroller. Specifically, the
-MicroControllerInterface calls these methods as part of the remote communication process’s runtime cycle to work with
+MicroControllerInterface calls these methods as part of the remote communication process's runtime cycle to work with
 the data sent by the custom hardware module.
 
 #### initialize_remote_assets
@@ -402,9 +458,9 @@ def terminate_remote_assets(self) -> None:
 #### process_received_data
 This method allows processing incoming module messages as they are received by the PC. The MicroControllerInterface
 instance calls this method for any ModuleState or ModuleData message received from the hardware module, if the
-event code of the message matches one of the codes in the data_codes attribute of the module’s interface instance.
+event code of the message matches one of the codes in the data_codes attribute of the module's interface instance.
 
-**Note!** The MicroControllerInterface class ***automatically*** saves (logs) each received and sent message to disk.
+***Note,*** the MicroControllerInterface class ***automatically*** saves (logs) each received and sent message to disk.
 Therefore, this method should ***not*** be used to save the data for post-runtime processing. Instead, this method
 should be used to process the data in real time or route it to other processes / machines for real time processing.
 
@@ -443,88 +499,76 @@ def process_received_data(self, message: ModuleData | ModuleState) -> None:
 #### Sending Data to the Microcontroller
 In addition to abstract methods, each interface may need to send data to the microcontroller. Broadly, the outgoing
 messages are divided into two categories: **commands** and **parameter updates**. Command messages instruct the module
-to perform a specified action. Parameter updates are used to overwrite the module’s runtime parameters to broadly adjust
+to perform a specified action. Parameter updates are used to overwrite the module's runtime parameters to broadly adjust
 how the module behaves while executing commands.
 
 Each interface should use the `send_parameters()` method inherited from the (base) ModuleInterface class to send
 parameter update messages to the managed module and the `send_command()` method to send command messages to the managed
-module. These utility method abstracts the necessary steps for packaging and transmitting the input data to the module.
+module. These utility methods abstract the necessary steps for packaging and transmitting the input data to the module.
 
-**Note!** These methods use LRU caching and JIT compilation to optimize their runtime speed and minimize the delay
-between submitting the message for transmission and it being sent to the microcontroller. Therefore, most command and
-parameter update functions / methods should be simple wrappers around these inherited methods. See the API documentation
-for the ModuleInterface class for the details about these methods inherited by each child interface class.
+***Note,*** these methods use LRU caching to optimize their runtime speed and minimize the delay between submitting
+the message for transmission and it being sent to the microcontroller. Therefore, most command and parameter update
+functions / methods should be simple wrappers around these inherited methods. See the API documentation for the
+ModuleInterface class for the details about these methods inherited by each child interface class.
 
-___
+### CLI
 
-## CLI Commands
+This library provides the `axci` CLI that exposes the following commands:
 
-This library provides several CLI commands for system diagnostics and MCP server management. All commands are available
-from any environment that has the library installed.
+| Command         | Description                                                              |
+|-----------------|--------------------------------------------------------------------------|
+| `id`            | Discovers all connected Ataraxis microcontrollers and returns their IDs  |
+| `mqtt`          | Checks whether an MQTT broker is reachable at the specified host / port  |
+| `config create` | Generates a precursor extraction config from a microcontroller manifest  |
+| `config show`   | Displays the contents of an extraction configuration file                |
+| `process`       | Processes log archives to extract hardware module and kernel event data  |
+| `mcp`           | Starts the MCP server for AI agent integration                           |
 
-### axci-id
-Discovers connected microcontrollers by evaluating each available serial port for whether it is connected to a valid
-Ataraxis microcontroller and, if so, queries the unique identifier of that microcontroller. Internally calls the
-`print_microcontroller_ids()` function.
+Use `axci --help` or `axci COMMAND --help` for detailed usage information.
 
-```bash
-axci-id
-```
+### MCP Server
 
-### axci-mqtt
-Checks whether an MQTT broker is reachable at the specified host and port. Useful for verifying broker availability
-before running code that depends on MQTT communication. Internally calls the `check_mqtt_connectivity()` function.
+This library provides an MCP server that exposes microcontroller discovery, MQTT connectivity checking, manifest
+management, extraction configuration management, and log data processing functionality for AI agent integration.
 
-```bash
-axci-mqtt
-```
-
-### axci-mcp
-Starts the MCP server for AI agent integration. See the [MCP Server](#mcp-server-agentic-integration) section for
-details.
-
-```bash
-axci-mcp
-```
-
-___
-
-## MCP Server (Agentic Integration)
-
-This library includes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables AI agents
-to programmatically interact with microcontroller discovery and MQTT broker connectivity checking functionality.
-
-### Starting the Server
+#### Starting the Server
 
 Start the MCP server using the CLI:
 
 ```bash
-axci-mcp
+axci mcp
 ```
 
-### Available Tools
+#### Available Tools
 
-| Tool                    | Description                                                                      |
-|-------------------------|----------------------------------------------------------------------------------|
-| `list_microcontrollers` | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs    |
-| `check_mqtt_broker`     | Checks whether an MQTT broker is reachable at the specified host and port        |
+| Tool                                  | Description                                                                   |
+|---------------------------------------|-------------------------------------------------------------------------------|
+| `list_microcontrollers`               | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs |
+| `check_mqtt_broker`                   | Checks whether an MQTT broker is reachable at the specified host and port     |
+| `assemble_log_archives_tool`          | Consolidates raw .npy log entries into .npz archives by source ID             |
+| `read_microcontroller_manifest_tool`  | Reads a microcontroller manifest file and returns its contents                |
+| `write_microcontroller_manifest_tool` | Writes or updates a microcontroller manifest file in a log directory          |
+| `discover_microcontroller_data_tool`  | Discovers confirmed microcontroller recordings under a root directory         |
+| `read_extraction_config_tool`         | Reads an extraction configuration from a YAML file and returns its contents   |
+| `write_extraction_config_tool`        | Writes an extraction configuration to a YAML file from structured data        |
+| `validate_extraction_config_tool`     | Validates an extraction config against a manifest for completeness            |
+| `prepare_log_processing_batch_tool`   | Prepares a batch of log processing jobs across multiple directories           |
+| `execute_log_processing_jobs_tool`    | Executes prepared log processing jobs with concurrent worker threads          |
+| `get_log_processing_status_tool`      | Returns the current status of the active log processing session               |
+| `get_log_processing_timing_tool`      | Returns timing information for all jobs in the active session                 |
+| `cancel_log_processing_tool`          | Cancels the active log processing execution session                           |
+| `reset_log_processing_jobs_tool`      | Resets failed or all jobs in a processing tracker for re-execution            |
+| `get_batch_status_overview_tool`      | Summarizes processing status for all log directories under a root directory   |
+| `verify_processing_output_tool`       | Verifies completeness and schema correctness of processed output              |
+| `query_extracted_events_tool`         | Queries and samples extracted event data from feather output files            |
+| `clean_log_processing_output_tool`    | Deletes processed output directories for clean re-processing                  |
 
-### Claude Desktop Configuration
+#### Client Registration
 
-For integration with Claude Desktop, add the following to the Claude Desktop configuration file
-(`~/.config/claude/claude_desktop_config.json` on Linux,
-`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or
-`%APPDATA%\Claude\claude_desktop_config.json` on Windows):
-
-```json
-{
-  "mcpServers": {
-    "ataraxis-communication-interface": {
-      "command": "axci-mcp"
-    }
-  }
-}
-```
+MCP server registration and Claude Code skill assets for this library are distributed through the
+[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace as part of the **communication** plugin. Install the
+plugin from the marketplace to automatically register the MCP server with compatible clients and make all associated
+skills available.
 
 ___
 
@@ -537,45 +581,82 @@ ___
 
 ## Developers
 
-This section provides installation, dependency, and build-system instructions for project developers.
+This section provides installation, dependency, and build-system instructions for the developers
+that want to modify the source code of this library.
 
 ### Installing the Project
 
-***Note!*** This installation method requires **mamba version 2.3.2 or above**. Currently, all Sun lab automation
-pipelines require that mamba is installed through the [miniforge3](https://github.com/conda-forge/miniforge) installer.
+***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all
+Sun lab automation pipelines require that mamba is installed through the
+[miniforge3](https://github.com/conda-forge/miniforge) installer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning.
-2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
-3. ```cd``` to the root directory of the prepared project distribution.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the
+   appropriate decompression tool.
+3. `cd` to the root directory of the prepared project distribution.
 4. Install the core Sun lab development dependencies into the ***base*** mamba environment via the
-   ```mamba install tox uv tox-uv``` command.
-5. Use the ```tox -e create``` command to create the project-specific development environment followed by
-   ```tox -e install``` command to install the project into that environment as a library.
+   `mamba install tox uv tox-uv` command.
+5. Use the `tox -e create` command to create the project-specific development environment followed
+   by `tox -e install` command to install the project into that environment as a library.
 
 ### Additional Dependencies
 
-In addition to installing the project and all user dependencies, install the following dependencies:
+In addition to installing the project and all user dependencies, install the following
+dependencies:
 
-1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by the developed project.
-   Currently, this library supports the three latest stable versions. It is recommended to use a tool like
-   [pyenv](https://github.com/pyenv/pyenv) to install and manage the required versions.
+1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by
+   the developed project. Currently, this library supports the three latest stable versions. It is
+   recommended to use a tool like [pyenv](https://github.com/pyenv/pyenv) to install and manage
+   the required versions.
 
 ### Development Automation
 
-This project comes with a fully configured set of automation pipelines implemented using
-[tox](https://tox.wiki/en/latest/user_guide.html). Check the [tox.ini file](tox.ini) for details about the
-available pipelines and their implementation. Alternatively, call ```tox list``` from the root directory of the project
-to see the list of available tasks.
+This project uses `tox` for development automation. The following tox environments are available:
 
-**Note!** All pull requests for this project have to successfully complete the ```tox``` task before being merged.
-To expedite the task’s runtime, use the ```tox --parallel``` command to run some tasks in-parallel.
+| Environment          | Description                                                  |
+|----------------------|--------------------------------------------------------------|
+| `lint`               | Runs ruff formatting, ruff linting, and mypy type checking   |
+| `stubs`              | Generates py.typed marker and .pyi stub files                |
+| `{py312,...}-test`   | Runs the test suite via pytest for each supported Python     |
+| `coverage`           | Aggregates test coverage into an HTML report                 |
+| `docs`               | Builds the API documentation via Sphinx                      |
+| `build`              | Builds sdist and wheel distributions                         |
+| `upload`             | Uploads distributions to PyPI via twine                      |
+| `install`            | Builds and installs the project into its mamba environment   |
+| `uninstall`          | Uninstalls the project from its mamba environment            |
+| `create`             | Creates the project's mamba development environment          |
+| `remove`             | Removes the project's mamba development environment          |
+| `provision`          | Recreates the mamba environment from scratch                 |
+| `export`             | Exports the mamba environment as .yml and spec.txt files     |
+| `import`             | Creates or updates the mamba environment from a .yml file    |
+
+Run any environment using `tox -e ENVIRONMENT`. For example, `tox -e lint`.
+
+***Note,*** all pull requests for this project have to successfully complete the `tox` task before
+being merged. To expedite the task's runtime, use the `tox --parallel` command to run some tasks
+in parallel.
+
+### AI-Assisted Development
+
+Claude Code skills and AI development assets for this project are distributed through the
+[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace across two plugins:
+
+- **communication** plugin: Provides MCP server registration, communication-specific skills for microcontroller setup,
+  pipeline orchestration, log processing, and extraction configuration management. Install this plugin to register the
+  `axci mcp` server with compatible MCP clients and make all communication workflow skills available.
+- **automation** plugin: Provides shared development skills that enforce Sun Lab coding conventions (Python style,
+  README style, commit messages, pyproject.toml, tox configuration) and general-purpose codebase exploration tools.
+
+Install both plugins from the marketplace to make all associated skills and development tools available to compatible
+AI coding agents.
 
 ### Automation Troubleshooting
 
-Many packages used in 'tox' automation pipelines (uv, mypy, ruff) and 'tox' itself may experience runtime failures. In
-most cases, this is related to their caching behavior. If an unintelligible error is encountered with
-any of the automation components, deleting the corresponding .cache (.tox, .ruff_cache, .mypy_cache, etc.) manually
-or via a CLI command typically solves the issue.
+Many packages used in `tox` automation pipelines (uv, mypy, ruff) and `tox` itself may experience
+runtime failures. In most cases, this is related to their caching behavior. If an unintelligible
+error is encountered with any of the automation components, deleting the corresponding cache
+directories (`.tox`, `.ruff_cache`, `.mypy_cache`, etc.) manually or via a CLI command typically
+resolves the issue.
 
 ___
 
