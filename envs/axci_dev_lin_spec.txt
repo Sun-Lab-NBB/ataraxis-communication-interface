@@ -76,7 +76,7 @@ https://conda.anaconda.org/conda-forge/linux-64/libmpdec-4.0.0-hb03c661_1.conda
 
 https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.52.0-hf4e2dac_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.2.0-h934c35e_18.conda
-https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.41.3-h5347b49_0.conda
+https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42-h5347b49_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_2.conda
 
 
@@ -116,7 +116,7 @@ https://conda.anaconda.org/conda-forge/linux-64/python-3.14.3-h32b2ec7_101_cp314
 https://conda.anaconda.org/conda-forge/noarch/python-discovery-1.2.1-pyhcf101f3_0.conda
 
 
-https://conda.anaconda.org/conda-forge/noarch/python-uv-0.11.2-pyhcf101f3_0.conda
+https://conda.anaconda.org/conda-forge/noarch/python-uv-0.11.3-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
 https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
 
@@ -146,7 +146,7 @@ https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
 https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tomli-w-1.2.0-pyhd8ed1ab_0.conda
-https://conda.anaconda.org/conda-forge/noarch/tox-4.50.3-pyhcf101f3_0.conda
+https://conda.anaconda.org/conda-forge/noarch/tox-4.52.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tox-uv-1.29.0-pyhd8ed1ab_0.conda
 
 
@@ -157,7 +157,7 @@ https://conda.anaconda.org/conda-forge/noarch/tox-uv-1.29.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.15.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
 
-https://conda.anaconda.org/conda-forge/linux-64/uv-0.11.2-h0f56927_0.conda
+https://conda.anaconda.org/conda-forge/linux-64/uv-0.11.3-h0f56927_0.conda
 
 https://conda.anaconda.org/conda-forge/noarch/virtualenv-21.2.0-pyhcf101f3_0.conda
 
