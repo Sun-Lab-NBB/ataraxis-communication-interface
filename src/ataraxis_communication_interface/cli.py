@@ -42,10 +42,9 @@ def axci_cli() -> None:  # pragma: no cover
     "via the UART serial interface; ignored by microcontrollers that use the USB interface.",
 )
 def identify(baudrate: int) -> None:  # pragma: no cover
-    """Discovers all available serial ports and identifies which ones are connected to Arduino or Teensy
-    microcontrollers running the ataraxis-micro-controller library.
+    """Discovers all connected Arduino or Teensy microcontrollers running the ataraxis-micro-controller library.
 
-    Uses parallel processing to simultaneously query all ports for microcontroller identification.
+    Use this command to identify the hardware available to the local host-machine.
     """
     # Gets all available serial ports.
     available_ports = list_available_ports()
@@ -160,7 +159,7 @@ def config_group() -> None:  # pragma: no cover
     "--output-path",
     required=True,
     type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
-    help="The path where the extraction_config.yaml file will be written.",
+    help="The path to the output .yaml file where to save the generated configuration data.",
 )
 def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no cover
     """Generates a precursor extraction configuration from a microcontroller manifest.
@@ -183,12 +182,12 @@ def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no
     "--config-path",
     required=True,
     type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path),
-    help="The path to the extraction_config.yaml file to display.",
+    help="The path to the extraction configuration .yaml file to display.",
 )
 def config_show(config_path: Path) -> None:  # pragma: no cover
     """Displays the contents of an extraction configuration file.
 
-    Reads the extraction_config.yaml and prints each controller's modules, event codes, command codes,
+    Reads the specified .yaml file and prints each controller's modules, event codes, command codes,
     and kernel settings.
     """
     config = ExtractionConfig.load(file_path=config_path)
@@ -212,7 +211,8 @@ def config_show(config_path: Path) -> None:  # pragma: no cover
     "--log-directory",
     required=True,
     type=click.Path(exists=True, file_okay=False, dir_okay=True, readable=True, path_type=Path),
-    help="The path to the root directory to search for .npz log archives. Searched recursively.",
+    help="The path to the root directory to search for .npz log archives. Typically this is the root directory of the "
+    "processed recording session.",
 )
 @click.option(
     "-od",
@@ -220,14 +220,15 @@ def config_show(config_path: Path) -> None:  # pragma: no cover
     required=True,
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
     help="The path to the directory where processed output files are written. Created automatically if it "
-    "does not exist.",
+    "does not exist. All processed data is saved under microcontroller_data subdirectory created under this target "
+    "output directory.",
 )
 @click.option(
     "-c",
     "--config",
     required=True,
     type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path),
-    help="The path to the extraction_config.yaml specifying which controllers, modules, and events to extract.",
+    help="The path to the .yaml file specifying which controllers, modules, and events to extract.",
 )
 @click.option(
     "-id",
