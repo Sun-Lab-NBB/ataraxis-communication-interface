@@ -264,6 +264,105 @@ _PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]] = {
     163: lambda: np.zeros(15, dtype=np.uint64),  # kFifteenUint64s
     164: lambda: np.zeros(15, dtype=np.int64),  # kFifteenInt64s
     165: lambda: np.zeros(15, dtype=np.float64),  # kFifteenFloat64s
+    # Extended prototypes (codes 166-252)
+    # bool extended (16 bytes to 248 bytes)
+    166: lambda: np.zeros(16, dtype=np.bool_),  # kSixteenBools
+    167: lambda: np.zeros(24, dtype=np.bool_),  # kTwentyFourBools
+    168: lambda: np.zeros(32, dtype=np.bool_),  # kThirtyTwoBools
+    169: lambda: np.zeros(40, dtype=np.bool_),  # kFortyBools
+    170: lambda: np.zeros(48, dtype=np.bool_),  # kFortyEightBools
+    171: lambda: np.zeros(52, dtype=np.bool_),  # kFiftyTwoBools
+    172: lambda: np.zeros(248, dtype=np.bool_),  # kTwoHundredFortyEightBools
+    # uint8_t extended (16 bytes to 248 bytes)
+    173: lambda: np.zeros(16, dtype=np.uint8),  # kSixteenUint8s
+    174: lambda: np.zeros(18, dtype=np.uint8),  # kEighteenUint8s
+    175: lambda: np.zeros(20, dtype=np.uint8),  # kTwentyUint8s
+    176: lambda: np.zeros(22, dtype=np.uint8),  # kTwentyTwoUint8s
+    177: lambda: np.zeros(24, dtype=np.uint8),  # kTwentyFourUint8s
+    178: lambda: np.zeros(28, dtype=np.uint8),  # kTwentyEightUint8s
+    179: lambda: np.zeros(32, dtype=np.uint8),  # kThirtyTwoUint8s
+    180: lambda: np.zeros(36, dtype=np.uint8),  # kThirtySixUint8s
+    181: lambda: np.zeros(40, dtype=np.uint8),  # kFortyUint8s
+    182: lambda: np.zeros(44, dtype=np.uint8),  # kFortyFourUint8s
+    183: lambda: np.zeros(48, dtype=np.uint8),  # kFortyEightUint8s
+    184: lambda: np.zeros(52, dtype=np.uint8),  # kFiftyTwoUint8s
+    185: lambda: np.zeros(64, dtype=np.uint8),  # kSixtyFourUint8s
+    186: lambda: np.zeros(96, dtype=np.uint8),  # kNinetySixUint8s
+    187: lambda: np.zeros(128, dtype=np.uint8),  # kOneHundredTwentyEightUint8s
+    188: lambda: np.zeros(192, dtype=np.uint8),  # kOneHundredNinetyTwoUint8s
+    189: lambda: np.zeros(244, dtype=np.uint8),  # kTwoHundredFortyFourUint8s
+    190: lambda: np.zeros(248, dtype=np.uint8),  # kTwoHundredFortyEightUint8s
+    # int8_t extended (16 bytes to 248 bytes)
+    191: lambda: np.zeros(16, dtype=np.int8),  # kSixteenInt8s
+    192: lambda: np.zeros(24, dtype=np.int8),  # kTwentyFourInt8s
+    193: lambda: np.zeros(32, dtype=np.int8),  # kThirtyTwoInt8s
+    194: lambda: np.zeros(40, dtype=np.int8),  # kFortyInt8s
+    195: lambda: np.zeros(48, dtype=np.int8),  # kFortyEightInt8s
+    196: lambda: np.zeros(52, dtype=np.int8),  # kFiftyTwoInt8s
+    197: lambda: np.zeros(92, dtype=np.int8),  # kNinetyTwoInt8s
+    198: lambda: np.zeros(132, dtype=np.int8),  # kOneHundredThirtyTwoInt8s
+    199: lambda: np.zeros(172, dtype=np.int8),  # kOneHundredSeventyTwoInt8s
+    200: lambda: np.zeros(212, dtype=np.int8),  # kTwoHundredTwelveInt8s
+    201: lambda: np.zeros(244, dtype=np.int8),  # kTwoHundredFortyFourInt8s
+    202: lambda: np.zeros(248, dtype=np.int8),  # kTwoHundredFortyEightInt8s
+    # uint16_t extended (32 bytes to 248 bytes)
+    203: lambda: np.zeros(16, dtype=np.uint16),  # kSixteenUint16s
+    204: lambda: np.zeros(20, dtype=np.uint16),  # kTwentyUint16s
+    205: lambda: np.zeros(24, dtype=np.uint16),  # kTwentyFourUint16s
+    206: lambda: np.zeros(26, dtype=np.uint16),  # kTwentySixUint16s
+    207: lambda: np.zeros(32, dtype=np.uint16),  # kThirtyTwoUint16s
+    208: lambda: np.zeros(48, dtype=np.uint16),  # kFortyEightUint16s
+    209: lambda: np.zeros(64, dtype=np.uint16),  # kSixtyFourUint16s
+    210: lambda: np.zeros(96, dtype=np.uint16),  # kNinetySixUint16s
+    211: lambda: np.zeros(122, dtype=np.uint16),  # kOneHundredTwentyTwoUint16s
+    212: lambda: np.zeros(124, dtype=np.uint16),  # kOneHundredTwentyFourUint16s
+    # int16_t extended (32 bytes to 248 bytes)
+    213: lambda: np.zeros(16, dtype=np.int16),  # kSixteenInt16s
+    214: lambda: np.zeros(20, dtype=np.int16),  # kTwentyInt16s
+    215: lambda: np.zeros(24, dtype=np.int16),  # kTwentyFourInt16s
+    216: lambda: np.zeros(26, dtype=np.int16),  # kTwentySixInt16s
+    217: lambda: np.zeros(32, dtype=np.int16),  # kThirtyTwoInt16s
+    218: lambda: np.zeros(48, dtype=np.int16),  # kFortyEightInt16s
+    219: lambda: np.zeros(64, dtype=np.int16),  # kSixtyFourInt16s
+    220: lambda: np.zeros(96, dtype=np.int16),  # kNinetySixInt16s
+    221: lambda: np.zeros(122, dtype=np.int16),  # kOneHundredTwentyTwoInt16s
+    222: lambda: np.zeros(124, dtype=np.int16),  # kOneHundredTwentyFourInt16s
+    # uint32_t extended (64 bytes to 248 bytes)
+    223: lambda: np.zeros(16, dtype=np.uint32),  # kSixteenUint32s
+    224: lambda: np.zeros(20, dtype=np.uint32),  # kTwentyUint32s
+    225: lambda: np.zeros(24, dtype=np.uint32),  # kTwentyFourUint32s
+    226: lambda: np.zeros(32, dtype=np.uint32),  # kThirtyTwoUint32s
+    227: lambda: np.zeros(48, dtype=np.uint32),  # kFortyEightUint32s
+    228: lambda: np.zeros(62, dtype=np.uint32),  # kSixtyTwoUint32s
+    # int32_t extended (64 bytes to 248 bytes)
+    229: lambda: np.zeros(16, dtype=np.int32),  # kSixteenInt32s
+    230: lambda: np.zeros(20, dtype=np.int32),  # kTwentyInt32s
+    231: lambda: np.zeros(24, dtype=np.int32),  # kTwentyFourInt32s
+    232: lambda: np.zeros(32, dtype=np.int32),  # kThirtyTwoInt32s
+    233: lambda: np.zeros(48, dtype=np.int32),  # kFortyEightInt32s
+    234: lambda: np.zeros(62, dtype=np.int32),  # kSixtyTwoInt32s
+    # float extended (64 bytes to 248 bytes)
+    235: lambda: np.zeros(16, dtype=np.float32),  # kSixteenFloat32s
+    236: lambda: np.zeros(20, dtype=np.float32),  # kTwentyFloat32s
+    237: lambda: np.zeros(24, dtype=np.float32),  # kTwentyFourFloat32s
+    238: lambda: np.zeros(32, dtype=np.float32),  # kThirtyTwoFloat32s
+    239: lambda: np.zeros(48, dtype=np.float32),  # kFortyEightFloat32s
+    240: lambda: np.zeros(62, dtype=np.float32),  # kSixtyTwoFloat32s
+    # uint64_t extended (128 bytes to 248 bytes)
+    241: lambda: np.zeros(16, dtype=np.uint64),  # kSixteenUint64s
+    242: lambda: np.zeros(20, dtype=np.uint64),  # kTwentyUint64s
+    243: lambda: np.zeros(24, dtype=np.uint64),  # kTwentyFourUint64s
+    244: lambda: np.zeros(31, dtype=np.uint64),  # kThirtyOneUint64s
+    # int64_t extended (128 bytes to 248 bytes)
+    245: lambda: np.zeros(16, dtype=np.int64),  # kSixteenInt64s
+    246: lambda: np.zeros(20, dtype=np.int64),  # kTwentyInt64s
+    247: lambda: np.zeros(24, dtype=np.int64),  # kTwentyFourInt64s
+    248: lambda: np.zeros(31, dtype=np.int64),  # kThirtyOneInt64s
+    # double extended (128 bytes to 248 bytes)
+    249: lambda: np.zeros(16, dtype=np.float64),  # kSixteenFloat64s
+    250: lambda: np.zeros(20, dtype=np.float64),  # kTwentyFloat64s
+    251: lambda: np.zeros(24, dtype=np.float64),  # kTwentyFourFloat64s
+    252: lambda: np.zeros(31, dtype=np.float64),  # kThirtyOneFloat64s
 }
 """Maps prototype integer codes to factory callables that produce the corresponding numpy prototype objects."""
 
@@ -762,6 +861,204 @@ class SerialPrototypes(IntEnum):
     """An array of 15 signed 64-bit integers."""
     FIFTEEN_FLOAT64S = 165
     """An array of 15 double-precision 64-bit floating-point numbers."""
+
+    # Extended prototypes (codes 166-252)
+
+    # bool extended (16 bytes to 248 bytes)
+    SIXTEEN_BOOLS = 166
+    """An array of 16 8-bit booleans."""
+    TWENTY_FOUR_BOOLS = 167
+    """An array of 24 8-bit booleans."""
+    THIRTY_TWO_BOOLS = 168
+    """An array of 32 8-bit booleans."""
+    FORTY_BOOLS = 169
+    """An array of 40 8-bit booleans."""
+    FORTY_EIGHT_BOOLS = 170
+    """An array of 48 8-bit booleans."""
+    FIFTY_TWO_BOOLS = 171
+    """An array of 52 8-bit booleans."""
+    TWO_HUNDRED_FORTY_EIGHT_BOOLS = 172
+    """An array of 248 8-bit booleans."""
+
+    # uint8_t extended (16 bytes to 248 bytes)
+    SIXTEEN_UINT8S = 173
+    """An array of 16 unsigned 8-bit integers."""
+    EIGHTEEN_UINT8S = 174
+    """An array of 18 unsigned 8-bit integers."""
+    TWENTY_UINT8S = 175
+    """An array of 20 unsigned 8-bit integers."""
+    TWENTY_TWO_UINT8S = 176
+    """An array of 22 unsigned 8-bit integers."""
+    TWENTY_FOUR_UINT8S = 177
+    """An array of 24 unsigned 8-bit integers."""
+    TWENTY_EIGHT_UINT8S = 178
+    """An array of 28 unsigned 8-bit integers."""
+    THIRTY_TWO_UINT8S = 179
+    """An array of 32 unsigned 8-bit integers."""
+    THIRTY_SIX_UINT8S = 180
+    """An array of 36 unsigned 8-bit integers."""
+    FORTY_UINT8S = 181
+    """An array of 40 unsigned 8-bit integers."""
+    FORTY_FOUR_UINT8S = 182
+    """An array of 44 unsigned 8-bit integers."""
+    FORTY_EIGHT_UINT8S = 183
+    """An array of 48 unsigned 8-bit integers."""
+    FIFTY_TWO_UINT8S = 184
+    """An array of 52 unsigned 8-bit integers."""
+    SIXTY_FOUR_UINT8S = 185
+    """An array of 64 unsigned 8-bit integers."""
+    NINETY_SIX_UINT8S = 186
+    """An array of 96 unsigned 8-bit integers."""
+    ONE_HUNDRED_TWENTY_EIGHT_UINT8S = 187
+    """An array of 128 unsigned 8-bit integers."""
+    ONE_HUNDRED_NINETY_TWO_UINT8S = 188
+    """An array of 192 unsigned 8-bit integers."""
+    TWO_HUNDRED_FORTY_FOUR_UINT8S = 189
+    """An array of 244 unsigned 8-bit integers."""
+    TWO_HUNDRED_FORTY_EIGHT_UINT8S = 190
+    """An array of 248 unsigned 8-bit integers."""
+
+    # int8_t extended (16 bytes to 248 bytes)
+    SIXTEEN_INT8S = 191
+    """An array of 16 signed 8-bit integers."""
+    TWENTY_FOUR_INT8S = 192
+    """An array of 24 signed 8-bit integers."""
+    THIRTY_TWO_INT8S = 193
+    """An array of 32 signed 8-bit integers."""
+    FORTY_INT8S = 194
+    """An array of 40 signed 8-bit integers."""
+    FORTY_EIGHT_INT8S = 195
+    """An array of 48 signed 8-bit integers."""
+    FIFTY_TWO_INT8S = 196
+    """An array of 52 signed 8-bit integers."""
+    NINETY_TWO_INT8S = 197
+    """An array of 92 signed 8-bit integers."""
+    ONE_HUNDRED_THIRTY_TWO_INT8S = 198
+    """An array of 132 signed 8-bit integers."""
+    ONE_HUNDRED_SEVENTY_TWO_INT8S = 199
+    """An array of 172 signed 8-bit integers."""
+    TWO_HUNDRED_TWELVE_INT8S = 200
+    """An array of 212 signed 8-bit integers."""
+    TWO_HUNDRED_FORTY_FOUR_INT8S = 201
+    """An array of 244 signed 8-bit integers."""
+    TWO_HUNDRED_FORTY_EIGHT_INT8S = 202
+    """An array of 248 signed 8-bit integers."""
+
+    # uint16_t extended (32 bytes to 248 bytes)
+    SIXTEEN_UINT16S = 203
+    """An array of 16 unsigned 16-bit integers."""
+    TWENTY_UINT16S = 204
+    """An array of 20 unsigned 16-bit integers."""
+    TWENTY_FOUR_UINT16S = 205
+    """An array of 24 unsigned 16-bit integers."""
+    TWENTY_SIX_UINT16S = 206
+    """An array of 26 unsigned 16-bit integers."""
+    THIRTY_TWO_UINT16S = 207
+    """An array of 32 unsigned 16-bit integers."""
+    FORTY_EIGHT_UINT16S = 208
+    """An array of 48 unsigned 16-bit integers."""
+    SIXTY_FOUR_UINT16S = 209
+    """An array of 64 unsigned 16-bit integers."""
+    NINETY_SIX_UINT16S = 210
+    """An array of 96 unsigned 16-bit integers."""
+    ONE_HUNDRED_TWENTY_TWO_UINT16S = 211
+    """An array of 122 unsigned 16-bit integers."""
+    ONE_HUNDRED_TWENTY_FOUR_UINT16S = 212
+    """An array of 124 unsigned 16-bit integers."""
+
+    # int16_t extended (32 bytes to 248 bytes)
+    SIXTEEN_INT16S = 213
+    """An array of 16 signed 16-bit integers."""
+    TWENTY_INT16S = 214
+    """An array of 20 signed 16-bit integers."""
+    TWENTY_FOUR_INT16S = 215
+    """An array of 24 signed 16-bit integers."""
+    TWENTY_SIX_INT16S = 216
+    """An array of 26 signed 16-bit integers."""
+    THIRTY_TWO_INT16S = 217
+    """An array of 32 signed 16-bit integers."""
+    FORTY_EIGHT_INT16S = 218
+    """An array of 48 signed 16-bit integers."""
+    SIXTY_FOUR_INT16S = 219
+    """An array of 64 signed 16-bit integers."""
+    NINETY_SIX_INT16S = 220
+    """An array of 96 signed 16-bit integers."""
+    ONE_HUNDRED_TWENTY_TWO_INT16S = 221
+    """An array of 122 signed 16-bit integers."""
+    ONE_HUNDRED_TWENTY_FOUR_INT16S = 222
+    """An array of 124 signed 16-bit integers."""
+
+    # uint32_t extended (64 bytes to 248 bytes)
+    SIXTEEN_UINT32S = 223
+    """An array of 16 unsigned 32-bit integers."""
+    TWENTY_UINT32S = 224
+    """An array of 20 unsigned 32-bit integers."""
+    TWENTY_FOUR_UINT32S = 225
+    """An array of 24 unsigned 32-bit integers."""
+    THIRTY_TWO_UINT32S = 226
+    """An array of 32 unsigned 32-bit integers."""
+    FORTY_EIGHT_UINT32S = 227
+    """An array of 48 unsigned 32-bit integers."""
+    SIXTY_TWO_UINT32S = 228
+    """An array of 62 unsigned 32-bit integers."""
+
+    # int32_t extended (64 bytes to 248 bytes)
+    SIXTEEN_INT32S = 229
+    """An array of 16 signed 32-bit integers."""
+    TWENTY_INT32S = 230
+    """An array of 20 signed 32-bit integers."""
+    TWENTY_FOUR_INT32S = 231
+    """An array of 24 signed 32-bit integers."""
+    THIRTY_TWO_INT32S = 232
+    """An array of 32 signed 32-bit integers."""
+    FORTY_EIGHT_INT32S = 233
+    """An array of 48 signed 32-bit integers."""
+    SIXTY_TWO_INT32S = 234
+    """An array of 62 signed 32-bit integers."""
+
+    # float extended (64 bytes to 248 bytes)
+    SIXTEEN_FLOAT32S = 235
+    """An array of 16 single-precision 32-bit floating-point numbers."""
+    TWENTY_FLOAT32S = 236
+    """An array of 20 single-precision 32-bit floating-point numbers."""
+    TWENTY_FOUR_FLOAT32S = 237
+    """An array of 24 single-precision 32-bit floating-point numbers."""
+    THIRTY_TWO_FLOAT32S = 238
+    """An array of 32 single-precision 32-bit floating-point numbers."""
+    FORTY_EIGHT_FLOAT32S = 239
+    """An array of 48 single-precision 32-bit floating-point numbers."""
+    SIXTY_TWO_FLOAT32S = 240
+    """An array of 62 single-precision 32-bit floating-point numbers."""
+
+    # uint64_t extended (128 bytes to 248 bytes)
+    SIXTEEN_UINT64S = 241
+    """An array of 16 unsigned 64-bit integers."""
+    TWENTY_UINT64S = 242
+    """An array of 20 unsigned 64-bit integers."""
+    TWENTY_FOUR_UINT64S = 243
+    """An array of 24 unsigned 64-bit integers."""
+    THIRTY_ONE_UINT64S = 244
+    """An array of 31 unsigned 64-bit integers."""
+
+    # int64_t extended (128 bytes to 248 bytes)
+    SIXTEEN_INT64S = 245
+    """An array of 16 signed 64-bit integers."""
+    TWENTY_INT64S = 246
+    """An array of 20 signed 64-bit integers."""
+    TWENTY_FOUR_INT64S = 247
+    """An array of 24 signed 64-bit integers."""
+    THIRTY_ONE_INT64S = 248
+    """An array of 31 signed 64-bit integers."""
+
+    # double extended (128 bytes to 248 bytes)
+    SIXTEEN_FLOAT64S = 249
+    """An array of 16 double-precision 64-bit floating-point numbers."""
+    TWENTY_FLOAT64S = 250
+    """An array of 20 double-precision 64-bit floating-point numbers."""
+    TWENTY_FOUR_FLOAT64S = 251
+    """An array of 24 double-precision 64-bit floating-point numbers."""
+    THIRTY_ONE_FLOAT64S = 252
+    """An array of 31 double-precision 64-bit floating-point numbers."""
 
     def as_uint8(self) -> np.uint8:
         """Returns the enumeration value as a numpy uint8 type."""
