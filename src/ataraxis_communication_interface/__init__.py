@@ -5,7 +5,7 @@ See the `documentation <https://ataraxis-communication-interface-api.netlify.app
 available assets. See the `source code repository <https://github.com/Sun-Lab-NBB/ataraxis-communication-interface>`_
 for more details.
 
-Authors: Ivan Kondratyev (Inkaros), Jacob Groner
+Authors: Ivan Kondratyev (Inkaros), Jacob Groner (Jgroner11)
 """
 
 from .dataclasses import (

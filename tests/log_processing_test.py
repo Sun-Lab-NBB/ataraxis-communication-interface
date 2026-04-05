@@ -1,12 +1,16 @@
 """Contains tests for the classes and functions defined in the log_processing module."""
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import polars as pl
 import pytest
 from ataraxis_base_utilities import error_format
+
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from ataraxis_communication_interface.dataclasses import (
@@ -45,8 +49,11 @@ from ataraxis_communication_interface.log_processing import (
     initialize_processing_tracker,
 )
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-def _create_archive_entry(source_id: int, elapsed_us: int, payload: np.ndarray) -> tuple[str, np.ndarray]:
+
+def _create_archive_entry(source_id: int, elapsed_us: int, payload: NDArray[np.uint8]) -> tuple[str, NDArray[np.uint8]]:
     """Creates a single archive entry (key, data) in the LogPackage format."""
     header = np.empty(9, dtype=np.uint8)
     header[0] = np.uint8(source_id)
@@ -56,7 +63,7 @@ def _create_archive_entry(source_id: int, elapsed_us: int, payload: np.ndarray) 
     return key, data
 
 
-def _create_onset_entry(source_id: int, onset_us: int) -> tuple[str, np.ndarray]:
+def _create_onset_entry(source_id: int, onset_us: int) -> tuple[str, NDArray[np.uint8]]:
     """Creates the onset timestamp entry for a log archive."""
     onset_payload = np.frombuffer(np.int64(onset_us).tobytes(), dtype=np.uint8)
     return _create_archive_entry(source_id=source_id, elapsed_us=0, payload=onset_payload)
@@ -65,11 +72,11 @@ def _create_onset_entry(source_id: int, onset_us: int) -> tuple[str, np.ndarray]
 def _create_test_archive(
     archive_path: Path,
     source_id: int,
-    messages: list[tuple[int, np.ndarray]],
+    messages: list[tuple[int, NDArray[np.uint8]]],
     onset_us: int = 1_000_000_000_000,
 ) -> None:
     """Creates a test .npz log archive with the given messages."""
-    entries: dict[str, np.ndarray] = {}
+    entries: dict[str, NDArray[np.uint8]] = {}
 
     # Creates the onset entry.
     key, data = _create_onset_entry(source_id=source_id, onset_us=onset_us)
@@ -83,25 +90,27 @@ def _create_test_archive(
     np.savez(str(archive_path), **entries)
 
 
-def _make_module_state_payload(module_type: int, module_id: int, command: int, event: int) -> np.ndarray:
+def _make_module_state_payload(module_type: int, module_id: int, command: int, event: int) -> NDArray[np.uint8]:
     """Creates a MODULE_STATE message payload."""
     return np.array([SerialProtocols.MODULE_STATE, module_type, module_id, command, event], dtype=np.uint8)
 
 
 def _make_module_data_payload(
     module_type: int, module_id: int, command: int, event: int, prototype_code: int, data_bytes: list[int]
-) -> np.ndarray:
+) -> NDArray[np.uint8]:
     """Creates a MODULE_DATA message payload."""
     header = [SerialProtocols.MODULE_DATA, module_type, module_id, command, event, prototype_code]
     return np.array(header + data_bytes, dtype=np.uint8)
 
 
-def _make_kernel_state_payload(command: int, event: int) -> np.ndarray:
+def _make_kernel_state_payload(command: int, event: int) -> NDArray[np.uint8]:
     """Creates a KERNEL_STATE message payload."""
     return np.array([SerialProtocols.KERNEL_STATE, command, event], dtype=np.uint8)
 
 
-def _make_kernel_data_payload(command: int, event: int, prototype_code: int, data_bytes: list[int]) -> np.ndarray:
+def _make_kernel_data_payload(
+    command: int, event: int, prototype_code: int, data_bytes: list[int]
+) -> NDArray[np.uint8]:
     """Creates a KERNEL_DATA message payload."""
     header = [SerialProtocols.KERNEL_DATA, command, event, prototype_code]
     return np.array(header + data_bytes, dtype=np.uint8)
@@ -121,7 +130,7 @@ def _setup_test_environment(
 
     # Creates archive with module state and data messages.
     archive_path = log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
         (2000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
         (
@@ -588,7 +597,7 @@ def test_execute_job_sequential_module_only(tmp_path: Path) -> None:
 
     # Creates archive with module messages.
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
         (2000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
         (
@@ -642,7 +651,7 @@ def test_execute_job_sequential_kernel_only(tmp_path: Path) -> None:
     source_id = 1
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_kernel_state_payload(command=1, event=5)),
         (2000, _make_kernel_state_payload(command=2, event=6)),
         (
@@ -727,7 +736,7 @@ def test_execute_job_module_and_kernel(tmp_path: Path) -> None:
     module_id = 2
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
         (2000, _make_kernel_state_payload(command=1, event=5)),
         (3000, _make_module_state_payload(module_type, module_id, command=2, event=10)),
@@ -777,7 +786,7 @@ def test_execute_job_no_matching_messages(tmp_path: Path) -> None:
     source_id = 1
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_module_state_payload(1, 2, command=1, event=99)),  # Wrong event.
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -1014,7 +1023,7 @@ def test_run_log_processing_pipeline_with_kernel(tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
 
     archive_path = log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
         (2000, _make_kernel_state_payload(command=1, event=5)),
     ]
@@ -1063,7 +1072,7 @@ def test_execute_job_parallel_processing(tmp_path: Path) -> None:
 
     # Creates an archive with PARALLEL_PROCESSING_THRESHOLD messages to trigger parallel path.
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
@@ -1110,7 +1119,7 @@ def test_execute_job_parallel_with_progress(tmp_path: Path) -> None:
     module_id = 2
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
@@ -1152,7 +1161,7 @@ def test_execute_job_parallel_with_external_executor(tmp_path: Path) -> None:
     module_id = 2
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
@@ -1195,7 +1204,7 @@ def test_execute_job_parallel_kernel(tmp_path: Path) -> None:
     source_id = 1
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (i * 10, _make_kernel_state_payload(command=1, event=5)) for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -1238,7 +1247,7 @@ def test_execute_job_exception_handling(tmp_path: Path) -> None:
     # Creates a corrupted .npz file that causes LogArchiveReader to fail during processing.
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     # Creates an archive with a malformed onset entry (no valid int64 payload).
-    entries: dict[str, np.ndarray] = {}
+    entries: dict[str, NDArray[np.uint8]] = {}
     # Onset entry with truncated data (too short for int64 onset).
     onset_key = f"{source_id:03d}_00000000000000000000"
     onset_data = np.array([source_id, 0, 0, 0, 0, 0, 0, 0, 0], dtype=np.uint8)  # 9 bytes header, no payload
@@ -1287,7 +1296,7 @@ def test_execute_job_parallel_auto_workers(tmp_path: Path) -> None:
     module_id = 2
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
@@ -1334,7 +1343,7 @@ def test_run_log_processing_pipeline_local_mode_multi_worker(tmp_path: Path) -> 
     output_dir = tmp_path / "output"
 
     archive_path = log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    messages: list[tuple[int, np.ndarray]] = [
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
         (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)

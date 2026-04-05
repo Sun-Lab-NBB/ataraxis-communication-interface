@@ -68,6 +68,11 @@ plugins:
 - **communication** plugin (`ataraxis/plugins/communication/`): Registers the `axci mcp` server with compatible MCP
   clients and provides communication-specific skills for microcontroller setup, pipeline orchestration, log processing,
   extraction configuration, and post-processing verification.
+- **microcontroller** plugin (`ataraxis/plugins/microcontroller/`): Provides firmware-side skills for implementing
+  custom hardware Module subclasses in the companion
+  [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library. The
+  `/firmware-module` skill complements the `/microcontroller-interface` skill from the communication plugin, covering
+  the firmware counterpart to the PC-side ModuleInterface.
 - **automation** plugin (`ataraxis/plugins/automation/`): Provides shared development skills that enforce Sun Lab
   coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
   general-purpose codebase exploration tools.
@@ -119,6 +124,12 @@ Skills are distributed through the ataraxis marketplace and are loaded into Clau
 | `/log-processing`            | Orchestrate log archive processing workflow via MCP tools             |
 | `/log-processing-results`    | Reference for output data formats and event distribution analysis     |
 
+### Microcontroller Plugin Skills (ataraxis/plugins/microcontroller/)
+
+| Skill              | Description                                                                    |
+|--------------------|--------------------------------------------------------------------------------|
+| `/firmware-module` | Firmware-side Module subclass implementation, command execution, and SendData   |
+
 ### Automation Plugin Skills (ataraxis/plugins/automation/)
 
 | Skill                      | Description                                                              |
@@ -167,8 +178,9 @@ data from DataLogger archives.
 - **ModuleInterface**: Abstract base class that users subclass to define hardware module behavior. Requires
   `module_type`, `module_id`, and `name` as positional arguments; optional `error_codes` and `data_codes` sets
   control message routing. Three abstract methods: `initialize_remote_assets()`, `terminate_remote_assets()`, and
-  `process_received_data()`. Public methods `send_command()`, `send_parameters()`, and `dequeue_commands()` use
-  LRU-cached message construction for performance. The `type_id` property combines `(type << 8) | id` for
+  `process_received_data()`. Public methods `send_command()` and `send_parameters()` use LRU-cached message
+  construction for performance. `reset_command_queue()` sends a dequeue command to the microcontroller. The
+  `type_id` property combines `(type << 8) | id` for
   dispatch lookups.
 - **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
   CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 252 numpy data
@@ -178,8 +190,8 @@ data from DataLogger archives.
   `ModuleIdentification`). All received data is timestamped via `PrecisionTimer` and logged to `DataLogger` through
   an `MPQueue`.
 - **MQTT Communication**: `MQTTCommunication` provides publish/subscribe messaging over MQTT via `paho-mqtt`.
-  Constructor takes `ip`, `port`, and optional `monitored_topics`. `receive_message()` returns `(topic, message)`
-  tuples from an internal deque populated by the on_message callback.
+  Constructor takes `ip`, `port`, and optional `monitored_topics`. `get_data()` returns `(topic, message)`
+  tuples from an internal `Queue` populated by the on_message callback.
 - **Microcontroller Manifest**: `MicroControllerManifest` (`YamlConfig` subclass) associates controller IDs with
   human-readable names and their module lists in a `microcontroller_manifest.yaml` file alongside DataLogger
   archives. `MicroControllerSourceData` stores per-controller entries with a tuple of `ModuleSourceData` objects.
@@ -209,9 +221,8 @@ data from DataLogger archives.
 
 ### Key Patterns
 
-- **Multiprocessing Spawn**: `mp.set_start_method("spawn")` is set globally in `__init__.py` of
-  `microcontroller_interface.py` for cross-platform consistency. The communication process is a daemon process
-  requiring an explicit `stop()` call.
+- **Daemon Communication Process**: The communication process is a daemon process requiring an explicit `stop()`
+  call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
 - **Message Protocol Stack**: Four levels — `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
   frame encoding), message protocols (12 types via `SerialProtocols` enum), and data prototypes (252 numpy types
   via `SerialPrototypes` enum).
@@ -227,8 +238,10 @@ data from DataLogger archives.
 - **Budget-Based Worker Allocation**: The MCP execution manager computes a worker budget as `available_cores - 2`,
   divides it among concurrent jobs snapped to multiples of 5, with a sqrt-derived saturation floor based on message
   count (`ceil(sqrt(messages / 1000))`).
-- **Frozen Dataclasses**: All configuration and manifest data classes use `frozen=True` for immutability and
-  hashability. Performance-critical internal classes use `slots=True`.
+- **Frozen Dataclasses**: Inner data classes (`ModuleSourceData`, `MicroControllerSourceData`,
+  `ModuleExtractionConfig`, `KernelExtractionConfig`, `ControllerExtractionConfig`) use `frozen=True` for
+  immutability and `slots=True` for performance. The top-level `MicroControllerManifest` and `ExtractionConfig`
+  classes extend `YamlConfig` and are mutable (not frozen).
 
 ### Code Standards
 
@@ -246,7 +259,7 @@ data from DataLogger archives.
 1. Review `src/ataraxis_communication_interface/microcontroller_interface.py` for current implementation
 2. Understand the multiprocessing architecture: main process sends commands via `MPQueue`, communication process
    handles serial I/O and dispatches received messages to `ModuleInterface` instances
-3. The communication loop runs in `_communication_loop()` as a static method in a spawned process
+3. The communication loop runs in `_runtime_cycle()` as a static method in a spawned process
 4. The watchdog thread monitors process liveness from the main process
 5. Test with actual microcontroller hardware or in test mode
 
@@ -255,7 +268,7 @@ data from DataLogger archives.
 1. Review `src/ataraxis_communication_interface/microcontroller_interface.py` for the ABC definition
 2. Subclasses must implement `initialize_remote_assets()`, `terminate_remote_assets()`, and
    `process_received_data()`
-3. `send_command()`, `send_parameters()`, and `dequeue_commands()` use LRU-cached message construction
+3. `send_command()` and `send_parameters()` use LRU-cached message construction; `reset_command_queue()` sends a dequeue command
 4. See `examples/example_interface.py` for a reference subclass implementation
 
 **Modifying serial communication:**
@@ -264,20 +277,22 @@ data from DataLogger archives.
 2. `SerialProtocols` (12 codes) and `SerialPrototypes` (252 codes) define the protocol layer
 3. Command classes (`RepeatedModuleCommand`, `OneOffModuleCommand`, `DequeueModuleCommand`, `KernelCommand`,
    `ModuleParameters`) construct packed byte arrays via `packed_data` property
-4. Reception classes (`ModuleData`, `ModuleState`, `KernelData`, `KernelState`) parse header bytes via properties
+4. Reception classes (`ModuleData`, `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`,
+   `ControllerIdentification`, `ModuleIdentification`) parse header bytes via properties
 
 **Modifying MQTT communication:**
 
 1. Review `src/ataraxis_communication_interface/communication.py` for `MQTTCommunication`
-2. Uses `paho-mqtt` v2 client with callback-based message reception into a `deque`
+2. Uses `paho-mqtt` v2 client with callback-based message reception into a `Queue`
 3. `connect()`/`disconnect()` manage the MQTT client lifecycle
-4. `receive_message()` returns `(topic, message)` tuples or `None`
+4. `get_data()` returns `(topic, message)` tuples or `None`; `has_data` property checks queue state
 
 **Modifying data classes and manifests:**
 
 1. Review `src/ataraxis_communication_interface/dataclasses.py` for all data structures
 2. `MicroControllerManifest` and `ExtractionConfig` extend `YamlConfig` from `ataraxis-data-structures`
-3. All data classes are frozen — create new instances rather than mutating
+3. Inner data classes are frozen — create new instances rather than mutating. Top-level `MicroControllerManifest`
+   and `ExtractionConfig` are mutable `YamlConfig` subclasses
 4. `create_extraction_config()` generates a precursor config from a manifest with empty event codes
 
 **Modifying log processing:**

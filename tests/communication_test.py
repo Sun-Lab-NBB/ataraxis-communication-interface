@@ -1,7 +1,9 @@
-"""Contains tests for the classes and methods defined in the communications module."""
+"""Contains tests for the classes and methods defined in the communication module."""
+
+from __future__ import annotations
 
 import time
-from typing import Any, Generator
+from typing import TYPE_CHECKING, Any, Generator
 import multiprocessing
 from multiprocessing import Queue
 
@@ -33,6 +35,9 @@ from ataraxis_communication_interface.communication import (
     ControllerIdentification,
 )
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
 
 @pytest.fixture
 def transport_layer() -> TransportLayer:
@@ -41,7 +46,7 @@ def transport_layer() -> TransportLayer:
 
 
 @pytest.fixture(scope="function")
-def logger_queue(tmp_path_factory) -> Generator[Queue, Any, None]:
+def logger_queue(tmp_path_factory: pytest.TempPathFactory) -> Generator[Queue[Any], Any, None]:
     """Creates a DataLogger instance and returns its input queue."""
     # Creates a unique temp directory for this test
     tmp_dir = tmp_path_factory.mktemp("logger_data")
@@ -76,7 +81,7 @@ def test_serial_protocols_members() -> None:
         (SerialProtocols.CONTROLLER_IDENTIFICATION, 11),
     ],
 )
-def test_serial_protocols_as_uint8(protocol, expected_value) -> None:
+def test_serial_protocols_as_uint8(protocol: SerialProtocols, expected_value: int) -> None:
     """Verifies the functioning of the SerialProtocols enum as_uint8() method."""
     result = protocol.as_uint8()
     assert isinstance(result, np.uint8)
@@ -124,7 +129,7 @@ def test_serial_prototypes_members() -> None:
         (SerialPrototypes.THIRTY_ONE_FLOAT64S, 252),
     ],
 )
-def test_serial_prototypes_as_uint8(prototype, expected_value) -> None:
+def test_serial_prototypes_as_uint8(prototype: SerialPrototypes, expected_value: int) -> None:
     """Verifies the functioning of the SerialPrototypes enum as_uint8() method."""
     result = prototype.as_uint8()
     assert isinstance(result, np.uint8)
@@ -149,7 +154,9 @@ def test_serial_prototypes_as_uint8(prototype, expected_value) -> None:
         (SerialPrototypes.THIRTY_ONE_FLOAT64S, np.ndarray, (31,), np.float64),
     ],
 )
-def test_serial_prototypes_get_prototype(prototype, expected_type, expected_shape, expected_dtype) -> None:
+def test_serial_prototypes_get_prototype(
+    prototype: SerialPrototypes, expected_type: type, expected_shape: tuple[int, ...] | None, expected_dtype: Any
+) -> None:
     """Verifies the functioning of the SerialPrototypes enum get_prototype() method."""
     result = prototype.get_prototype()
     assert isinstance(result, expected_type)
@@ -173,7 +180,7 @@ def test_serial_prototypes_get_prototype(prototype, expected_type, expected_shap
         (np.uint8(255), None),  # Invalid code
     ],
 )
-def test_serial_prototypes_get_prototype_for_code(code, expected_result) -> None:
+def test_serial_prototypes_get_prototype_for_code(code: np.uint8, expected_result: Any) -> None:
     """Verifies the functioning of the SerialPrototypes enum get_prototype_for_code() method."""
     # noinspection PyTypeChecker
     result = SerialPrototypes.get_prototype_for_code(code)
@@ -218,7 +225,7 @@ def test_serial_prototypes_get_prototype_for_code(code, expected_result) -> None
         (253, None),  # Invalid code (beyond extended range)
     ],
 )
-def test_serial_prototypes_get_dtype_for_code(code, expected_dtype) -> None:
+def test_serial_prototypes_get_dtype_for_code(code: int, expected_dtype: str | None) -> None:
     """Verifies the functioning of the SerialPrototypes enum get_dtype_for_code() method."""
     result = SerialPrototypes.get_dtype_for_code(code)
     assert result == expected_dtype
@@ -371,7 +378,7 @@ def test_module_parameters() -> None:
         (KernelCommand, {"command": np.uint8(1)}, 3),
     ],
 )
-def test_command_packed_data_sizes(command_class, kwargs, expected_size) -> None:
+def test_command_packed_data_sizes(command_class: type, kwargs: dict[str, Any], expected_size: int) -> None:
     """Verifies that all command classes pack data to the expected size."""
     # noinspection PyArgumentList
     cmd = command_class(**kwargs)
@@ -387,7 +394,7 @@ def test_command_packed_data_sizes(command_class, kwargs, expected_size) -> None
         ),
     ],
 )
-def test_parameters_packed_data_validation(parameter_class, kwargs) -> None:
+def test_parameters_packed_data_validation(parameter_class: type, kwargs: dict[str, Any]) -> None:
     """Verifies that parameter classes correctly pack their data."""
     # noinspection PyArgumentList
     params = parameter_class(**kwargs)
@@ -397,7 +404,7 @@ def test_parameters_packed_data_validation(parameter_class, kwargs) -> None:
     assert params.packed_data.dtype == np.uint8
 
 
-def test_module_data_init(transport_layer) -> None:
+def test_module_data_init(transport_layer: TransportLayer) -> None:
     """Verifies ModuleData initialization."""
     data = ModuleData()
 
@@ -409,7 +416,7 @@ def test_module_data_init(transport_layer) -> None:
     assert isinstance(data.data_object, np.uint8)
 
 
-def test_kernel_data_init(transport_layer) -> None:
+def test_kernel_data_init(transport_layer: TransportLayer) -> None:
     """Verifies KernelData initialization."""
     data = KernelData()
 
@@ -419,7 +426,7 @@ def test_kernel_data_init(transport_layer) -> None:
     assert isinstance(data.data_object, np.uint8)
 
 
-def test_module_state_init(transport_layer) -> None:
+def test_module_state_init(transport_layer: TransportLayer) -> None:
     """Verifies ModuleState initialization."""
     state = ModuleState()
 
@@ -430,7 +437,7 @@ def test_module_state_init(transport_layer) -> None:
     assert state.event == 0
 
 
-def test_kernel_state_init(transport_layer) -> None:
+def test_kernel_state_init(transport_layer: TransportLayer) -> None:
     """Verifies KernelState initialization."""
     state = KernelState()
 
@@ -439,7 +446,7 @@ def test_kernel_state_init(transport_layer) -> None:
     assert state.event == 0
 
 
-def test_reception_code_init(transport_layer) -> None:
+def test_reception_code_init(transport_layer: TransportLayer) -> None:
     """Verifies ReceptionCode initialization."""
     code = ReceptionCode()
 
@@ -447,7 +454,7 @@ def test_reception_code_init(transport_layer) -> None:
     assert code.reception_code == 0
 
 
-def test_controller_identification_init(transport_layer) -> None:
+def test_controller_identification_init(transport_layer: TransportLayer) -> None:
     """Verifies ControllerIdentification initialization."""
     ident = ControllerIdentification()
 
@@ -455,13 +462,13 @@ def test_controller_identification_init(transport_layer) -> None:
     assert ident.controller_id == 0
 
 
-def test_module_identification_init(transport_layer) -> None:
+def test_module_identification_init(transport_layer: TransportLayer) -> None:
     """Verifies ModuleIdentification initialization."""
     ident = ModuleIdentification()
     assert ident.module_type_id == 0
 
 
-def test_serial_communication_init_and_repr(logger_queue) -> None:
+def test_serial_communication_init_and_repr(logger_queue: Queue[Any]) -> None:
     """Verifies SerialCommunication's initialization and string representation."""
     comm = SerialCommunication(
         port="TEST",
@@ -488,7 +495,7 @@ def test_serial_communication_init_and_repr(logger_queue) -> None:
     assert repr(comm) == expected_repr
 
 
-def test_serial_communication_send_message(logger_queue) -> None:
+def test_serial_communication_send_message(logger_queue: Queue[Any]) -> None:
     """Verifies the functionality of the SerialCommunication send_message() method."""
     comm = SerialCommunication(
         port="TEST",
@@ -580,7 +587,9 @@ def test_serial_communication_send_message(logger_queue) -> None:
         ),
     ],
 )
-def test_serial_communication_receive_message(logger_queue, message_data, expected_type, expected_values) -> None:
+def test_serial_communication_receive_message(
+    logger_queue: Queue[Any], message_data: NDArray[np.uint8], expected_type: type, expected_values: dict[str, Any]
+) -> None:
     """Verifies the functioning of SerialCommunication receive_message() method."""
     # Initialize communication
     comm = SerialCommunication(
@@ -612,7 +621,7 @@ def test_serial_communication_receive_message(logger_queue, message_data, expect
         assert np.array_equal(received.message, message_data[1 : len(received.message) + 1])
 
 
-def test_serial_communication_receive_message_error(logger_queue) -> None:
+def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) -> None:
     """Verifies the error handling of the SerialCommunication receive_message() method."""
     comm = SerialCommunication(
         port="TEST",
@@ -643,7 +652,7 @@ def test_serial_communication_receive_message_error(logger_queue) -> None:
         comm.receive_message()
 
 
-def test_serial_communication_module_data_invalid_prototype(logger_queue) -> None:
+def test_serial_communication_module_data_invalid_prototype(logger_queue: Queue[Any]) -> None:
     """Verifies error handling when ModuleData has invalid prototype code."""
     comm = SerialCommunication(
         port="TEST",
@@ -670,7 +679,7 @@ def test_serial_communication_module_data_invalid_prototype(logger_queue) -> Non
         comm.receive_message()
 
 
-def test_serial_communication_kernel_data_invalid_prototype(logger_queue) -> None:
+def test_serial_communication_kernel_data_invalid_prototype(logger_queue: Queue[Any]) -> None:
     """Verifies error handling when KernelData has invalid prototype code."""
     comm = SerialCommunication(
         port="TEST",

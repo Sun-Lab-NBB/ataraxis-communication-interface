@@ -2,6 +2,8 @@
 clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import sys
 from enum import IntEnum
@@ -490,7 +492,7 @@ class ModuleInterface(ABC):  # pragma: no cover
 
     @property
     def error_codes(self) -> set[np.uint8]:
-        """Returns the set of message event-codes event codes that trigger runtime errors."""
+        """Returns the set of message event codes that trigger runtime errors."""
         return self._error_codes
 
     @property
@@ -970,7 +972,7 @@ class MicroControllerInterface:  # pragma: no cover
                 timeout_timer.reset()
 
         # If no response was received from the microcontroller, raises an error
-        if len(module_type_ids) == 0:
+        if not module_type_ids:
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The "
                 f"microcontroller did not respond to the module identification request."
@@ -1232,7 +1234,7 @@ class MicroControllerInterface:  # pragma: no cover
                 # microcontroller.
                 while not input_queue.empty():
                     # Transmits the data to the microcontroller. Expects that the queue always yields valid messages.
-                    serial_communication.send_message(input_queue.get())
+                    serial_communication.send_message(message=input_queue.get())
 
                 # Keepalive messaging. Sends a keepalive message every keepalive_interval milliseconds to ensure that
                 # the microcontroller-PC communication is functional. Each time a keepalive message is sent, the
@@ -1244,7 +1246,7 @@ class MicroControllerInterface:  # pragma: no cover
                     if not keepalive_response_received:
                         # While this is unlikely to succeed, instructs the microcontroller to reset itself before
                         # ending the runtime.
-                        serial_communication.send_message(MicroControllerInterface._reset_command)
+                        serial_communication.send_message(message=MicroControllerInterface._reset_command)
                         message = (
                             f"Communication with the microcontroller {controller_id} is interrupted. The "
                             f"microcontroller did not respond to the keepalive message within the expected interval "

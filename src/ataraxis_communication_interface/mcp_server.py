@@ -5,6 +5,8 @@ microcontroller data log processing, output verification, and extracted event qu
 enabling AI agents to programmatically interact with the library's core features.
 """
 
+from __future__ import annotations  # pragma: no cover
+
 from typing import TYPE_CHECKING, Any, Literal  # pragma: no cover
 from pathlib import Path  # pragma: no cover
 from threading import Lock, Thread  # pragma: no cover

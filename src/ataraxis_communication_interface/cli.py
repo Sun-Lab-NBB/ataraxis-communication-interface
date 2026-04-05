@@ -1,5 +1,7 @@
 """Provides the Command Line Interface (CLI) installed into the Python environment together with the library."""
 
+from __future__ import annotations  # pragma: no cover
+
 from typing import TYPE_CHECKING, Literal  # pragma: no cover
 from pathlib import Path  # pragma: no cover
 from concurrent.futures import ProcessPoolExecutor, as_completed  # pragma: no cover

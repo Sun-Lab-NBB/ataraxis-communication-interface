@@ -55,9 +55,6 @@ ___
   - [Keepalive](#keepalive)
   - [Communication](#communication)
   - [Data Logging](#data-logging)
-    - [Log Format](#log-format)
-    - [Onset Timestamp](#onset-timestamp)
-    - [Working with MicroControllerInterface Logs](#working-with-microcontrollerinterface-logs)
   - [Log Processing](#log-processing)
   - [Custom Module Interfaces](#custom-module-interfaces)
   - [Implementing Custom Module Interfaces](#implementing-custom-module-interfaces)
@@ -267,7 +264,7 @@ if __name__ == "__main__":
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # To process the data logged during runtime, first generate a precursor extraction configuration from the
-    # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during start().
+    # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during __init__.
     console.echo(message="Creating extraction configuration from manifest...")
     manifest_path = data_logger.output_directory / MICROCONTROLLER_MANIFEST_FILENAME
     config = create_extraction_config(manifest_path=manifest_path)
@@ -566,9 +563,10 @@ axci mcp
 #### Client Registration
 
 MCP server registration and Claude Code skill assets for this library are distributed through the
-[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace as part of the **communication** plugin. Install the
-plugin from the marketplace to automatically register the MCP server with compatible clients and make all associated
-skills available.
+[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace as part of the **communication** plugin. The companion
+**microcontroller** plugin provides firmware-side skills for implementing the C++ Module subclasses that pair with the
+PC-side ModuleInterface subclasses defined by this library. Install both plugins from the marketplace to register the
+MCP server with compatible clients and make all associated skills available.
 
 ___
 
@@ -638,17 +636,22 @@ in parallel.
 
 ### AI-Assisted Development
 
-Claude Code skills and AI development assets for this project are distributed through the
-[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace across two plugins:
+Claude Code skills and other AI development assets for this project are distributed through the
+[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace across three plugins:
 
 - **communication** plugin: Provides MCP server registration, communication-specific skills for microcontroller setup,
   pipeline orchestration, log processing, and extraction configuration management. Install this plugin to register the
   `axci mcp` server with compatible MCP clients and make all communication workflow skills available.
+- **microcontroller** plugin: Provides firmware-side skills for implementing custom hardware Module subclasses in the
+  companion [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library. The
+  `/firmware-module` skill complements the communication plugin's `/microcontroller-interface` skill, covering
+  stage-based command execution, parameter structures, event codes, and main.cpp integration with Kernel and
+  Communication.
 - **automation** plugin: Provides shared development skills that enforce Sun Lab coding conventions (Python style,
   README style, commit messages, pyproject.toml, tox configuration) and general-purpose codebase exploration tools.
 
-Install both plugins from the marketplace to make all associated skills and development tools available to compatible
-AI coding agents.
+Install all three plugins from the marketplace to make all associated skills and development tools available to
+compatible AI coding agents.
 
 ### Automation Troubleshooting
 
