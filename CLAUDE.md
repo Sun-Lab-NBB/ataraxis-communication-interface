@@ -171,8 +171,8 @@ data from DataLogger archives.
   LRU-cached message construction for performance. The `type_id` property combines `(type << 8) | id` for
   dispatch lookups.
 - **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
-  CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 165 numpy data
-  prototypes (`SerialPrototypes` enum) covering all numpy scalar and small-array types. `send_message()` accepts
+  CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 252 numpy data
+  prototypes (`SerialPrototypes` enum) covering all numpy scalar and array types. `send_message()` accepts
   command and parameter message objects; `receive_message()` returns typed message objects (`ModuleData`,
   `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`, `ControllerIdentification`,
   `ModuleIdentification`). All received data is timestamped via `PrecisionTimer` and logged to `DataLogger` through
@@ -213,7 +213,7 @@ data from DataLogger archives.
   `microcontroller_interface.py` for cross-platform consistency. The communication process is a daemon process
   requiring an explicit `stop()` call.
 - **Message Protocol Stack**: Four levels — `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
-  frame encoding), message protocols (12 types via `SerialProtocols` enum), and data prototypes (165 numpy types
+  frame encoding), message protocols (12 types via `SerialProtocols` enum), and data prototypes (252 numpy types
   via `SerialPrototypes` enum).
 - **LRU Caching**: `ModuleInterface` caches command messages (`maxsize=32`) and parameter messages (`maxsize=16`)
   to avoid redundant serialization during repeated operations.
@@ -261,7 +261,7 @@ data from DataLogger archives.
 **Modifying serial communication:**
 
 1. Review `src/ataraxis_communication_interface/communication.py` for all message types and protocols
-2. `SerialProtocols` (12 codes) and `SerialPrototypes` (165 codes) define the protocol layer
+2. `SerialProtocols` (12 codes) and `SerialPrototypes` (252 codes) define the protocol layer
 3. Command classes (`RepeatedModuleCommand`, `OneOffModuleCommand`, `DequeueModuleCommand`, `KernelCommand`,
    `ModuleParameters`) construct packed byte arrays via `packed_data` property
 4. Reception classes (`ModuleData`, `ModuleState`, `KernelData`, `KernelState`) parse header bytes via properties
