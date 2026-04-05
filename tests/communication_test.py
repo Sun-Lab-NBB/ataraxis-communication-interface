@@ -99,6 +99,16 @@ def test_serial_prototypes_members() -> None:
     assert SerialPrototypes.ELEVEN_FLOAT64S.value == 153
     assert SerialPrototypes.FIFTEEN_INT64S.value == 164
     assert SerialPrototypes.TWO_INT32S.value == 37
+    # Extended prototypes
+    assert SerialPrototypes.SIXTEEN_BOOLS.value == 166
+    assert SerialPrototypes.TWO_HUNDRED_FORTY_EIGHT_UINT8S.value == 190
+    assert SerialPrototypes.NINETY_TWO_INT8S.value == 197
+    assert SerialPrototypes.ONE_HUNDRED_TWENTY_FOUR_UINT16S.value == 212
+    assert SerialPrototypes.SIXTY_TWO_INT32S.value == 234
+    assert SerialPrototypes.FORTY_EIGHT_FLOAT32S.value == 239
+    assert SerialPrototypes.THIRTY_ONE_UINT64S.value == 244
+    assert SerialPrototypes.THIRTY_ONE_INT64S.value == 248
+    assert SerialPrototypes.THIRTY_ONE_FLOAT64S.value == 252
 
 
 @pytest.mark.parametrize(
@@ -109,6 +119,9 @@ def test_serial_prototypes_members() -> None:
         (SerialPrototypes.ELEVEN_FLOAT64S, 153),
         (SerialPrototypes.FIFTEEN_INT64S, 164),
         (SerialPrototypes.TWO_INT32S, 37),
+        (SerialPrototypes.TWO_HUNDRED_FORTY_EIGHT_BOOLS, 172),
+        (SerialPrototypes.SIXTY_TWO_FLOAT32S, 240),
+        (SerialPrototypes.THIRTY_ONE_FLOAT64S, 252),
     ],
 )
 def test_serial_prototypes_as_uint8(prototype, expected_value) -> None:
@@ -126,6 +139,14 @@ def test_serial_prototypes_as_uint8(prototype, expected_value) -> None:
         (SerialPrototypes.ELEVEN_FLOAT64S, np.ndarray, (11,), np.float64),
         (SerialPrototypes.FIFTEEN_INT64S, np.ndarray, (15,), np.int64),
         (SerialPrototypes.TWO_INT32S, np.ndarray, (2,), np.int32),
+        (SerialPrototypes.TWO_HUNDRED_FORTY_EIGHT_BOOLS, np.ndarray, (248,), np.bool_),
+        (SerialPrototypes.TWO_HUNDRED_FORTY_EIGHT_UINT8S, np.ndarray, (248,), np.uint8),
+        (SerialPrototypes.NINETY_TWO_INT8S, np.ndarray, (92,), np.int8),
+        (SerialPrototypes.ONE_HUNDRED_TWENTY_FOUR_UINT16S, np.ndarray, (124,), np.uint16),
+        (SerialPrototypes.SIXTY_TWO_UINT32S, np.ndarray, (62,), np.uint32),
+        (SerialPrototypes.SIXTY_TWO_FLOAT32S, np.ndarray, (62,), np.float32),
+        (SerialPrototypes.THIRTY_ONE_UINT64S, np.ndarray, (31,), np.uint64),
+        (SerialPrototypes.THIRTY_ONE_FLOAT64S, np.ndarray, (31,), np.float64),
     ],
 )
 def test_serial_prototypes_get_prototype(prototype, expected_type, expected_shape, expected_dtype) -> None:
@@ -146,6 +167,9 @@ def test_serial_prototypes_get_prototype(prototype, expected_type, expected_shap
         (np.uint8(153), np.zeros(11, dtype=np.float64)),  # ELEVEN_FLOAT64S
         (np.uint8(164), np.zeros(15, dtype=np.int64)),  # FIFTEEN_INT64S
         (np.uint8(37), np.zeros(2, dtype=np.int32)),  # TWO_INT32S
+        (np.uint8(190), np.zeros(248, dtype=np.uint8)),  # TWO_HUNDRED_FORTY_EIGHT_UINT8S
+        (np.uint8(240), np.zeros(62, dtype=np.float32)),  # SIXTY_TWO_FLOAT32S
+        (np.uint8(252), np.zeros(31, dtype=np.float64)),  # THIRTY_ONE_FLOAT64S
         (np.uint8(255), None),  # Invalid code
     ],
 )
@@ -179,8 +203,19 @@ def test_serial_prototypes_get_prototype_for_code(code, expected_result) -> None
         (40, "int64"),
         (41, "float64"),
         (165, "float64"),
+        (172, "bool"),  # TWO_HUNDRED_FORTY_EIGHT_BOOLS
+        (190, "uint8"),  # TWO_HUNDRED_FORTY_EIGHT_UINT8S
+        (202, "int8"),  # TWO_HUNDRED_FORTY_EIGHT_INT8S
+        (212, "uint16"),  # ONE_HUNDRED_TWENTY_FOUR_UINT16S
+        (222, "int16"),  # ONE_HUNDRED_TWENTY_FOUR_INT16S
+        (228, "uint32"),  # SIXTY_TWO_UINT32S
+        (234, "int32"),  # SIXTY_TWO_INT32S
+        (240, "float32"),  # SIXTY_TWO_FLOAT32S
+        (244, "uint64"),  # THIRTY_ONE_UINT64S
+        (248, "int64"),  # THIRTY_ONE_INT64S
+        (252, "float64"),  # THIRTY_ONE_FLOAT64S
         (0, None),  # Invalid code
-        (200, None),  # Invalid code
+        (253, None),  # Invalid code (beyond extended range)
     ],
 )
 def test_serial_prototypes_get_dtype_for_code(code, expected_dtype) -> None:
