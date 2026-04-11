@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
+from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import polars as pl
 import pytest
 from ataraxis_base_utilities import error_format
-
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from ataraxis_communication_interface.dataclasses import (
@@ -35,7 +34,7 @@ from ataraxis_communication_interface.log_processing import (
     MICROCONTROLLER_DATA_DIRECTORY,
     execute_job,
     find_log_archive,
-    _generate_job_ids,
+    generate_job_ids,
     _ColumnAccumulator,
     _ExtractedMessages,
     _ExtractedModuleData,
@@ -46,7 +45,6 @@ from ataraxis_communication_interface.log_processing import (
     _build_message_dataframe,
     _extract_unique_components,
     run_log_processing_pipeline,
-    initialize_processing_tracker,
 )
 
 if TYPE_CHECKING:
@@ -453,11 +451,11 @@ def test_resolve_recording_roots_deduplicates() -> None:
     assert len(result) == 2
 
 
-def test_generate_job_ids() -> None:
-    """Verifies that _generate_job_ids returns a mapping of source IDs to hex job IDs."""
+def testgenerate_job_ids() -> None:
+    """Verifies that generate_job_ids returns a mapping of source IDs to hex job IDs."""
     source_ids = ["1", "2", "3"]
 
-    result = _generate_job_ids(source_ids=source_ids)
+    result = generate_job_ids(source_ids=source_ids)
 
     assert len(result) == 3
     assert set(result.keys()) == {"1", "2", "3"}
@@ -467,24 +465,12 @@ def test_generate_job_ids() -> None:
         int(job_id, 16)  # Validates hex format
 
 
-def test_generate_job_ids_deterministic() -> None:
-    """Verifies that _generate_job_ids produces deterministic results."""
-    result1 = _generate_job_ids(source_ids=["1", "2"])
-    result2 = _generate_job_ids(source_ids=["1", "2"])
+def testgenerate_job_ids_deterministic() -> None:
+    """Verifies that generate_job_ids produces deterministic results."""
+    result1 = generate_job_ids(source_ids=["1", "2"])
+    result2 = generate_job_ids(source_ids=["1", "2"])
 
     assert result1 == result2
-
-
-def test_initialize_processing_tracker(tmp_path: Path) -> None:
-    """Verifies that initialize_processing_tracker creates a tracker and returns job IDs."""
-    result = initialize_processing_tracker(output_directory=tmp_path, source_ids=["1", "2"])
-
-    assert len(result) == 2
-    assert "1" in result
-    assert "2" in result
-
-    tracker_path = tmp_path / TRACKER_FILENAME
-    assert tracker_path.exists()
 
 
 def test_execute_job_empty_event_codes(tmp_path: Path) -> None:
