@@ -113,22 +113,22 @@ Skills are distributed through the ataraxis marketplace and are loaded into Clau
 
 ### Communication Plugin Skills (ataraxis/plugins/communication/)
 
-| Skill                        | Description                                                           |
-|------------------------------|-----------------------------------------------------------------------|
-| `/microcontroller-setup`     | MCP-based microcontroller discovery, MQTT verification, and manifests |
-| `/microcontroller-interface` | MicroControllerInterface and ModuleInterface API usage and lifecycle  |
-| `/mcp-environment-setup`     | MCP server connectivity diagnostics and environment verification      |
-| `/pipeline`                  | End-to-end pipeline orchestration and multi-controller planning       |
-| `/extraction-configuration`  | ExtractionConfig parameters, generation, validation, and lifecycle    |
-| `/log-input-format`          | Reference for NPZ archive format, source IDs, and DataLogger output   |
-| `/log-processing`            | Orchestrate log archive processing workflow via MCP tools             |
-| `/log-processing-results`    | Reference for output data formats and event distribution analysis     |
+| Skill                                  | Description                                                           |
+|----------------------------------------|-----------------------------------------------------------------------|
+| `/microcontroller-setup`               | MCP-based microcontroller discovery, MQTT verification, and manifests |
+| `/microcontroller-interface`           | MicroControllerInterface and ModuleInterface API usage and lifecycle  |
+| `/communication-mcp-environment-setup` | MCP server connectivity diagnostics and environment verification      |
+| `/pipeline`                            | End-to-end pipeline orchestration and multi-controller planning       |
+| `/extraction-configuration`            | ExtractionConfig parameters, generation, validation, and lifecycle    |
+| `/log-input-format`                    | Reference for NPZ archive format, source IDs, and DataLogger output   |
+| `/log-processing`                      | Orchestrate log archive processing workflow via MCP tools             |
+| `/log-processing-results`              | Reference for output data formats and event distribution analysis     |
 
 ### Microcontroller Plugin Skills (ataraxis/plugins/microcontroller/)
 
-| Skill              | Description                                                                    |
-|--------------------|--------------------------------------------------------------------------------|
-| `/firmware-module` | Firmware-side Module subclass implementation, command execution, and SendData   |
+| Skill              | Description                                                                   |
+|--------------------|-------------------------------------------------------------------------------|
+| `/firmware-module` | Firmware-side Module subclass implementation, command execution, and SendData |
 
 ### Automation Plugin Skills (ataraxis/plugins/automation/)
 
@@ -268,7 +268,8 @@ data from DataLogger archives.
 1. Review `src/ataraxis_communication_interface/microcontroller_interface.py` for the ABC definition
 2. Subclasses must implement `initialize_remote_assets()`, `terminate_remote_assets()`, and
    `process_received_data()`
-3. `send_command()` and `send_parameters()` use LRU-cached message construction; `reset_command_queue()` sends a dequeue command
+3. `send_command()` and `send_parameters()` use LRU-cached message construction; `reset_command_queue()` sends a 
+   dequeue command
 4. See `examples/example_interface.py` for a reference subclass implementation
 
 **Modifying serial communication:**
