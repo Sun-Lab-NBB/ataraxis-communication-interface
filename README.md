@@ -540,8 +540,8 @@ axci mcp
 
 | Tool                                  | Description                                                                   |
 |---------------------------------------|-------------------------------------------------------------------------------|
-| `list_microcontrollers`               | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs |
-| `check_mqtt_broker`                   | Checks whether an MQTT broker is reachable at the specified host and port     |
+| `list_microcontrollers_tool`          | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs |
+| `check_mqtt_broker_tool`              | Checks whether an MQTT broker is reachable at the specified host and port     |
 | `assemble_log_archives_tool`          | Consolidates raw .npy log entries into .npz archives by source ID             |
 | `read_microcontroller_manifest_tool`  | Reads a microcontroller manifest file and returns its contents                |
 | `write_microcontroller_manifest_tool` | Writes or updates a microcontroller manifest file in a log directory          |
