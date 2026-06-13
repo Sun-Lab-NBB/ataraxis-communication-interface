@@ -164,7 +164,7 @@ _job_execution_state: _JobExecutionState | None = None  # pragma: no cover
 
 
 @mcp.tool()  # pragma: no cover
-def list_microcontrollers(baudrate: int = 115200) -> str:  # pragma: no cover
+def list_microcontrollers_tool(baudrate: int = 115200) -> str:  # pragma: no cover
     """Discovers all available serial ports and identifies which ones are connected to Arduino or Teensy
     microcontrollers running the ataraxis-micro-controller library.
 
@@ -234,7 +234,7 @@ def list_microcontrollers(baudrate: int = 115200) -> str:  # pragma: no cover
 
 
 @mcp.tool()  # pragma: no cover
-def check_mqtt_broker(host: str = "127.0.0.1", port: int = 1883) -> str:  # pragma: no cover
+def check_mqtt_broker_tool(host: str = "127.0.0.1", port: int = 1883) -> str:  # pragma: no cover
     """Checks whether an MQTT broker is reachable at the specified host and port.
 
     Attempts to connect to the MQTT broker and reports the result. Use this tool to verify MQTT broker availability
