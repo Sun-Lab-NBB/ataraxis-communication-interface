@@ -928,6 +928,80 @@ def test_run_log_processing_pipeline_remote_mode(tmp_path: Path) -> None:
     assert len(feather_files) == 1
 
 
+def test_run_log_processing_pipeline_remote_jobs_share_tracker(tmp_path: Path) -> None:
+    """Verifies that independent remote jobs sharing one tracker do not reset each other's state.
+
+    Dispatches each configured controller as its own remote job against a single shared tracker. Running the
+    second job must align the tracker against the configuration universe and leave the first job's completed
+    state intact, rather than treating it as a foreign entry and resetting it.
+    """
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    module_type, module_id = 1, 2
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
+        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (
+            2000,
+            _make_module_data_payload(
+                module_type, module_id, command=2, event=20, prototype_code=SerialPrototypes.ONE_UINT8, data_bytes=[42]
+            ),
+        ),
+    ]
+
+    manifest = MicroControllerManifest()
+    controllers: list[ControllerExtractionConfig] = []
+    for source_id in (1, 2):
+        _create_test_archive(
+            archive_path=log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}", source_id=source_id, messages=messages
+        )
+        manifest.controllers.append(
+            MicroControllerSourceData(
+                id=source_id,
+                name=f"ctrl_{source_id}",
+                modules=(ModuleSourceData(module_type=module_type, module_id=module_id, name="m"),),
+            )
+        )
+        controllers.append(
+            ControllerExtractionConfig(
+                controller_id=source_id,
+                modules=(ModuleExtractionConfig(module_type=module_type, module_id=module_id, event_codes=(10, 20)),),
+                kernel=None,
+            )
+        )
+    manifest.save(file_path=log_dir / MICROCONTROLLER_MANIFEST_FILENAME)
+    config_path = tmp_path / "config.yaml"
+    ExtractionConfig(controllers=controllers).save(file_path=config_path)
+
+    job_id_one = ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="1")
+    job_id_two = ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="2")
+
+    # Dispatches each controller as a separate remote job against the same output directory (shared tracker).
+    run_log_processing_pipeline(
+        log_directory=log_dir,
+        output_directory=output_dir,
+        config=config_path,
+        job_id=job_id_one,
+        workers=1,
+        display_progress=False,
+    )
+    run_log_processing_pipeline(
+        log_directory=log_dir,
+        output_directory=output_dir,
+        config=config_path,
+        job_id=job_id_two,
+        workers=1,
+        display_progress=False,
+    )
+
+    # Both jobs must be recorded as succeeded; the second run must not have reset the first.
+    tracker = ProcessingTracker(file_path=output_dir / MICROCONTROLLER_DATA_DIRECTORY / TRACKER_FILENAME)
+    assert tracker.get_job_status(job_id=job_id_one) == ProcessingStatus.SUCCEEDED
+    assert tracker.get_job_status(job_id=job_id_two) == ProcessingStatus.SUCCEEDED
+
+
 def test_run_log_processing_pipeline_invalid_job_id(tmp_path: Path) -> None:
     """Verifies that run_log_processing_pipeline raises ValueError for an invalid job_id."""
     log_dir, config_path, output_dir = _setup_test_environment(tmp_path)

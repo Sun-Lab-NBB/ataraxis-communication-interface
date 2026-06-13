@@ -897,10 +897,8 @@ def prepare_log_processing_batch_tool(  # pragma: no cover
             # Initializes a new tracker with jobs for the filtered source IDs. Uses prepare_tracker so the MCP
             # batch-preparation path inherits the same regeneration logic as run_log_processing_pipeline.
             tracker = ProcessingTracker(file_path=tracker_path)
-            tracker_jobs: list[tuple[str, str]] = [
-                (EXTRACTION_JOB_NAME, source_id) for source_id in filtered_ids
-            ]
-            prepare_tracker(tracker=tracker, jobs=tracker_jobs)
+            tracker_jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in filtered_ids]
+            prepare_tracker(tracker=tracker, jobs=tracker_jobs, universe=tracker_jobs)
             job_ids = generate_job_ids(source_ids=filtered_ids)
 
             jobs: list[dict[str, str]] = [
@@ -1100,6 +1098,8 @@ def get_log_processing_status_tool() -> dict[str, Any]:  # pragma: no cover
                 entry: dict[str, Any] = {"job_id": job.job_id, "source_id": job.source_id, "status": status.name}
                 if job_state.error_message is not None:
                     entry["error_message"] = job_state.error_message
+                if job_state.executor_id is not None:
+                    entry["executor_id"] = job_state.executor_id
                 job_details.append(entry)
             else:
                 job_details.append({"job_id": job.job_id, "source_id": job.source_id, "status": "UNKNOWN"})
@@ -1156,6 +1156,9 @@ def get_log_processing_timing_tool() -> dict[str, Any]:  # pragma: no cover
 
             job_info = tracker.jobs[job.job_id]
             entry: dict[str, Any] = {"job_id": job.job_id, "source_id": job.source_id}
+
+            if job_info.executor_id is not None:
+                entry["executor_id"] = job_info.executor_id
 
             if job_info.started_at is not None:
                 started_at_us = int(job_info.started_at)

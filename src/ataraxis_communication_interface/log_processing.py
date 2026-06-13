@@ -212,18 +212,11 @@ def run_log_processing_pipeline(
         )
         console.error(message=message, error=ValueError)
 
-    # Resolves all archive paths upfront and validates they belong to the same DataLogger output directory.
-    archive_paths = {
-        source_id: find_log_archive(log_directory=log_directory, source_id=source_id) for source_id in source_ids
-    }
-    parent_directories = {path.parent for path in archive_paths.values()}
-    if len(parent_directories) > 1:
-        message = (
-            f"Unable to process logs in '{log_directory}'. The requested log archives span multiple directories: "
-            f"{sorted(str(parent) for parent in parent_directories)}. Each DataLogger output directory must be "
-            f"processed independently."
-        )
-        console.error(message=message, error=ValueError)
+    # Builds the universe of every job the extraction config could produce: one extraction job per configured
+    # controller ID. The universe is a configuration fingerprint, not an invocation fingerprint, so every
+    # invocation (local or a single remote job) aligns the tracker against the same set and never resets sibling
+    # jobs.
+    universe: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
 
     # Creates the microcontroller_data subdirectory under the output path.
     data_path = output_directory / MICROCONTROLLER_DATA_DIRECTORY
@@ -231,28 +224,27 @@ def run_log_processing_pipeline(
 
     tracker = ProcessingTracker(file_path=data_path / TRACKER_FILENAME)
 
-    # Aligns the tracker with the current invocation's job set in both local and remote modes. Foreign entries
-    # on disk indicate that the extraction configuration has diverged from what was previously tracked and are
-    # reset before processing begins.
-    jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
-    prepare_tracker(tracker=tracker, jobs=jobs)
-
     if job_id is not None:
-        # Generates all possible job IDs and executes only the one matching the provided job_id (remote mode).
+        # Remote mode: selects the job to run solely by ID, validated against the configuration universe. Aligns
+        # the tracker with the full universe so start_job finds the requested ID and concurrent remote jobs do not
+        # treat each other's entries as foreign. Resolves only the matched archive so a missing or late sibling
+        # archive cannot fail this job.
         all_job_ids = generate_job_ids(source_ids=source_ids)
         id_to_source: dict[str, str] = {generated_id: source for source, generated_id in all_job_ids.items()}
 
         if job_id not in id_to_source:
             message = (
                 f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match "
-                f"any jobs available for the provided log IDs. Valid job IDs: "
+                f"any jobs available for the provided extraction config. Valid job IDs: "
                 f"{list(all_job_ids.values())}."
             )
             console.error(message=message, error=ValueError)
 
+        prepare_tracker(tracker=tracker, jobs=universe, universe=universe)
+
         source_id = id_to_source[job_id]
         execute_job(
-            log_path=archive_paths[source_id],
+            log_path=find_log_archive(log_directory=log_directory, source_id=source_id),
             output_directory=data_path,
             source_id=source_id,
             job_id=job_id,
@@ -262,10 +254,27 @@ def run_log_processing_pipeline(
             display_progress=display_progress,
         )
     else:
-        # Runs all requested jobs sequentially (local mode). Resolves workers once and creates a shared
-        # ProcessPoolExecutor to reuse across all jobs, avoiding repeated process pool creation.
-        job_ids = generate_job_ids(source_ids=source_ids)
+        # Local mode: resolves all requested archive paths upfront and validates they belong to the same
+        # DataLogger output directory.
+        archive_paths = {
+            source_id: find_log_archive(log_directory=log_directory, source_id=source_id) for source_id in source_ids
+        }
+        parent_directories = {path.parent for path in archive_paths.values()}
+        if len(parent_directories) > 1:
+            message = (
+                f"Unable to process logs in '{log_directory}'. The requested log archives span multiple "
+                f"directories: {sorted(str(parent) for parent in parent_directories)}. Each DataLogger output "
+                f"directory must be processed independently."
+            )
+            console.error(message=message, error=ValueError)
 
+        # Aligns the tracker with the requested jobs while detecting foreign entries against the full universe.
+        jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
+        prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
+
+        # Resolves workers once and creates a shared ProcessPoolExecutor to reuse across all jobs, avoiding
+        # repeated process pool creation.
+        job_ids = generate_job_ids(source_ids=source_ids)
         resolved_workers = resolve_worker_count(requested_workers=workers)
         shared_executor = ProcessPoolExecutor(max_workers=resolved_workers) if resolved_workers > 1 else None
 
@@ -591,29 +600,35 @@ def find_log_archive(log_directory: Path, source_id: str) -> Path:
     return matches[0]
 
 
-def prepare_tracker(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> None:
-    """Aligns the processing tracker's job registry with the jobs discovered for the current pipeline invocation.
+def prepare_tracker(tracker: ProcessingTracker, jobs: list[tuple[str, str]], universe: list[tuple[str, str]]) -> None:
+    """Aligns the processing tracker's job registry with the jobs requested for the current pipeline invocation.
 
     Notes:
-        Applies the same regeneration strategy in local and remote modes so that foreign or stale tracker
-        entries consistently trigger a reset instead of silently persisting across invocations. Foreign entries
-        are treated as architectural drift (the current invocation's job set has changed since the tracker was
-        last written) and surfaced through a warning before the tracker is rebuilt.
+        Foreign entries are detected by comparing the tracker's existing job IDs against the configuration-derived
+        universe of all possible jobs for the current extraction config, not against the invocation's requested
+        subset. This lets a subset invocation or a single concurrent remote job align the tracker without wiping
+        previously-completed state for sibling jobs. Any existing entries that are not part of the universe are
+        treated as architectural drift (the extraction config itself has changed since the tracker was last
+        written) and surfaced through a warning before the tracker is rebuilt.
 
-        If the tracker file does not yet exist on disk, the helper initializes it from scratch with the current
-        jobs. If the file exists and contains job IDs that are not part of the current invocation's expected
-        set, those entries are classified as foreign and the helper emits a warning before resetting and
-        reinitializing the tracker. If the file already contains a strict subset of the expected IDs, the
-        helper performs an additive ``initialize_jobs`` call that registers the missing entries without
-        clobbering any existing state for previously-tracked jobs. If the file already contains exactly the
-        expected ID set, the helper is a no-op, which keeps ``initialize_jobs`` from emitting duplicate-entry
-        warnings for the fully-aligned case.
+        If the tracker file does not yet exist on disk, the helper initializes it with the requested jobs. If the
+        file exists and contains job IDs that are not part of the universe, those entries are classified as
+        foreign and the helper emits a warning before resetting and reinitializing the tracker. If the file
+        exists with only universe-valid entries but is missing some requested jobs, the helper performs an
+        additive ``initialize_jobs`` call that registers the missing entries without clobbering any existing
+        state. If the file already contains every requested job, the helper is a no-op, which keeps
+        ``initialize_jobs`` from emitting duplicate-entry warnings for the fully-aligned case.
 
     Args:
         tracker: The ProcessingTracker instance bound to the microcontroller_data output directory.
         jobs: The list of (job_name, specifier) tuples the current pipeline invocation intends to execute.
+        universe: The list of (job_name, specifier) tuples enumerating every job the extraction config could
+            produce. Used exclusively for foreign-entry detection.
     """
-    expected_ids = {
+    universe_ids = {
+        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in universe
+    }
+    requested_ids = {
         ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in jobs
     }
 
@@ -622,15 +637,14 @@ def prepare_tracker(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> 
         return
 
     existing_ids = set(tracker.find_jobs(job_name="").keys())
-    foreign_ids = existing_ids - expected_ids
-    missing_ids = expected_ids - existing_ids
+    foreign_ids = existing_ids - universe_ids
 
     if foreign_ids:
         console.echo(
             message=(
                 f"The processing tracker at '{tracker.file_path}' contains {len(foreign_ids)} job entries "
-                f"that are not part of the current invocation's job set. Resetting and reinitializing the "
-                f"tracker to match the requested jobs. Foreign job IDs: {sorted(foreign_ids)}."
+                f"that are not part of the current extraction config's job universe. Resetting and "
+                f"reinitializing the tracker to match the requested jobs. Foreign job IDs: {sorted(foreign_ids)}."
             ),
             level=LogLevel.WARNING,
         )
@@ -638,7 +652,7 @@ def prepare_tracker(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> 
         tracker.initialize_jobs(jobs=jobs)
         return
 
-    if missing_ids:
+    if not requested_ids.issubset(existing_ids):
         tracker.initialize_jobs(jobs=jobs)
 
 
