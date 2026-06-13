@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
+from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import polars as pl
 import pytest
 from ataraxis_base_utilities import error_format
-
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from ataraxis_communication_interface.dataclasses import (
@@ -35,7 +34,7 @@ from ataraxis_communication_interface.log_processing import (
     MICROCONTROLLER_DATA_DIRECTORY,
     execute_job,
     find_log_archive,
-    _generate_job_ids,
+    generate_job_ids,
     _ColumnAccumulator,
     _ExtractedMessages,
     _ExtractedModuleData,
@@ -46,7 +45,6 @@ from ataraxis_communication_interface.log_processing import (
     _build_message_dataframe,
     _extract_unique_components,
     run_log_processing_pipeline,
-    initialize_processing_tracker,
 )
 
 if TYPE_CHECKING:
@@ -453,11 +451,11 @@ def test_resolve_recording_roots_deduplicates() -> None:
     assert len(result) == 2
 
 
-def test_generate_job_ids() -> None:
-    """Verifies that _generate_job_ids returns a mapping of source IDs to hex job IDs."""
+def testgenerate_job_ids() -> None:
+    """Verifies that generate_job_ids returns a mapping of source IDs to hex job IDs."""
     source_ids = ["1", "2", "3"]
 
-    result = _generate_job_ids(source_ids=source_ids)
+    result = generate_job_ids(source_ids=source_ids)
 
     assert len(result) == 3
     assert set(result.keys()) == {"1", "2", "3"}
@@ -467,24 +465,12 @@ def test_generate_job_ids() -> None:
         int(job_id, 16)  # Validates hex format
 
 
-def test_generate_job_ids_deterministic() -> None:
-    """Verifies that _generate_job_ids produces deterministic results."""
-    result1 = _generate_job_ids(source_ids=["1", "2"])
-    result2 = _generate_job_ids(source_ids=["1", "2"])
+def testgenerate_job_ids_deterministic() -> None:
+    """Verifies that generate_job_ids produces deterministic results."""
+    result1 = generate_job_ids(source_ids=["1", "2"])
+    result2 = generate_job_ids(source_ids=["1", "2"])
 
     assert result1 == result2
-
-
-def test_initialize_processing_tracker(tmp_path: Path) -> None:
-    """Verifies that initialize_processing_tracker creates a tracker and returns job IDs."""
-    result = initialize_processing_tracker(output_directory=tmp_path, source_ids=["1", "2"])
-
-    assert len(result) == 2
-    assert "1" in result
-    assert "2" in result
-
-    tracker_path = tmp_path / TRACKER_FILENAME
-    assert tracker_path.exists()
 
 
 def test_execute_job_empty_event_codes(tmp_path: Path) -> None:
@@ -940,6 +926,80 @@ def test_run_log_processing_pipeline_remote_mode(tmp_path: Path) -> None:
 
     feather_files = list(data_dir.glob(f"*{FEATHER_SUFFIX}"))
     assert len(feather_files) == 1
+
+
+def test_run_log_processing_pipeline_remote_jobs_share_tracker(tmp_path: Path) -> None:
+    """Verifies that independent remote jobs sharing one tracker do not reset each other's state.
+
+    Dispatches each configured controller as its own remote job against a single shared tracker. Running the
+    second job must align the tracker against the configuration universe and leave the first job's completed
+    state intact, rather than treating it as a foreign entry and resetting it.
+    """
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    module_type, module_id = 1, 2
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
+        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (
+            2000,
+            _make_module_data_payload(
+                module_type, module_id, command=2, event=20, prototype_code=SerialPrototypes.ONE_UINT8, data_bytes=[42]
+            ),
+        ),
+    ]
+
+    manifest = MicroControllerManifest()
+    controllers: list[ControllerExtractionConfig] = []
+    for source_id in (1, 2):
+        _create_test_archive(
+            archive_path=log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}", source_id=source_id, messages=messages
+        )
+        manifest.controllers.append(
+            MicroControllerSourceData(
+                id=source_id,
+                name=f"ctrl_{source_id}",
+                modules=(ModuleSourceData(module_type=module_type, module_id=module_id, name="m"),),
+            )
+        )
+        controllers.append(
+            ControllerExtractionConfig(
+                controller_id=source_id,
+                modules=(ModuleExtractionConfig(module_type=module_type, module_id=module_id, event_codes=(10, 20)),),
+                kernel=None,
+            )
+        )
+    manifest.save(file_path=log_dir / MICROCONTROLLER_MANIFEST_FILENAME)
+    config_path = tmp_path / "config.yaml"
+    ExtractionConfig(controllers=controllers).save(file_path=config_path)
+
+    job_id_one = ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="1")
+    job_id_two = ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="2")
+
+    # Dispatches each controller as a separate remote job against the same output directory (shared tracker).
+    run_log_processing_pipeline(
+        log_directory=log_dir,
+        output_directory=output_dir,
+        config=config_path,
+        job_id=job_id_one,
+        workers=1,
+        display_progress=False,
+    )
+    run_log_processing_pipeline(
+        log_directory=log_dir,
+        output_directory=output_dir,
+        config=config_path,
+        job_id=job_id_two,
+        workers=1,
+        display_progress=False,
+    )
+
+    # Both jobs must be recorded as succeeded; the second run must not have reset the first.
+    tracker = ProcessingTracker(file_path=output_dir / MICROCONTROLLER_DATA_DIRECTORY / TRACKER_FILENAME)
+    assert tracker.get_job_status(job_id=job_id_one) == ProcessingStatus.SUCCEEDED
+    assert tracker.get_job_status(job_id=job_id_two) == ProcessingStatus.SUCCEEDED
 
 
 def test_run_log_processing_pipeline_invalid_job_id(tmp_path: Path) -> None:
