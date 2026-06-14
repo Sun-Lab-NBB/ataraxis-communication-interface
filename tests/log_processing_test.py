@@ -33,6 +33,7 @@ from ataraxis_communication_interface.microcontroller.log_processing import (
     PARALLEL_PROCESSING_THRESHOLD,
     MICROCONTROLLER_DATA_DIRECTORY,
     execute_job,
+    prepare_tracker,
     find_log_archive,
     generate_job_ids,
     _ColumnAccumulator,
@@ -471,6 +472,60 @@ def test_generate_job_ids_deterministic() -> None:
     second_result = generate_job_ids(source_ids=["1", "2"])
 
     assert first_result == second_result
+
+
+def test_prepare_tracker_new_file(tmp_path: Path) -> None:
+    """Verifies that prepare_tracker initializes a fresh tracker when no tracker file exists yet."""
+    tracker = ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME)
+    jobs = [("microcontroller_data_extraction", "1")]
+
+    prepare_tracker(tracker=tracker, jobs=jobs, universe=jobs)
+
+    expected = {ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="1")}
+    assert set(ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME).find_jobs(job_name="").keys()) == expected
+
+
+def test_prepare_tracker_foreign_entries(tmp_path: Path) -> None:
+    """Verifies that prepare_tracker resets and reinitializes the tracker when it contains foreign job entries."""
+    tracker = ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME)
+    # Seeds the tracker with a job that is not part of the requested universe, simulating extraction config drift.
+    tracker.initialize_jobs(jobs=[("stale_job", "99")])
+
+    requested = [("microcontroller_data_extraction", "1")]
+    prepare_tracker(tracker=tracker, jobs=requested, universe=requested)
+
+    foreign_id = ProcessingTracker.generate_job_id(job_name="stale_job", specifier="99")
+    expected = {ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="1")}
+    final_ids = set(ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME).find_jobs(job_name="").keys())
+    assert final_ids == expected
+    assert foreign_id not in final_ids
+
+
+def test_prepare_tracker_additive(tmp_path: Path) -> None:
+    """Verifies that prepare_tracker registers missing requested jobs without clobbering existing universe entries."""
+    tracker = ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME)
+    tracker.initialize_jobs(jobs=[("microcontroller_data_extraction", "1")])
+
+    requested = [("microcontroller_data_extraction", "1"), ("microcontroller_data_extraction", "2")]
+    prepare_tracker(tracker=tracker, jobs=requested, universe=requested)
+
+    expected = {
+        ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier=specifier)
+        for specifier in ("1", "2")
+    }
+    assert set(ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME).find_jobs(job_name="").keys()) == expected
+
+
+def test_prepare_tracker_fully_aligned(tmp_path: Path) -> None:
+    """Verifies that prepare_tracker is a no-op when the tracker already contains every requested job."""
+    tracker = ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME)
+    jobs = [("microcontroller_data_extraction", "1")]
+    tracker.initialize_jobs(jobs=jobs)
+
+    prepare_tracker(tracker=tracker, jobs=jobs, universe=jobs)
+
+    expected = {ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier="1")}
+    assert set(ProcessingTracker(file_path=tmp_path / TRACKER_FILENAME).find_jobs(job_name="").keys()) == expected
 
 
 def test_execute_job_empty_event_codes(tmp_path: Path) -> None:
