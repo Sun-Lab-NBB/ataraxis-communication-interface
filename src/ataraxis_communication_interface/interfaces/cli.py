@@ -14,10 +14,10 @@ from ataraxis_base_utilities import LogLevel, console  # pragma: no cover
 from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
 
 from .mcp_server import run_server as run_mcp  # pragma: no cover
-from .dataclasses import ExtractionConfig, create_extraction_config  # pragma: no cover
-from .communication import MQTTCommunication  # pragma: no cover
-from .log_processing import run_log_processing_pipeline  # pragma: no cover
-from .microcontroller_interface import _evaluate_port  # pragma: no cover
+from ..communication import MQTTCommunication  # pragma: no cover
+from ..microcontroller.interface import evaluate_port  # pragma: no cover
+from ..microcontroller.dataclasses import ExtractionConfig, create_extraction_config  # pragma: no cover
+from ..microcontroller.log_processing import run_log_processing_pipeline  # pragma: no cover
 
 # Enables console output.
 console.enable()  # pragma: no cover
@@ -70,7 +70,7 @@ def identify(baudrate: int) -> None:  # pragma: no cover
     with ProcessPoolExecutor() as executor:
         # Submits all port evaluation tasks.
         future_to_port = {
-            executor.submit(_evaluate_port, port_name, baudrate): (port_name, port_info)
+            executor.submit(evaluate_port, port_name, baudrate): (port_name, port_info)
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
         }
 

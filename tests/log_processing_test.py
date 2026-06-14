@@ -12,7 +12,7 @@ import pytest
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
-from ataraxis_communication_interface.dataclasses import (
+from ataraxis_communication_interface.microcontroller.dataclasses import (
     MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig,
     ModuleSourceData,
@@ -23,7 +23,7 @@ from ataraxis_communication_interface.dataclasses import (
     ControllerExtractionConfig,
 )
 from ataraxis_communication_interface.communication import SerialProtocols, SerialPrototypes
-from ataraxis_communication_interface.log_processing import (
+from ataraxis_communication_interface.microcontroller.log_processing import (
     FEATHER_SUFFIX,
     TRACKER_FILENAME,
     LOG_ARCHIVE_SUFFIX,

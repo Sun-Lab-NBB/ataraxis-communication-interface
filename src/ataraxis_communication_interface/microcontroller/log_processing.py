@@ -19,7 +19,7 @@ from .dataclasses import (
     MicroControllerManifest,
     ControllerExtractionConfig,
 )
-from .communication import SerialProtocols, SerialPrototypes
+from ..communication import SerialProtocols, SerialPrototypes
 
 if TYPE_CHECKING:
     from pathlib import Path

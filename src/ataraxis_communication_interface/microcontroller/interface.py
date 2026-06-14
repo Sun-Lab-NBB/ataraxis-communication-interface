@@ -22,7 +22,7 @@ from ataraxis_base_utilities import console
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
 
 from .dataclasses import ModuleSourceData, write_microcontroller_manifest
-from .communication import (
+from ..communication import (
     KernelData,
     ModuleData,
     KernelState,
@@ -1343,7 +1343,7 @@ class MicroControllerInterface:  # pragma: no cover
                 module.terminate_remote_assets()
 
 
-def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:  # pragma: no cover
+def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:  # pragma: no cover
     """Determines whether the target serial port is connected to an Ataraxis MicroController.
 
     Args:

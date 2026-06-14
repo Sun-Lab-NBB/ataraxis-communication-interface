@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from ataraxis_base_utilities import error_format
 
-from ataraxis_communication_interface.dataclasses import (
+from ataraxis_communication_interface.microcontroller.dataclasses import (
     EXTRACTION_CONFIGURATION_FILENAME,
     MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig,

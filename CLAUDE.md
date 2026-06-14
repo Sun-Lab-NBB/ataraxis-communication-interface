@@ -156,12 +156,15 @@ data from DataLogger archives.
 | Directory                                | Purpose                                                            |
 |------------------------------------------|--------------------------------------------------------------------|
 | `src/ataraxis_communication_interface/`  | Main library source code                                           |
-| `src/.../microcontroller_interface.py`   | Core MicroControllerInterface and ModuleInterface ABC              |
-| `src/.../communication.py`               | Serial and MQTT communication, message protocol, data prototypes   |
-| `src/.../dataclasses.py`                 | Manifest and extraction configuration data structures              |
-| `src/.../log_processing.py`              | Log data processing pipeline for extracting module/kernel events   |
-| `src/.../cli.py`                         | Click-based `axci` CLI with subcommand groups                      |
-| `src/.../mcp_server.py`                  | FastMCP server with 19 tools for discovery, config, and processing |
+| `src/.../communication/`                 | Serial/MQTT communication package (`protocols`, `messages`, `serial`, `mqtt`) |
+| `src/.../microcontroller/interface.py`   | Core MicroControllerInterface and ModuleInterface ABC              |
+| `src/.../microcontroller/dataclasses.py` | Manifest and extraction configuration data structures              |
+| `src/.../microcontroller/log_processing.py` | Log data processing pipeline for extracting module/kernel events |
+| `src/.../interfaces/cli.py`              | Click-based `axci` CLI with subcommand groups                      |
+| `src/.../interfaces/mcp_server.py`       | Thin MCP entry point; registers tool modules and runs the server   |
+| `src/.../interfaces/mcp_instance.py`     | Shared FastMCP instance and cross-tool helpers                     |
+| `src/.../interfaces/mcp_execution.py`    | Batch execution engine (state, manager thread, worker allocation)  |
+| `src/.../interfaces/*_tools.py`          | MCP tool groups (discovery, config, processing, output) — 19 tools |
 | `tests/`                                 | Test suite (dataclasses, communication, log_processing)            |
 | `examples/`                              | Example ModuleInterface subclass and runtime usage                 |
 | `docs/`                                  | Sphinx API documentation source                                    |
@@ -207,14 +210,17 @@ data from DataLogger archives.
   Uses `LogArchiveReader` for archive access and `ProcessingTracker` for job lifecycle management.
   `run_log_processing_pipeline()` orchestrates local (all jobs) and remote (single job by ID) execution modes.
   Outputs Polars DataFrames as Feather (Arrow IPC) files in a `microcontroller_data/` subdirectory.
-- **MCP Server**: `FastMCP` instance (`name="ataraxis-communication-interface"`, `json_response=True`) with 19
-  tools and `_JobExecutionState` tracking for batch processing. Tool categories: microcontroller discovery (2),
-  log archive management (1), manifest management (2), recording discovery (1), extraction config management (3),
-  batch processing execution (2), processing status and management (5), and output verification and cleanup (3).
-  Batch log processing uses `_JobExecutionState` with budget-based worker allocation: the execution manager divides
-  the CPU budget evenly among concurrent parallel jobs (snapped to multiples of 5) with a sqrt-derived saturation
-  floor. The MCP server is registered with MCP clients via the **communication** plugin in the ataraxis marketplace,
-  not directly from this repository.
+- **MCP Server**: `FastMCP` instance (`name="ataraxis-communication-interface"`, `json_response=True`) defined in
+  `interfaces/mcp_instance.py`, with 19 tools split across `interfaces/discovery_tools.py`, `config_tools.py`,
+  `processing_tools.py`, and `output_tools.py`. The tool modules register on the shared instance via `@mcp.tool()`
+  decorators and are imported for their side effects by the thin `interfaces/mcp_server.py`, which also exposes
+  `run_server()`. Tool categories: microcontroller discovery (2), log archive management (1), manifest management (2),
+  recording discovery (1), extraction config management (3), batch processing execution (2), processing status and
+  management (5), and output verification and cleanup (3). Batch log processing uses `JobExecutionState` (in
+  `interfaces/mcp_execution.py`, accessed via `get_execution_state()` / `set_execution_state()`) with budget-based
+  worker allocation: the execution manager divides the CPU budget evenly among concurrent parallel jobs (snapped to
+  multiples of 5) with a sqrt-derived saturation floor. The MCP server is registered with MCP clients via the
+  **communication** plugin in the ataraxis marketplace, not directly from this repository.
 - **CLI**: Click command group (`axci`) with `id` for microcontroller discovery, `mqtt` for broker verification,
   `config` subgroup (`create`, `show`) for extraction configuration management, `process` for log data processing,
   and `mcp` for starting the MCP server.
@@ -256,7 +262,7 @@ data from DataLogger archives.
 
 **Modifying MicroControllerInterface:**
 
-1. Review `src/ataraxis_communication_interface/microcontroller_interface.py` for current implementation
+1. Review `src/ataraxis_communication_interface/microcontroller/interface.py` for current implementation
 2. Understand the multiprocessing architecture: main process sends commands via `MPQueue`, communication process
    handles serial I/O and dispatches received messages to `ModuleInterface` instances
 3. The communication loop runs in `_runtime_cycle()` as a static method in a spawned process
@@ -265,7 +271,7 @@ data from DataLogger archives.
 
 **Modifying ModuleInterface:**
 
-1. Review `src/ataraxis_communication_interface/microcontroller_interface.py` for the ABC definition
+1. Review `src/ataraxis_communication_interface/microcontroller/interface.py` for the ABC definition
 2. Subclasses must implement `initialize_remote_assets()`, `terminate_remote_assets()`, and
    `process_received_data()`
 3. `send_command()` and `send_parameters()` use LRU-cached message construction; `reset_command_queue()` sends a 
@@ -274,7 +280,7 @@ data from DataLogger archives.
 
 **Modifying serial communication:**
 
-1. Review `src/ataraxis_communication_interface/communication.py` for all message types and protocols
+1. Review `src/ataraxis_communication_interface/communication/` (`protocols.py`, `messages.py`, `serial.py`) for all message types and protocols
 2. `SerialProtocols` (12 codes) and `SerialPrototypes` (252 codes) define the protocol layer
 3. Command classes (`RepeatedModuleCommand`, `OneOffModuleCommand`, `DequeueModuleCommand`, `KernelCommand`,
    `ModuleParameters`) construct packed byte arrays via `packed_data` property
@@ -283,14 +289,14 @@ data from DataLogger archives.
 
 **Modifying MQTT communication:**
 
-1. Review `src/ataraxis_communication_interface/communication.py` for `MQTTCommunication`
+1. Review `src/ataraxis_communication_interface/communication/mqtt.py` for `MQTTCommunication`
 2. Uses `paho-mqtt` v2 client with callback-based message reception into a `Queue`
 3. `connect()`/`disconnect()` manage the MQTT client lifecycle
 4. `get_data()` returns `(topic, message)` tuples or `None`; `has_data` property checks queue state
 
 **Modifying data classes and manifests:**
 
-1. Review `src/ataraxis_communication_interface/dataclasses.py` for all data structures
+1. Review `src/ataraxis_communication_interface/microcontroller/dataclasses.py` for all data structures
 2. `MicroControllerManifest` and `ExtractionConfig` extend `YamlConfig` from `ataraxis-data-structures`
 3. Inner data classes are frozen — create new instances rather than mutating. Top-level `MicroControllerManifest`
    and `ExtractionConfig` are mutable `YamlConfig` subclasses
@@ -298,7 +304,7 @@ data from DataLogger archives.
 
 **Modifying log processing:**
 
-1. Review `src/ataraxis_communication_interface/log_processing.py` for the processing pipeline
+1. Review `src/ataraxis_communication_interface/microcontroller/log_processing.py` for the processing pipeline
 2. `run_log_processing_pipeline()` supports local mode (all jobs) and remote mode (single job by ID)
 3. `ProcessingTracker` manages job lifecycle (SCHEDULED → RUNNING → SUCCEEDED/FAILED) via YAML state files
 4. `_process_message_batch()` runs in subprocess workers and is excluded from coverage (`# pragma: no cover`)
@@ -308,15 +314,18 @@ data from DataLogger archives.
 
 **Adding or modifying CLI commands:**
 
-1. Review `src/ataraxis_communication_interface/cli.py` for existing Click group structure
+1. Review `src/ataraxis_communication_interface/interfaces/cli.py` for existing Click group structure
 2. Follow existing patterns for option decorators and error handling
 3. Use `console.echo()` for output and `console.error()` for error handling
 4. The `config` subgroup demonstrates nested Click command groups
 
 **Adding or modifying MCP tools:**
 
-1. Review `src/ataraxis_communication_interface/mcp_server.py` for existing tool patterns
-2. Log processing execution uses `_JobExecutionState` with budget-based worker allocation
-3. The execution manager divides budget among parallel jobs via `_compute_sqrt_minimum()`
+1. Review the `src/ataraxis_communication_interface/interfaces/` tool modules (`discovery_tools.py`,
+   `config_tools.py`, `processing_tools.py`, `output_tools.py`) for existing tool patterns; each registers tools on
+   the shared instance from `interfaces/mcp_instance.py` via `@mcp.tool()`
+2. Add new tool modules to the side-effect import list in `interfaces/mcp_server.py` so their tools register
+3. Log processing execution uses `JobExecutionState` (in `interfaces/mcp_execution.py`) with budget-based worker
+   allocation; the execution manager divides budget among parallel jobs via `_compute_sqrt_minimum()`
 4. Return `dict[str, Any]` (JSON-serializable) for all tool responses
 5. MCP server registration happens in the ataraxis marketplace communication plugin, not in this repository

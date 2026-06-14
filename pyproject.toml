@@ -67,7 +67,7 @@ Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
 
 # Exports the unified CLI entry point for microcontroller discovery, MQTT checking, log processing, and MCP server.
 [project.scripts]
-axci = "ataraxis_communication_interface.cli:axci_cli"
+axci = "ataraxis_communication_interface.interfaces.cli:axci_cli"
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]
@@ -109,6 +109,7 @@ lint.select = ["ALL"]
 # General ignore directives
 lint.ignore = [
     "W291",    # Conflicts with docstring formatting
+    "TID252",  # Parent-relative imports are used by the interfaces subpackage
     "C901",    # Sometimes complex functions are necessary
     "PLR0913", # Sometimes complex functions are necessary
     "PLR0912", # Sometimes complex functions are necessary
@@ -189,6 +190,10 @@ exclude = [
     "recipe/",                               # Ignores recipe directory (grayskull output target)
     "tests/",                                # Ignores the test directory.
 ]
+
+# Excludes the CLI and MCP server interface modules from coverage measurement.
+[tool.coverage.run]
+omit = ["*/interfaces/*"]
 
 # This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
 [tool.coverage.paths]
