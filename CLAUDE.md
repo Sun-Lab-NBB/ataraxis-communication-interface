@@ -1,6 +1,6 @@
 # Claude Code Instructions
 
-## Session Start Behavior
+## Session start behavior
 
 At the beginning of each coding session, before making any code changes, you should build a comprehensive
 understanding of the codebase by invoking the `/explore-codebase` skill.
@@ -10,7 +10,7 @@ This ensures you:
 - Follow existing patterns and conventions
 - Don't introduce inconsistencies or break integrations
 
-## Style Guide Compliance
+## Style guide compliance
 
 Before writing, modifying, or reviewing any code or documentation, you MUST invoke the appropriate skill to load
 Ataraxis framework conventions. This applies to ALL file types:
@@ -31,7 +31,7 @@ All contributions must strictly follow these conventions. Key conventions includ
 - Proper error handling with `console.error()`
 - 120 character line limit
 
-## Cross-Referenced Library Verification
+## Cross-referenced library verification
 
 Ataraxis framework projects often depend on other `ataraxis-*` or `sl-*` libraries. These libraries may be stored
 locally in the same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`).
@@ -58,29 +58,53 @@ locally in the same parent directory as this project (`/home/cyberaxolotl/Deskto
 **Why this matters**: Skills and documentation may reference outdated APIs. Always verify against the actual library
 state to prevent integration errors.
 
-## Distribution Model
+## Available skills
 
-This project follows a dual distribution model. The library source code, tests, CLI, and MCP server implementation live
-in this repository (`ataraxis-communication-interface`) and are distributed via PyPI. Claude Code skills and MCP server
-registration are distributed separately through the [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace as
-plugins:
+Skills are distributed through the ataraxis marketplace and are loaded into Claude Code via the plugin system. They are
+**not** stored in this repository.
 
-- **communication** plugin (`ataraxis/plugins/communication/`): Registers the `axci mcp` server with compatible MCP
-  clients and provides communication-specific skills for microcontroller setup, pipeline orchestration, log processing,
-  extraction configuration, and post-processing verification.
-- **microcontroller** plugin (`ataraxis/plugins/microcontroller/`): Provides firmware-side skills for implementing
-  custom hardware Module subclasses in the companion
-  [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library. The
-  `/firmware-module` skill complements the `/microcontroller-interface` skill from the communication plugin, covering
-  the firmware counterpart to the PC-side ModuleInterface.
-- **automation** plugin (`ataraxis/plugins/automation/`): Provides shared development skills that enforce Ataraxis
-  framework coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
-  general-purpose codebase exploration tools.
+### Communication plugin skills (ataraxis/plugins/communication/)
 
-When modifying skills, edit the SKILL.md files in the ataraxis marketplace repository, not in this repository.
-When modifying the MCP server implementation or library code, edit the source files in this repository.
+| Skill                                  | Description                                                           |
+|----------------------------------------|-----------------------------------------------------------------------|
+| `/microcontroller-setup`               | MCP-based microcontroller discovery, MQTT verification, and manifests |
+| `/microcontroller-interface`           | MicroControllerInterface and ModuleInterface API usage and lifecycle  |
+| `/communication-mcp-environment-setup` | MCP server connectivity diagnostics and environment verification      |
+| `/pipeline`                            | End-to-end pipeline orchestration and multi-controller planning       |
+| `/extraction-configuration`            | ExtractionConfig parameters, generation, validation, and lifecycle    |
+| `/log-input-format`                    | Reference for NPZ archive format, source IDs, and DataLogger output   |
+| `/log-processing`                      | Orchestrate log archive processing workflow via MCP tools             |
+| `/log-processing-results`              | Reference for output data formats and event distribution analysis     |
 
-## MCP Server Integration
+### Microcontroller plugin skills (ataraxis/plugins/microcontroller/)
+
+| Skill              | Description                                                                   |
+|--------------------|-------------------------------------------------------------------------------|
+| `/firmware-module` | Firmware-side Module subclass implementation, command execution, and SendData |
+
+### Automation plugin skills (ataraxis/plugins/automation/)
+
+The automation plugin provides cross-cutting development skills; this table lists those relevant to this Python
+library. Language-specific style skills (C++, C#) are omitted because they do not apply here.
+
+| Skill                      | Description                                                                    |
+|----------------------------|--------------------------------------------------------------------------------|
+| `/explore-codebase`        | Perform in-depth codebase exploration at session start                         |
+| `/explore-dependencies`    | Explore installed ataraxis dependency APIs for reuse opportunities             |
+| `/python-style`            | Apply Ataraxis framework Python coding conventions (REQUIRED for code changes) |
+| `/readme-style`            | Apply Ataraxis framework README conventions                                    |
+| `/pyproject-style`         | Apply Ataraxis framework pyproject.toml conventions                            |
+| `/tox-config`              | Apply Ataraxis framework tox.ini conventions                                   |
+| `/api-docs`                | Apply Ataraxis framework Sphinx API documentation conventions                  |
+| `/project-layout`          | Apply Ataraxis framework project directory structure conventions               |
+| `/commit`                  | Draft Ataraxis framework style-compliant git commit messages                   |
+| `/pr`                      | Draft a style-compliant pull request summary for the active branch             |
+| `/release`                 | Draft style-compliant release notes from merged pull requests                  |
+| `/skill-design`            | Generate and verify Claude Code skill files                                    |
+| `/audit-facts`             | Audit documentation for factual accuracy against source code                   |
+| `/audit-style`             | Audit files for style and convention compliance against framework checklists   |
+
+## MCP server integration
 
 This library provides an MCP server (`axci mcp`) that exposes microcontroller discovery, MQTT broker checking,
 manifest management, extraction configuration management, and log data processing tools. When working with this project
@@ -106,60 +130,36 @@ or its dependencies, prefer using available MCP tools over direct code execution
    - The task requires custom logic not covered by available tools
    - Writing or modifying library source code
 
-## Available Skills
+## Distribution model
 
-Skills are distributed through the ataraxis marketplace and are loaded into Claude Code via the plugin system. They are
-**not** stored in this repository.
+This project follows a dual distribution model. The library source code, tests, CLI, and MCP server implementation live
+in this repository (`ataraxis-communication-interface`) and are distributed via PyPI. Claude Code skills and MCP server
+registration are distributed separately through the [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace as
+plugins:
 
-### Communication Plugin Skills (ataraxis/plugins/communication/)
+- **communication** plugin (`ataraxis/plugins/communication/`): Registers the `axci mcp` server with compatible MCP
+  clients and provides communication-specific skills for microcontroller setup, pipeline orchestration, log processing,
+  extraction configuration, and post-processing verification.
+- **microcontroller** plugin (`ataraxis/plugins/microcontroller/`): Provides firmware-side skills for implementing
+  custom hardware Module subclasses in the companion
+  [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library. The
+  `/firmware-module` skill complements the `/microcontroller-interface` skill from the communication plugin, covering
+  the firmware counterpart to the PC-side ModuleInterface.
+- **automation** plugin (`ataraxis/plugins/automation/`): Provides shared development skills that enforce Ataraxis
+  framework coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
+  general-purpose codebase exploration tools.
 
-| Skill                                  | Description                                                           |
-|----------------------------------------|-----------------------------------------------------------------------|
-| `/microcontroller-setup`               | MCP-based microcontroller discovery, MQTT verification, and manifests |
-| `/microcontroller-interface`           | MicroControllerInterface and ModuleInterface API usage and lifecycle  |
-| `/communication-mcp-environment-setup` | MCP server connectivity diagnostics and environment verification      |
-| `/pipeline`                            | End-to-end pipeline orchestration and multi-controller planning       |
-| `/extraction-configuration`            | ExtractionConfig parameters, generation, validation, and lifecycle    |
-| `/log-input-format`                    | Reference for NPZ archive format, source IDs, and DataLogger output   |
-| `/log-processing`                      | Orchestrate log archive processing workflow via MCP tools             |
-| `/log-processing-results`              | Reference for output data formats and event distribution analysis     |
+When modifying skills, edit the SKILL.md files in the ataraxis marketplace repository, not in this repository.
+When modifying the MCP server implementation or library code, edit the source files in this repository.
 
-### Microcontroller Plugin Skills (ataraxis/plugins/microcontroller/)
-
-| Skill              | Description                                                                   |
-|--------------------|-------------------------------------------------------------------------------|
-| `/firmware-module` | Firmware-side Module subclass implementation, command execution, and SendData |
-
-### Automation Plugin Skills (ataraxis/plugins/automation/)
-
-The automation plugin provides cross-cutting development skills; this table lists those relevant to this Python
-library. Language-specific style skills (C++, C#) are omitted because they do not apply here.
-
-| Skill                      | Description                                                                    |
-|----------------------------|--------------------------------------------------------------------------------|
-| `/explore-codebase`        | Perform in-depth codebase exploration at session start                         |
-| `/explore-dependencies`    | Explore installed ataraxis dependency APIs for reuse opportunities             |
-| `/python-style`            | Apply Ataraxis framework Python coding conventions (REQUIRED for code changes) |
-| `/readme-style`            | Apply Ataraxis framework README conventions                                    |
-| `/pyproject-style`         | Apply Ataraxis framework pyproject.toml conventions                            |
-| `/tox-config`              | Apply Ataraxis framework tox.ini conventions                                   |
-| `/api-docs`                | Apply Ataraxis framework Sphinx API documentation conventions                  |
-| `/project-layout`          | Apply Ataraxis framework project directory structure conventions               |
-| `/commit`                  | Draft Ataraxis framework style-compliant git commit messages                   |
-| `/pr`                      | Draft a style-compliant pull request summary for the active branch             |
-| `/release`                 | Draft style-compliant release notes from merged pull requests                  |
-| `/skill-design`            | Generate and verify Claude Code skill files                                    |
-| `/audit-facts`             | Audit documentation for factual accuracy against source code                   |
-| `/audit-style`             | Audit files for style and convention compliance against framework checklists   |
-
-## Project Context
+## Project context
 
 This is **ataraxis-communication-interface**, a Python library that provides the centralized interface for exchanging
 commands and data between Arduino and Teensy microcontrollers and host computers. It abstracts hardware module
 management, serial/USB communication, MQTT data exchange, and provides log processing for extracting hardware event
 data from DataLogger archives.
 
-### Key Areas
+### Key areas
 
 | Directory                                   | Purpose                                                                       |
 |---------------------------------------------|-------------------------------------------------------------------------------|
@@ -168,11 +168,7 @@ data from DataLogger archives.
 | `src/.../microcontroller/interface.py`      | Core MicroControllerInterface and ModuleInterface ABC                         |
 | `src/.../microcontroller/dataclasses.py`    | Manifest and extraction configuration data structures                         |
 | `src/.../microcontroller/log_processing.py` | Log data processing pipeline for extracting module/kernel events              |
-| `src/.../interfaces/cli.py`                 | Click-based `axci` CLI with subcommand groups                                 |
-| `src/.../interfaces/mcp_server.py`          | Thin MCP entry point; registers tool modules and runs the server              |
-| `src/.../interfaces/mcp_instance.py`        | Shared FastMCP instance and cross-tool helpers                                |
-| `src/.../interfaces/mcp_execution.py`       | Batch execution engine (state, manager thread, worker allocation)             |
-| `src/.../interfaces/*_tools.py`             | MCP tool groups (discovery, config, processing, output) — 19 tools            |
+| `src/.../interfaces/`                       | CLI (`axci`), MCP server entry point, shared instance, and MCP tool groups    |
 | `tests/`                                    | Test suite (dataclasses, communication, log_processing)                       |
 | `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
 | `docs/`                                     | Sphinx API documentation source                                               |
@@ -191,8 +187,7 @@ data from DataLogger archives.
   control message routing. Three abstract methods: `initialize_remote_assets()`, `terminate_remote_assets()`, and
   `process_received_data()`. Public methods `send_command()` and `send_parameters()` use LRU-cached message
   construction for performance. `reset_command_queue()` sends a dequeue command to the microcontroller. The
-  `type_id` property combines `(type << 8) | id` for
-  dispatch lookups.
+  `type_id` property combines `(type << 8) | id` for dispatch lookups.
 - **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
   CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 252 numpy data
   prototypes (`SerialPrototypes` enum) covering all numpy scalar and array types. `send_message()` accepts
@@ -233,7 +228,7 @@ data from DataLogger archives.
   `config` subgroup (`create`, `show`) for extraction configuration management, `process` for log data processing,
   and `mcp` for starting the MCP server.
 
-### Key Patterns
+### Key patterns
 
 - **Daemon Communication Process**: The communication process is a daemon process requiring an explicit `stop()`
   call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
@@ -257,7 +252,7 @@ data from DataLogger archives.
   immutability and `slots=True` for performance. The top-level `MicroControllerManifest` and `ExtractionConfig`
   classes extend `YamlConfig` and are mutable (not frozen).
 
-### Code Standards
+### Code standards
 
 - MyPy strict mode with full type annotations
 - Google-style docstrings
@@ -266,74 +261,32 @@ data from DataLogger archives.
 - Python 3.12, 3.13, 3.14 support
 - See style skills for complete conventions
 
-### Workflow Guidance
+### Workflow guidance
 
-**Modifying MicroControllerInterface:**
+Non-obvious facts for the most common modifications. Read the cited files for full context.
 
-1. Review `src/ataraxis_communication_interface/microcontroller/interface.py` for current implementation
-2. Understand the multiprocessing architecture: main process sends commands via `MPQueue`, communication process
-   handles serial I/O and dispatches received messages to `ModuleInterface` instances
-3. The communication loop runs in `_runtime_cycle()` as a static method in a spawned process
-4. The watchdog thread monitors process liveness from the main process
-5. Test with actual microcontroller hardware or in test mode
-
-**Modifying ModuleInterface:**
-
-1. Review `src/ataraxis_communication_interface/microcontroller/interface.py` for the ABC definition
-2. Subclasses must implement `initialize_remote_assets()`, `terminate_remote_assets()`, and
-   `process_received_data()`
-3. `send_command()` and `send_parameters()` use LRU-cached message construction; `reset_command_queue()` sends a 
-   dequeue command
-4. See `examples/example_interface.py` for a reference subclass implementation
-
-**Modifying serial communication:**
-
-1. Review `src/ataraxis_communication_interface/communication/` (`protocols.py`, `messages.py`, `serial.py`) for all message types and protocols
-2. `SerialProtocols` (12 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer
-3. Command classes (`RepeatedModuleCommand`, `OneOffModuleCommand`, `DequeueModuleCommand`, `KernelCommand`,
-   `ModuleParameters`) construct packed byte arrays via `packed_data` property
-4. Reception classes (`ModuleData`, `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`,
-   `ControllerIdentification`, `ModuleIdentification`) parse header bytes via properties
-
-**Modifying MQTT communication:**
-
-1. Review `src/ataraxis_communication_interface/communication/mqtt.py` for `MQTTCommunication`
-2. Uses `paho-mqtt` v2 client with callback-based message reception into a `Queue`
-3. `connect()`/`disconnect()` manage the MQTT client lifecycle
-4. `get_data()` returns `(topic, message)` tuples or `None`; `has_data` property checks queue state
-
-**Modifying data classes and manifests:**
-
-1. Review `src/ataraxis_communication_interface/microcontroller/dataclasses.py` for all data structures
-2. `MicroControllerManifest` and `ExtractionConfig` extend `YamlConfig` from `ataraxis-data-structures`
-3. Inner data classes are frozen — create new instances rather than mutating. Top-level `MicroControllerManifest`
-   and `ExtractionConfig` are mutable `YamlConfig` subclasses
-4. `create_extraction_config()` generates a precursor config from a manifest with empty event codes
-
-**Modifying log processing:**
-
-1. Review `src/ataraxis_communication_interface/microcontroller/log_processing.py` for the processing pipeline
-2. `run_log_processing_pipeline()` supports local mode (all jobs) and remote mode (single job by ID)
-3. `ProcessingTracker` manages job lifecycle (SCHEDULED → RUNNING → SUCCEEDED/FAILED) via YAML state files
-4. `_process_message_batch()` runs in subprocess workers and is excluded from coverage (`# pragma: no cover`)
-5. Parallelization threshold is 2000 messages; below that, processing runs sequentially
-6. Log discovery uses manifest-based routing via `microcontroller_manifest.yaml` files
-7. The `config` parameter is a `Path` — the pipeline loads the `ExtractionConfig` internally
-
-**Adding or modifying CLI commands:**
-
-1. Review `src/ataraxis_communication_interface/interfaces/cli.py` for existing Click group structure
-2. Follow existing patterns for option decorators and error handling
-3. Use `console.echo()` for output and `console.error()` for error handling
-4. The `config` subgroup demonstrates nested Click command groups
-
-**Adding or modifying MCP tools:**
-
-1. Review the `src/ataraxis_communication_interface/interfaces/` tool modules (`discovery_tools.py`,
-   `config_tools.py`, `processing_tools.py`, `output_tools.py`) for existing tool patterns; each registers tools on
-   the shared instance from `interfaces/mcp_instance.py` via `@mcp.tool()`
-2. Add new tool modules to the side effect import list in `interfaces/mcp_server.py` so their tools register
-3. Log processing execution uses `JobExecutionState` (in `interfaces/mcp_execution.py`) with budget-based worker
-   allocation; the execution manager divides budget among parallel jobs via `_compute_sqrt_minimum()`
-4. Return `dict[str, Any]` (JSON-serializable) for all tool responses
-5. MCP server registration happens in the ataraxis marketplace communication plugin, not in this repository
+- **MicroControllerInterface** (`microcontroller/interface.py`): the communication loop runs in `_runtime_cycle()`,
+  a static method executed in a spawned daemon process; a watchdog thread in the main process monitors liveness.
+  Commands flow from the main process through an `MPQueue` to the communication process, which requires an explicit
+  `stop()` call. Test against microcontroller hardware or in test mode.
+- **ModuleInterface** (`microcontroller/interface.py`): subclasses must implement `initialize_remote_assets()`,
+  `terminate_remote_assets()`, and `process_received_data()`. `send_command()` and `send_parameters()` use
+  LRU-cached message construction; `reset_command_queue()` sends a dequeue command. See
+  `examples/example_interface.py` for a reference subclass.
+- **Serial communication** (`communication/protocols.py`, `messages.py`, `serial.py`): `SerialProtocols`
+  (12 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer. Command classes pack bytes via
+  the `packed_data` property; reception classes parse header bytes via properties.
+- **MQTT communication** (`communication/mqtt.py`): `paho-mqtt` v2 client with callback reception into a `Queue`;
+  `get_data()` returns `(topic, message)` tuples or `None`, and the `has_data` property checks queue state.
+- **Data classes and manifests** (`microcontroller/dataclasses.py`): inner classes are frozen — create new instances
+  rather than mutating; `MicroControllerManifest` and `ExtractionConfig` are mutable `YamlConfig` subclasses.
+  `create_extraction_config()` builds a precursor config with empty event codes.
+- **Log processing** (`microcontroller/log_processing.py`): `run_log_processing_pipeline()` supports local (all jobs)
+  and remote (single job by ID) modes; the `config` parameter is a `Path` loaded internally; the parallelization
+  threshold is 2000 messages; `ProcessingTracker` manages job lifecycle via YAML state files.
+- **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors; the `config`
+  subgroup demonstrates nested Click command groups.
+- **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via
+  `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return
+  JSON-serializable `dict[str, Any]`. Execution uses `JobExecutionState` (`interfaces/mcp_execution.py`) with
+  budget-based worker allocation.

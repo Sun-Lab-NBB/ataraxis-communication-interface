@@ -109,7 +109,6 @@ lint.select = ["ALL"]
 # General ignore directives
 lint.ignore = [
     "W291",    # Conflicts with docstring formatting
-    "TID252",  # Parent-relative imports are used by the interfaces subpackage
     "C901",    # Sometimes complex functions are necessary
     "PLR0913", # Sometimes complex functions are necessary
     "PLR0912", # Sometimes complex functions are necessary
@@ -122,10 +121,13 @@ lint.ignore = [
     "D107",    # __init__ is documented inside the main class docstring where applicable
     "D205",    # Bugs out for file descriptions
     "PLW0603", # While global statement usage is not ideal, it streamlines certain development patterns
+
+    # Project-specific ignore directives
     "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
     "FBT001",  # Sometimes positional boolean arguments are necessary
     "FBT002",  # Sometimes positional boolean arguments are necessary
     "SLF001",  # Sometimes accessing private members is necessary
+    "TID252",  # Parent-relative imports are used by the interfaces subpackage
 ]
 
 # Additional formatting configurations
