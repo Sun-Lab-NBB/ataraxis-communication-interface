@@ -44,7 +44,6 @@ class RepeatedModuleCommand:
     complete."""
     cycle_delay: np.uint32 = _ZERO_LONG
     """The delay, in microseconds, before repeating (cycling) the command."""
-    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.REPEATED_MODULE_COMMAND.as_uint8())
@@ -88,7 +87,6 @@ class OneOffModuleCommand:
     noblock: np.bool_ = _TRUE
     """Determines whether to allow concurrent execution of other commands while waiting for the requested command to 
     complete."""
-    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.ONE_OFF_MODULE_COMMAND.as_uint8())
@@ -126,7 +124,6 @@ class DequeueModuleCommand:
     """The ID of the specific module instance within the broader module family."""
     return_code: np.uint8 = _ZERO_BYTE
     """The code to use for acknowledging the reception of the message, if set to a non-zero value."""
-    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.DEQUEUE_MODULE_COMMAND.as_uint8())
@@ -159,7 +156,6 @@ class KernelCommand:
     """The code of the command to execute."""
     return_code: np.uint8 = _ZERO_BYTE
     """The code to use for acknowledging the reception of the message, if set to a non-zero value."""
-    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.KERNEL_COMMAND.as_uint8())
@@ -190,17 +186,14 @@ class ModuleParameters:
     """The type (family) code of the module to which the command is addressed."""
     module_id: np.uint8
     """The ID of the specific module instance within the broader module family."""
-    # noinspection PyTypeHints
     parameter_data: tuple[np.number[Any] | np.bool_, ...]
     """A tuple of parameter values to send. Each value must be a numpy scalar or numpy boolean (e.g., np.uint8,
     np.float32), as serialization relies on the numpy itemsize and tobytes() interface. The values must match the type
     and order of the addressed module's parameter structure on the microcontroller."""
     return_code: np.uint8 = _ZERO_BYTE
     """The code to use for acknowledging the reception of the message, if set to a non-zero value."""
-    # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
-    # noinspection PyTypeHints
     parameters_size: np.uint8 | None = field(init=False, default=None)
     """Stores the total size of the serialized parameters in bytes."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.MODULE_PARAMETERS.as_uint8())

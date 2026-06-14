@@ -52,7 +52,6 @@ class MQTTCommunication:
         self._output_queue: Queue = Queue()  # type: ignore[type-arg]
 
         # Initializes the MQTT client. Note, it needs to be connected before it can send and receive messages!
-        # noinspection PyArgumentList,PyUnresolvedReferences
         self._client: mqtt.Client = mqtt.Client(  # type: ignore[call-arg]
             protocol=mqtt.MQTTv5,
             transport="tcp",

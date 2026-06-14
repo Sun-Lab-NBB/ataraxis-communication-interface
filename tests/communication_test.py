@@ -181,7 +181,6 @@ def test_serial_prototypes_get_prototype(
 )
 def test_serial_prototypes_get_prototype_for_code(code: np.uint8, expected_result: Any) -> None:
     """Verifies the functioning of the SerialPrototypes enum get_prototype_for_code() method."""
-    # noinspection PyTypeChecker
     result = SerialPrototypes.get_prototype_for_code(code)
 
     if expected_result is None:
@@ -379,7 +378,6 @@ def test_module_parameters() -> None:
 )
 def test_command_packed_data_sizes(command_class: type, kwargs: dict[str, Any], expected_size: int) -> None:
     """Verifies that all command classes pack data to the expected size."""
-    # noinspection PyArgumentList
     command = command_class(**kwargs)
     assert command.packed_data.size == expected_size
 
@@ -395,7 +393,6 @@ def test_command_packed_data_sizes(command_class: type, kwargs: dict[str, Any], 
 )
 def test_parameters_packed_data_validation(parameter_class: type, kwargs: dict[str, Any]) -> None:
     """Verifies that parameter classes correctly pack their data."""
-    # noinspection PyArgumentList
     params = parameter_class(**kwargs)
     assert params.packed_data is not None
     assert params.parameters_size is not None
@@ -506,7 +503,6 @@ def test_serial_communication_send_message(logger_queue: Queue[Any]) -> None:
 
     message = KernelCommand(command=np.uint8(1))
 
-    # noinspection PyTypeChecker
     communication.send_message(message=message)
 
     # Verifies the data was written to the transport layer.

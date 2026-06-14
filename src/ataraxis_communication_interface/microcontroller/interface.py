@@ -417,7 +417,6 @@ class ModuleInterface(ABC):  # pragma: no cover
         # Submits the packaged command for execution.
         self._input_queue.put(command_message)
 
-    # noinspection PyTypeHints
     def send_parameters(
         self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any] | np.bool_ | np.floating[Any], ...]
     ) -> None:

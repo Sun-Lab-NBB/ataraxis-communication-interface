@@ -1023,12 +1023,10 @@ class SerialPrototypes(IntEnum):
         """Returns the enumeration value as a numpy uint8 type."""
         return np.uint8(self.value)
 
-    # noinspection PyTypeHints
     def get_prototype(self) -> PrototypeType:
         """Returns the prototype object associated with the prototype enumeration value."""
         return _PROTOTYPE_FACTORIES[self.value]()
 
-    # noinspection PyTypeHints
     @staticmethod
     def get_prototype_for_code(code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.

@@ -284,7 +284,6 @@ class SerialCommunication:
         )
         console.error(message=message, error=ValueError)
         # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
-        # noinspection PyUnreachableCode
         raise ValueError(message)  # pragma: no cover
 
     def _log_data(self, timestamp: int, data: NDArray[np.uint8]) -> None:
