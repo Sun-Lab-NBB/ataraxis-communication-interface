@@ -161,21 +161,21 @@ data from DataLogger archives.
 
 ### Key Areas
 
-| Directory                                | Purpose                                                            |
-|------------------------------------------|--------------------------------------------------------------------|
-| `src/ataraxis_communication_interface/`  | Main library source code                                           |
-| `src/.../communication/`                 | Serial/MQTT communication package (`protocols`, `messages`, `serial`, `mqtt`) |
-| `src/.../microcontroller/interface.py`   | Core MicroControllerInterface and ModuleInterface ABC              |
-| `src/.../microcontroller/dataclasses.py` | Manifest and extraction configuration data structures              |
-| `src/.../microcontroller/log_processing.py` | Log data processing pipeline for extracting module/kernel events |
-| `src/.../interfaces/cli.py`              | Click-based `axci` CLI with subcommand groups                      |
-| `src/.../interfaces/mcp_server.py`       | Thin MCP entry point; registers tool modules and runs the server   |
-| `src/.../interfaces/mcp_instance.py`     | Shared FastMCP instance and cross-tool helpers                     |
-| `src/.../interfaces/mcp_execution.py`    | Batch execution engine (state, manager thread, worker allocation)  |
-| `src/.../interfaces/*_tools.py`          | MCP tool groups (discovery, config, processing, output) — 19 tools |
-| `tests/`                                 | Test suite (dataclasses, communication, log_processing)            |
-| `examples/`                              | Example ModuleInterface subclass and runtime usage                 |
-| `docs/`                                  | Sphinx API documentation source                                    |
+| Directory                                   | Purpose                                                                       |
+|---------------------------------------------|-------------------------------------------------------------------------------|
+| `src/ataraxis_communication_interface/`     | Main library source code                                                      |
+| `src/.../communication/`                    | Serial/MQTT communication package (`protocols`, `messages`, `serial`, `mqtt`) |
+| `src/.../microcontroller/interface.py`      | Core MicroControllerInterface and ModuleInterface ABC                         |
+| `src/.../microcontroller/dataclasses.py`    | Manifest and extraction configuration data structures                         |
+| `src/.../microcontroller/log_processing.py` | Log data processing pipeline for extracting module/kernel events              |
+| `src/.../interfaces/cli.py`                 | Click-based `axci` CLI with subcommand groups                                 |
+| `src/.../interfaces/mcp_server.py`          | Thin MCP entry point; registers tool modules and runs the server              |
+| `src/.../interfaces/mcp_instance.py`        | Shared FastMCP instance and cross-tool helpers                                |
+| `src/.../interfaces/mcp_execution.py`       | Batch execution engine (state, manager thread, worker allocation)             |
+| `src/.../interfaces/*_tools.py`             | MCP tool groups (discovery, config, processing, output) — 19 tools            |
+| `tests/`                                    | Test suite (dataclasses, communication, log_processing)                       |
+| `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
+| `docs/`                                     | Sphinx API documentation source                                               |
 
 ### Architecture
 
@@ -332,7 +332,7 @@ data from DataLogger archives.
 1. Review the `src/ataraxis_communication_interface/interfaces/` tool modules (`discovery_tools.py`,
    `config_tools.py`, `processing_tools.py`, `output_tools.py`) for existing tool patterns; each registers tools on
    the shared instance from `interfaces/mcp_instance.py` via `@mcp.tool()`
-2. Add new tool modules to the side-effect import list in `interfaces/mcp_server.py` so their tools register
+2. Add new tool modules to the side effect import list in `interfaces/mcp_server.py` so their tools register
 3. Log processing execution uses `JobExecutionState` (in `interfaces/mcp_execution.py`) with budget-based worker
    allocation; the execution manager divides budget among parallel jobs via `_compute_sqrt_minimum()`
 4. Return `dict[str, Any]` (JSON-serializable) for all tool responses
