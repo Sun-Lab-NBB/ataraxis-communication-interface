@@ -220,7 +220,7 @@ class ExtractionConfig(YamlConfig):
 
     Specifies which controllers, modules, and events to extract from log archives. Processing requires a valid
     configuration file with non-empty event codes for every module and kernel entry. Use the CLI
-    ``axci config create`` command or the ``create_extraction_config_tool`` MCP tool to generate a precursor
+    ``axci config create`` command or the ``create_extraction_config`` function to generate a precursor
     configuration from an existing microcontroller manifest, then fill in the event codes before processing.
     """
 

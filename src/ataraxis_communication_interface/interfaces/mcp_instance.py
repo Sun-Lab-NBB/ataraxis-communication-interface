@@ -1,4 +1,4 @@
-"""Provides the shared FastMCP server instance and cross-tool helper functions used by the MCP tool modules."""
+"""Provides the shared FastMCP server instance and a cross-tool helper function used by the MCP tool modules."""
 
 from __future__ import annotations
 

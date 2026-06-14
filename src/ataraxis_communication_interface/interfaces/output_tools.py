@@ -37,8 +37,9 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
             subdirectory with processed output.
 
     Returns:
-        A dictionary containing a 'verified' flag, per-file results in 'files' (each with path, schema validity,
-        row count, and column names), tracker status in 'tracker', and aggregate counts.
+        A dictionary containing a 'verified' flag, the 'output_directory' and 'data_path', per-file results in 'files'
+        (each with path, filename, type, schema validity, row count, and column names), tracker status in 'tracker',
+        and a 'total_files' count.
     """
     output_path = Path(output_directory)
 
@@ -170,8 +171,9 @@ def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str,
             subdirectories to delete.
 
     Returns:
-        A dictionary containing a 'results' list with per-directory outcomes (each with 'output_directory',
-        'cleaned' flag, and either 'data_path' or 'error') and a 'total_cleaned' count.
+        A dictionary containing a 'results' list with per-directory outcomes (each with 'output_directory', a
+        'cleaned' flag, and one of 'data_path', 'error', or 'message'), a 'total_cleaned' count, and a
+        'total_directories' count.
     """
     results = [_clean_single_output(output_directory=directory) for directory in output_directories]
     total_cleaned = sum(1 for result in results if result.get("cleaned", False))
@@ -186,7 +188,8 @@ def _clean_single_output(output_directory: str) -> dict[str, Any]:
         output_directory: The absolute path to the output directory.
 
     Returns:
-        A dictionary containing 'output_directory', 'cleaned' flag, and either 'data_path' or 'error' keys.
+        A dictionary containing 'output_directory', a 'cleaned' flag, and one of 'data_path' (on successful deletion),
+        'error' (on failure), or 'message' (when there is nothing to clean).
     """
     output_path = Path(output_directory)
 
@@ -226,7 +229,8 @@ def _analyze_single_event_feather(
 
     Returns:
         A dictionary containing 'file', 'summary', 'event_distribution', 'command_distribution',
-        'inter_event_timing', and 'sample_rows' keys, or 'file' and 'error' keys if the file cannot be read.
+        'inter_event_timing', and 'sample_rows' keys, or 'file' and 'error' keys if the file cannot be read. For an
+        empty file, 'summary' contains only 'total_rows' (0) and the distribution and timing collections are empty.
     """
     file_path = Path(feather_file)
 

@@ -290,8 +290,8 @@ def get_log_processing_status_tool() -> dict[str, Any]:
     exists, returns an inactive status.
 
     Returns:
-        A dictionary containing an 'active' flag, per-job status entries in 'jobs', and a 'summary' with counts
-        for pending, running, succeeded, and failed jobs.
+        A dictionary containing an 'active' flag, a 'canceled' flag, per-job status entries in 'jobs', and a
+        'summary' with counts for scheduled, running, succeeded, and failed jobs.
     """
     state = get_execution_state()
     if state is None:
@@ -361,8 +361,9 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     timestamps from ProcessingTracker.
 
     Returns:
-        A dictionary containing an 'active' flag, per-job timing in 'jobs', and a 'session' summary with
-        total elapsed seconds and throughput.
+        A dictionary containing an 'active' flag, per-job timing in 'jobs', and a 'session' summary with total
+        elapsed seconds and completed, failed, running, and pending counts. The session also includes a throughput in
+        jobs per hour once at least one job has completed.
     """
     state = get_execution_state()
     if state is None:

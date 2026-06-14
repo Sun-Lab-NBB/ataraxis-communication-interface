@@ -21,9 +21,10 @@ class MQTTCommunication:
         at initialization. See https://mqtt.org/ for more details.
 
     Args:
-        ip: The IP address of the MQTT broker.
-        port: The socket port used by the MQTT broker.
-        monitored_topics: The list of MQTT topics to monitor for incoming messages.
+        ip: The IP address of the MQTT broker. Defaults to "127.0.0.1" (localhost).
+        port: The socket port used by the MQTT broker. Defaults to 1883, the standard MQTT port.
+        monitored_topics: The tuple of MQTT topics to monitor for incoming messages. Defaults to None, which
+            subscribes to no topics.
 
     Attributes:
         _ip: Stores the IP address of the MQTT broker.
@@ -152,7 +153,7 @@ class MQTTCommunication:
         """
         return not self._output_queue.empty()
 
-    def get_data(self) -> tuple[str, bytes | bytearray] | None:
+    def get_data(self) -> tuple[str, bytes] | None:
         """Extracts and returns the first available message stored inside the instance's buffer queue.
 
         Returns:
@@ -166,14 +167,14 @@ class MQTTCommunication:
             message = (
                 f"Cannot get data from the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication instance. "
                 f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-                f"sending data."
+                f"retrieving data."
             )
             console.error(message=message, error=ConnectionError)
 
         if not self.has_data:
             return None
 
-        data: tuple[str, bytes | bytearray] = self._output_queue.get_nowait()
+        data: tuple[str, bytes] = self._output_queue.get_nowait()
         return data
 
     def disconnect(self) -> None:

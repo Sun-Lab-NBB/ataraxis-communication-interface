@@ -189,8 +189,7 @@ def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no
 def config_show(config_path: Path) -> None:  # pragma: no cover
     """Displays the contents of an extraction configuration file.
 
-    Reads the specified .yaml file and prints each controller's modules, event codes, command codes,
-    and kernel settings.
+    Reads the specified .yaml file and prints each controller's modules, event codes, and kernel settings.
     """
     config = ExtractionConfig.load(file_path=config_path)
 
@@ -293,8 +292,9 @@ def process(
 def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:  # pragma: no cover
     """Starts the Model Context Protocol (MCP) server for agentic interaction with the library.
 
-    The MCP server exposes microcontroller discovery, MQTT connectivity checking, and data processing
-    functionality through the MCP protocol, enabling AI agents to programmatically interact with the library.
+    The MCP server exposes microcontroller discovery, MQTT connectivity checking, extraction configuration
+    management, log data processing, output verification, and event querying through the MCP protocol, enabling AI
+    agents to programmatically interact with the library.
     """
     console.echo(message=f"Starting AXCI MCP server with {transport} transport...", level=LogLevel.INFO)
     run_mcp(transport=transport)

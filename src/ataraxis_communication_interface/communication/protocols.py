@@ -1034,7 +1034,8 @@ class SerialPrototypes(IntEnum):
         """Returns the prototype object associated with the input prototype code.
 
         Args:
-            code: The prototype byte-code for which to retrieve the prototype object.
+            code: The prototype code for which to retrieve the prototype object. The code is converted to an integer
+                before lookup.
 
         Returns:
             The prototype object that is either a numpy scalar or shallow array type. If the input code is not one of

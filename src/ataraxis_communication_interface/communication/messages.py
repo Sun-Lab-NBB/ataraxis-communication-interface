@@ -191,16 +191,17 @@ class ModuleParameters:
     module_id: np.uint8
     """The ID of the specific module instance within the broader module family."""
     # noinspection PyTypeHints
-    parameter_data: tuple[np.number[Any] | np.bool, ...]
-    """A tuple of parameter values to send. The values inside the tuple must match the type and format of the values 
-    used in the addressed module's parameter structure on the microcontroller."""
+    parameter_data: tuple[np.number[Any] | np.bool_, ...]
+    """A tuple of parameter values to send. Each value must be a numpy scalar or numpy boolean (e.g., np.uint8,
+    np.float32), as serialization relies on the numpy itemsize and tobytes() interface. The values must match the type
+    and order of the addressed module's parameter structure on the microcontroller."""
     return_code: np.uint8 = _ZERO_BYTE
     """The code to use for acknowledging the reception of the message, if set to a non-zero value."""
     # noinspection PyTypeHints
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
     # noinspection PyTypeHints
-    parameters_size: NDArray[np.uint8] | None = field(init=False, default=None)
+    parameters_size: np.uint8 | None = field(init=False, default=None)
     """Stores the total size of the serialized parameters in bytes."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.MODULE_PARAMETERS.as_uint8())
     """Stores the message protocol code."""
@@ -428,7 +429,12 @@ class ControllerIdentification:
 
 @dataclass(slots=True)
 class ModuleIdentification:
-    """Identifies a hardware module instance by communicating its combined type and id code."""
+    """Identifies a hardware module instance by communicating its combined type and id code.
+
+    Notes:
+        Unlike the other reception message classes, this class stores only the combined module_type_id value and does
+        not retain a parsed message header buffer.
+    """
 
     module_type_id: np.uint16 = _ZERO_SHORT
     """The unique uint16 code that results from combining the type and ID codes of the module instance."""

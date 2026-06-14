@@ -671,7 +671,7 @@ def test_serial_communication_module_data_invalid_prototype(logger_queue: Queue[
 
     expected_error = (
         "Invalid prototype code 255 encountered when extracting the data object from "
-        "the received ModuleData message sent my module 2 of type 1. All messages must use one of the valid prototype "
+        "the received ModuleData message sent by module 2 of type 1. All messages must use one of the valid prototype "
         "codes available from the SerialPrototypes enumeration."
     )
 
@@ -858,7 +858,7 @@ def test_mqtt_communication_send_receive_errors() -> None:
     message = (
         f"Cannot get data from the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
         f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-        f"sending data."
+        f"retrieving data."
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
         unity_comm.get_data()

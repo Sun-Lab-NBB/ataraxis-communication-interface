@@ -153,13 +153,14 @@ def run_log_processing_pipeline(
             recursively, so archives may be nested at any depth below this path.
         output_directory: The path to the root output directory. A ``microcontroller_data/`` subdirectory is created
             automatically under this path, and all tracker and output files are written there.
-        config: The path to the extraction_config.yaml file specifying which controllers, modules, events, and
-            commands to extract. Controller IDs in the config determine which archives are processed.
+        config: The path to the extraction_config.yaml file specifying which controllers, modules, and events to
+            extract. Controller IDs in the config determine which archives are processed.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed (remote mode). If not provided, all configured jobs are run sequentially
             with automatic tracker management (local mode).
         workers: The number of worker processes to use for parallel processing. Setting this to a value less than 1
-            uses all available CPU cores. Setting this to 1 conducts processing sequentially.
+            uses all available CPU cores minus two reserved cores (at least one). Setting this to 1 conducts
+            processing sequentially.
         display_progress: Determines whether to display progress bars during extraction. Defaults to True for
             interactive CLI use. Set to False for MCP batch processing.
 
@@ -167,8 +168,8 @@ def run_log_processing_pipeline(
         FileNotFoundError: If the log_directory does not exist, the config path does not exist, a controller ID
             has no matching archive, or no microcontroller manifest is found.
         ValueError: If the provided job_id does not match any discoverable job, if controller IDs are not
-            registered in the microcontroller manifest, if resolved archives span multiple directories, or if the
-            extraction config has empty event codes.
+            registered in the microcontroller manifest, if resolved archives span multiple directories, if more than
+            one log archive matches a configured controller ID, or if the extraction config has empty event codes.
     """
     if not log_directory.exists() or not log_directory.is_dir():
         message = f"Unable to process logs in '{log_directory}'. The path does not exist or is not a directory."
@@ -327,6 +328,9 @@ def execute_job(
         When an external executor is provided, batch processing is submitted to that executor instead of creating a
         new ProcessPoolExecutor. The caller is responsible for executor lifecycle management.
 
+        If an error occurs during processing, the job is marked as failed in the tracker before the exception is
+        propagated to the caller.
+
     Args:
         log_path: The path to the .npz log archive to process.
         output_directory: The path to the directory where feather output files and the tracker are written.
@@ -426,7 +430,7 @@ def execute_job(
                 worker_count = resolve_worker_count(requested_workers=0)
 
             # Uses LogArchiveReader to create batches optimized for parallel processing. The batch multiplier of 4
-            # creates many smaller batches for better load distribution across workers.
+            # creates four batches per worker for better load distribution across workers.
             batch_keys = reader.get_batches(workers=worker_count, batch_multiplier=4)
 
             # Uses the provided executor or creates a managed one for this invocation.

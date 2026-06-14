@@ -61,7 +61,7 @@ class SerialCommunication:
 
     Notes:
         This class is explicitly designed to be used by other library assets and should not be used directly by end
-        users. An instance of this class is initialized and managed by the MicrocontrollerInterface class.
+        users. An instance of this class is initialized and managed by the MicroControllerInterface class.
 
     Args:
         controller_id: The identifier code of the microcontroller to communicate with.
@@ -89,7 +89,7 @@ class SerialCommunication:
             being saved (logged) to disk.
         _source_id: Stores the unique identifier of the microcontroller with which the instance communicates at runtime.
         _logger_queue: Stores the multiprocessing Queue that buffers and pipes the data to the DataLogger process(es).
-        _usb_port: Stores the ID of the USB port used for communication.
+        _usb_port: Stores the name of the serial port (USB or UART) used for communication.
     """
 
     def __init__(
@@ -183,8 +183,9 @@ class SerialCommunication:
             attributes. It is advised to finish working with the received message data before receiving another message.
 
         Returns:
-            A reference to the parsed message data stored as an instance's attribute, or None, if no message was
-            received.
+            A reference to the parsed message data stored as an instance's attribute, which is one of ModuleData,
+            ModuleState, KernelData, KernelState, ControllerIdentification, ModuleIdentification, or ReceptionCode, or
+            None if no message was received.
 
         Raises:
             ValueError: If the received message uses an invalid (unrecognized) message protocol code. If the received
@@ -219,7 +220,7 @@ class SerialCommunication:
             if prototype is None:
                 message = (
                     f"Invalid prototype code {self._module_data.prototype_code} encountered when extracting the data "
-                    f"object from the received ModuleData message sent my module {self._module_data.module_id} of type "
+                    f"object from the received ModuleData message sent by module {self._module_data.module_id} of type "
                     f"{self._module_data.module_type}. All messages must use one of the valid prototype "
                     f"codes available from the SerialPrototypes enumeration."
                 )

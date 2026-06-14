@@ -22,8 +22,8 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
     """Starts the MCP server with the specified transport.
 
     Args:
-        transport: The transport protocol to use. Supported values are 'stdio' for standard input/output communication
-            and 'streamable-http' for HTTP-based communication.
+        transport: The transport protocol to use. Supported values are 'stdio' for standard input/output
+            communication, 'sse' for Server-Sent Events, and 'streamable-http' for HTTP-based communication.
     """
     # Delegates to the FastMCP run loop, which blocks until the transport connection is closed. For 'stdio', the server
     # runs until the parent process closes stdin. For 'streamable-http', runs an HTTP server that accepts connections

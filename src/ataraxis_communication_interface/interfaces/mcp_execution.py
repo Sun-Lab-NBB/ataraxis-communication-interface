@@ -24,7 +24,7 @@ returns from process parallelism. This value sets the minimum workers a job rece
 push it lower. With a factor of 1,000, a 648,000-message archive has a saturation floor of 25 workers."""
 
 _WORKER_MULTIPLE: int = 5
-"""Worker counts above 1 are rounded down to the nearest multiple of this value for clean allocation."""
+"""Worker counts above 1 are rounded to the nearest multiple of this value for clean allocation."""
 
 
 @dataclass(slots=True)
@@ -56,10 +56,11 @@ class PendingJob:
 class JobExecutionState:
     """Tracks runtime state for batch job execution with budget-based worker allocation.
 
-    The execution manager groups pending jobs by source ID so that archives with similar sizes share a single
-    ProcessPoolExecutor. Each group is dispatched as one thread that processes its jobs sequentially, reusing the
-    pool across all archives in the group. This avoids the overhead of repeatedly spawning and tearing down worker
-    processes for archives of the same size.
+    The execution manager groups pending parallel jobs by their precomputed worker tier, derived from each archive's
+    message count, so that archives requiring the same worker count share a single ProcessPoolExecutor. Each group is
+    dispatched as one thread that processes its jobs sequentially, reusing the pool across all archives in the group.
+    Small archives are dispatched as single-job groups. This avoids the overhead of repeatedly spawning and tearing
+    down worker processes for archives of the same tier.
     """
 
     all_jobs: dict[tuple[str, str], PendingJob] = field(default_factory=dict)

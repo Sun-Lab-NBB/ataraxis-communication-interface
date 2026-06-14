@@ -425,7 +425,7 @@ class ModuleInterface(ABC):  # pragma: no cover
 
         Notes:
             This method caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending
-            previously created command messages.
+            previously created parameter messages.
 
         Args:
             parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
@@ -528,7 +528,7 @@ class MicroControllerInterface:  # pragma: no cover
         buffer_size: The size, in bytes, of the buffer used by the microcontroller's serial communication interface.
             Usually, this information is available from the microcontroller's manufacturer (UART / USB controller
             specification).
-        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci-id' CLI
+        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci id' CLI
             command to discover the available microcontrollers and their respective communication port names.
         name: A colloquial human-readable name for this microcontroller (e.g., 'actor_controller'). Written to the
             microcontroller manifest file alongside the controller_id to identify this controller.
@@ -539,12 +539,13 @@ class MicroControllerInterface:  # pragma: no cover
 
     Raises:
         TypeError: If any of the input arguments are not of the expected type.
+        ValueError: If two ModuleInterface instances share the same combined module type-code and id-code.
 
     Attributes:
         _started: Tracks whether the communication process has been started.
         _controller_id: Stores the id of the managed microcontroller.
         _name: Stores the human-readable name of this microcontroller instance.
-        _port: Stores the USB port used for microcontroller communication.
+        _port: Stores the serial port used for microcontroller communication.
         _baudrate: Stores the baudrate used during communication over the UART serial interface.
         _buffer_size: Stores the microcontroller's serial buffer size, in bytes.
         _modules: Stores ModuleInterface instances managed by this MicroControllerInterface.
@@ -1019,6 +1020,9 @@ class MicroControllerInterface:  # pragma: no cover
         Args:
             controller_id: The ID of the interfaced microcontroller.
             in_data: The KernelState or KernelData message to be parsed.
+
+        Raises:
+            RuntimeError: If the incoming Kernel message carries an error event code.
         """
         # Note, event codes are taken directly from the microcontroller's Kernel class.
         # kModuleSetupError
