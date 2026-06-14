@@ -19,12 +19,12 @@ from .mcp_execution import (
     set_execution_state,
     job_execution_manager,
 )
-from ..microcontroller.dataclasses import ExtractionConfig
-from ..microcontroller.log_processing import (
+from ..microcontroller import (
     TRACKER_FILENAME,
     LOG_ARCHIVE_SUFFIX,
     EXTRACTION_JOB_NAME,
     MICROCONTROLLER_DATA_DIRECTORY,
+    ExtractionConfig,
     prepare_tracker,
     generate_job_ids,
 )

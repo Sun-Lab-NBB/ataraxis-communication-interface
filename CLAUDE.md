@@ -132,17 +132,25 @@ Skills are distributed through the ataraxis marketplace and are loaded into Clau
 
 ### Automation Plugin Skills (ataraxis/plugins/automation/)
 
+The automation plugin provides cross-cutting development skills; this table lists those relevant to this Python
+library. Language-specific style skills (C++, C#) are omitted because they do not apply here.
+
 | Skill                      | Description                                                                    |
 |----------------------------|--------------------------------------------------------------------------------|
 | `/explore-codebase`        | Perform in-depth codebase exploration at session start                         |
 | `/explore-dependencies`    | Explore installed ataraxis dependency APIs for reuse opportunities             |
 | `/python-style`            | Apply Ataraxis framework Python coding conventions (REQUIRED for code changes) |
 | `/readme-style`            | Apply Ataraxis framework README conventions                                    |
-| `/commit`                  | Draft Ataraxis framework style-compliant git commit messages                   |
 | `/pyproject-style`         | Apply Ataraxis framework pyproject.toml conventions                            |
 | `/tox-config`              | Apply Ataraxis framework tox.ini conventions                                   |
-| `/skill-design`            | Generate and verify Claude Code skill files                                    |
+| `/api-docs`                | Apply Ataraxis framework Sphinx API documentation conventions                  |
 | `/project-layout`          | Apply Ataraxis framework project directory structure conventions               |
+| `/commit`                  | Draft Ataraxis framework style-compliant git commit messages                   |
+| `/pr`                      | Draft a style-compliant pull request summary for the active branch             |
+| `/release`                 | Draft style-compliant release notes from merged pull requests                  |
+| `/skill-design`            | Generate and verify Claude Code skill files                                    |
+| `/audit-facts`             | Audit documentation for factual accuracy against source code                   |
+| `/audit-style`             | Audit files for style and convention compliance against framework checklists   |
 
 ## Project Context
 
@@ -281,7 +289,7 @@ data from DataLogger archives.
 **Modifying serial communication:**
 
 1. Review `src/ataraxis_communication_interface/communication/` (`protocols.py`, `messages.py`, `serial.py`) for all message types and protocols
-2. `SerialProtocols` (12 codes) and `SerialPrototypes` (252 codes) define the protocol layer
+2. `SerialProtocols` (12 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer
 3. Command classes (`RepeatedModuleCommand`, `OneOffModuleCommand`, `DequeueModuleCommand`, `KernelCommand`,
    `ModuleParameters`) construct packed byte arrays via `packed_data` property
 4. Reception classes (`ModuleData`, `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`,

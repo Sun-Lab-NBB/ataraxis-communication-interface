@@ -13,14 +13,15 @@ from ataraxis_transport_layer_pc import list_available_ports
 
 from .mcp_instance import mcp
 from ..communication import MQTTCommunication
-from ..microcontroller.interface import evaluate_port
-from ..microcontroller.dataclasses import (
+from ..microcontroller import (
+    LOG_ARCHIVE_SUFFIX,
     MICROCONTROLLER_MANIFEST_FILENAME,
     ModuleSourceData,
     MicroControllerManifest,
+    evaluate_port,
+    resolve_recording_roots,
     write_microcontroller_manifest,
 )
-from ..microcontroller.log_processing import LOG_ARCHIVE_SUFFIX, resolve_recording_roots
 
 if TYPE_CHECKING:
     from serial.tools.list_ports_common import ListPortInfo

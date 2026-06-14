@@ -11,7 +11,7 @@ from ataraxis_time import TimeUnits, convert_time
 from ataraxis_data_structures import delete_directory
 
 from .mcp_instance import mcp, read_tracker_status
-from ..microcontroller.log_processing import (
+from ..microcontroller import (
     FEATHER_SUFFIX,
     TRACKER_FILENAME,
     KERNEL_FEATHER_INFIX,

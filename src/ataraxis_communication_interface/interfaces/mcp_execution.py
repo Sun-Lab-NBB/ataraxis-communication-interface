@@ -12,8 +12,12 @@ import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
-from ..microcontroller.dataclasses import ExtractionConfig
-from ..microcontroller.log_processing import PARALLEL_PROCESSING_THRESHOLD, execute_job, find_log_archive
+from ..microcontroller import (
+    PARALLEL_PROCESSING_THRESHOLD,
+    ExtractionConfig,
+    execute_job,
+    find_log_archive,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path

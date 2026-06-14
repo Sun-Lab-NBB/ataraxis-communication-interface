@@ -6,7 +6,7 @@ from typing import Any
 from pathlib import Path
 
 from .mcp_instance import mcp
-from ..microcontroller.dataclasses import (
+from ..microcontroller import (
     ExtractionConfig,
     KernelExtractionConfig,
     ModuleExtractionConfig,
