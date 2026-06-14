@@ -16,8 +16,9 @@ Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
 import numpy as np
-from ataraxis_communication_interface import ModuleData, ModuleState, ModuleInterface
 from ataraxis_data_structures import SharedMemoryArray
+
+from ataraxis_communication_interface import ModuleData, ModuleState, ModuleInterface
 
 
 class TestModuleInterface(ModuleInterface):
@@ -84,7 +85,7 @@ class TestModuleInterface(ModuleInterface):
                 self._shared_memory[0] += 1
 
             # Sets the previous pin state value to match the recorded pin state.
-            self._previous_pin_state = True if message.event == 52 else False
+            self._previous_pin_state = bool(message.event == 52)
 
         # The module uses code 54 messages to return its echo value to the PC.
         elif isinstance(message, ModuleData) and message.event == 54:
