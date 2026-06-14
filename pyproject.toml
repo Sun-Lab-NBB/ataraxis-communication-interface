@@ -20,7 +20,7 @@ maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["ataraxis", "sunlab", "serial", "communication", "interface", "microcontroller", "USB", "UART", "MQTT"]
+keywords = ["ataraxis", "serial", "communication", "interface", "microcontroller", "USB", "UART", "MQTT"]
 
 classifiers = [
     # Development status
