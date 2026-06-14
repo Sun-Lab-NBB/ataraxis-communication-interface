@@ -20,7 +20,7 @@ maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["ataraxis", "sunlab", "serial", "communication", "interface", "microcontroller", "USB", "UART", "MQTT"]
+keywords = ["ataraxis", "serial", "communication", "interface", "microcontroller", "USB", "UART", "MQTT"]
 
 classifiers = [
     # Development status
@@ -67,7 +67,7 @@ Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
 
 # Exports the unified CLI entry point for microcontroller discovery, MQTT checking, log processing, and MCP server.
 [project.scripts]
-axci = "ataraxis_communication_interface.cli:axci_cli"
+axci = "ataraxis_communication_interface.interfaces.cli:axci_cli"
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]
@@ -121,10 +121,13 @@ lint.ignore = [
     "D107",    # __init__ is documented inside the main class docstring where applicable
     "D205",    # Bugs out for file descriptions
     "PLW0603", # While global statement usage is not ideal, it streamlines certain development patterns
+
+    # Project-specific ignore directives
     "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
     "FBT001",  # Sometimes positional boolean arguments are necessary
     "FBT002",  # Sometimes positional boolean arguments are necessary
     "SLF001",  # Sometimes accessing private members is necessary
+    "TID252",  # Parent-relative imports are used by the interfaces subpackage
 ]
 
 # Additional formatting configurations
@@ -189,6 +192,10 @@ exclude = [
     "recipe/",                               # Ignores recipe directory (grayskull output target)
     "tests/",                                # Ignores the test directory.
 ]
+
+# Excludes the CLI and MCP server interface modules from coverage measurement.
+[tool.coverage.run]
+omit = ["*/interfaces/*"]
 
 # This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
 [tool.coverage.paths]

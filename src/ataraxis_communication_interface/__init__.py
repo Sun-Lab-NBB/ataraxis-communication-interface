@@ -8,28 +8,26 @@ for more details.
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner (Jgroner11)
 """
 
-from .dataclasses import (
-    EXTRACTION_CONFIGURATION_FILENAME,
-    MICROCONTROLLER_MANIFEST_FILENAME,
-    ExtractionConfig,
-    ModuleSourceData,
-    KernelExtractionConfig,
-    ModuleExtractionConfig,
-    MicroControllerManifest,
-    MicroControllerSourceData,
-    ControllerExtractionConfig,
-    create_extraction_config,
-    write_microcontroller_manifest,
-)
 from .communication import (
     ModuleData,
     ModuleState,
     MQTTCommunication,
 )
-from .log_processing import run_log_processing_pipeline
-from .microcontroller_interface import (
+from .microcontroller import (
+    EXTRACTION_CONFIGURATION_FILENAME,
+    MICROCONTROLLER_MANIFEST_FILENAME,
     ModuleInterface,
+    ExtractionConfig,
+    ModuleSourceData,
+    KernelExtractionConfig,
+    ModuleExtractionConfig,
+    MicroControllerManifest,
     MicroControllerInterface,
+    MicroControllerSourceData,
+    ControllerExtractionConfig,
+    create_extraction_config,
+    run_log_processing_pipeline,
+    write_microcontroller_manifest,
 )
 
 __all__ = [

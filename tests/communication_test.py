@@ -48,10 +48,9 @@ def transport_layer() -> TransportLayer:
 @pytest.fixture(scope="function")
 def logger_queue(tmp_path_factory: pytest.TempPathFactory) -> Generator[Queue[Any], Any, None]:
     """Creates a DataLogger instance and returns its input queue."""
-    # Creates a unique temp directory for this test
-    tmp_dir = tmp_path_factory.mktemp("logger_data")
+    temporary_directory = tmp_path_factory.mktemp("logger_data")
 
-    logger = DataLogger(output_directory=tmp_dir, instance_name=f"{tmp_dir}_logger")
+    logger = DataLogger(output_directory=temporary_directory, instance_name=f"{temporary_directory}_logger")
     yield logger.input_queue
 
 
@@ -182,7 +181,6 @@ def test_serial_prototypes_get_prototype(
 )
 def test_serial_prototypes_get_prototype_for_code(code: np.uint8, expected_result: Any) -> None:
     """Verifies the functioning of the SerialPrototypes enum get_prototype_for_code() method."""
-    # noinspection PyTypeChecker
     result = SerialPrototypes.get_prototype_for_code(code)
 
     if expected_result is None:
@@ -233,7 +231,7 @@ def test_serial_prototypes_get_dtype_for_code(code: int, expected_dtype: str | N
 
 def test_repeated_module_command() -> None:
     """Verifies RepeatedModuleCommand initialization and data packing."""
-    cmd = RepeatedModuleCommand(
+    command = RepeatedModuleCommand(
         module_type=np.uint8(1),
         module_id=np.uint8(2),
         command=np.uint8(3),
@@ -243,31 +241,31 @@ def test_repeated_module_command() -> None:
     )
 
     # Verifies attributes.
-    assert cmd.module_type == 1
-    assert cmd.module_id == 2
-    assert cmd.command == 3
-    assert cmd.return_code == 4
-    assert not cmd.noblock
-    assert cmd.cycle_delay == 1000
-    assert cmd.protocol_code == SerialProtocols.REPEATED_MODULE_COMMAND.as_uint8()
+    assert command.module_type == 1
+    assert command.module_id == 2
+    assert command.command == 3
+    assert command.return_code == 4
+    assert not command.noblock
+    assert command.cycle_delay == 1000
+    assert command.protocol_code == SerialProtocols.REPEATED_MODULE_COMMAND.as_uint8()
 
     # Verifies packed data.
-    assert isinstance(cmd.packed_data, np.ndarray)
-    assert cmd.packed_data.dtype == np.uint8
-    assert cmd.packed_data.size == 10
-    assert np.array_equal(cmd.packed_data[0:6], [cmd.protocol_code, 1, 2, 4, 3, False])
+    assert isinstance(command.packed_data, np.ndarray)
+    assert command.packed_data.dtype == np.uint8
+    assert command.packed_data.size == 10
+    assert np.array_equal(command.packed_data[0:6], [command.protocol_code, 1, 2, 4, 3, False])
 
     # Verifies repr.
     expected_repr = (
-        f"RepeatedModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, "
+        f"RepeatedModuleCommand(protocol_code={command.protocol_code}, module_type=1, "
         f"module_id=2, command=3, return_code=4, noblock=False, cycle_delay=1000 us)"
     )
-    assert repr(cmd) == expected_repr
+    assert repr(command) == expected_repr
 
 
 def test_one_off_module_command() -> None:
     """Verifies OneOffModuleCommand initialization and data packing."""
-    cmd = OneOffModuleCommand(
+    command = OneOffModuleCommand(
         module_type=np.uint8(1),
         module_id=np.uint8(2),
         command=np.uint8(3),
@@ -276,68 +274,68 @@ def test_one_off_module_command() -> None:
     )
 
     # Verifies attributes.
-    assert cmd.module_type == 1
-    assert cmd.module_id == 2
-    assert cmd.command == 3
-    assert cmd.return_code == 4
-    assert not cmd.noblock
-    assert cmd.protocol_code == SerialProtocols.ONE_OFF_MODULE_COMMAND.as_uint8()
+    assert command.module_type == 1
+    assert command.module_id == 2
+    assert command.command == 3
+    assert command.return_code == 4
+    assert not command.noblock
+    assert command.protocol_code == SerialProtocols.ONE_OFF_MODULE_COMMAND.as_uint8()
 
     # Verifies packed data.
-    assert isinstance(cmd.packed_data, np.ndarray)
-    assert cmd.packed_data.dtype == np.uint8
-    assert cmd.packed_data.size == 6
-    assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 1, 2, 4, 3, False])
+    assert isinstance(command.packed_data, np.ndarray)
+    assert command.packed_data.dtype == np.uint8
+    assert command.packed_data.size == 6
+    assert np.array_equal(command.packed_data, [command.protocol_code, 1, 2, 4, 3, False])
 
     # Verifies repr.
     expected_repr = (
-        f"OneOffModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, "
+        f"OneOffModuleCommand(protocol_code={command.protocol_code}, module_type=1, "
         f"module_id=2, command=3, return_code=4, noblock=False)"
     )
-    assert repr(cmd) == expected_repr
+    assert repr(command) == expected_repr
 
 
 def test_dequeue_module_command() -> None:
     """Verifies DequeueModuleCommand initialization and data packing."""
-    cmd = DequeueModuleCommand(module_type=np.uint8(1), module_id=np.uint8(2), return_code=np.uint8(3))
+    command = DequeueModuleCommand(module_type=np.uint8(1), module_id=np.uint8(2), return_code=np.uint8(3))
 
     # Verifies attributes.
-    assert cmd.module_type == 1
-    assert cmd.module_id == 2
-    assert cmd.return_code == 3
-    assert cmd.protocol_code == SerialProtocols.DEQUEUE_MODULE_COMMAND.as_uint8()
+    assert command.module_type == 1
+    assert command.module_id == 2
+    assert command.return_code == 3
+    assert command.protocol_code == SerialProtocols.DEQUEUE_MODULE_COMMAND.as_uint8()
 
     # Verifies packed data.
-    assert isinstance(cmd.packed_data, np.ndarray)
-    assert cmd.packed_data.dtype == np.uint8
-    assert cmd.packed_data.size == 4
-    assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 1, 2, 3])
+    assert isinstance(command.packed_data, np.ndarray)
+    assert command.packed_data.dtype == np.uint8
+    assert command.packed_data.size == 4
+    assert np.array_equal(command.packed_data, [command.protocol_code, 1, 2, 3])
 
     # Verifies repr.
     expected_repr = (
-        f"DequeueModuleCommand(protocol_code={cmd.protocol_code}, module_type=1, module_id=2, return_code=3)"
+        f"DequeueModuleCommand(protocol_code={command.protocol_code}, module_type=1, module_id=2, return_code=3)"
     )
-    assert repr(cmd) == expected_repr
+    assert repr(command) == expected_repr
 
 
 def test_kernel_command() -> None:
     """Verifies KernelCommand initialization and data packing."""
-    cmd = KernelCommand(command=np.uint8(1), return_code=np.uint8(2))
+    command = KernelCommand(command=np.uint8(1), return_code=np.uint8(2))
 
     # Verifies attributes.
-    assert cmd.command == 1
-    assert cmd.return_code == 2
-    assert cmd.protocol_code == SerialProtocols.KERNEL_COMMAND.as_uint8()
+    assert command.command == 1
+    assert command.return_code == 2
+    assert command.protocol_code == SerialProtocols.KERNEL_COMMAND.as_uint8()
 
     # Verifies packed data.
-    assert isinstance(cmd.packed_data, np.ndarray)
-    assert cmd.packed_data.dtype == np.uint8
-    assert cmd.packed_data.size == 3
-    assert np.array_equal(cmd.packed_data, [cmd.protocol_code, 2, 1])
+    assert isinstance(command.packed_data, np.ndarray)
+    assert command.packed_data.dtype == np.uint8
+    assert command.packed_data.size == 3
+    assert np.array_equal(command.packed_data, [command.protocol_code, 2, 1])
 
     # Verifies repr.
-    expected_repr = f"KernelCommand(protocol_code={cmd.protocol_code}, command=1, return_code=2)"
-    assert repr(cmd) == expected_repr
+    expected_repr = f"KernelCommand(protocol_code={command.protocol_code}, command=1, return_code=2)"
+    assert repr(command) == expected_repr
 
 
 def test_module_parameters() -> None:
@@ -380,9 +378,8 @@ def test_module_parameters() -> None:
 )
 def test_command_packed_data_sizes(command_class: type, kwargs: dict[str, Any], expected_size: int) -> None:
     """Verifies that all command classes pack data to the expected size."""
-    # noinspection PyArgumentList
-    cmd = command_class(**kwargs)
-    assert cmd.packed_data.size == expected_size
+    command = command_class(**kwargs)
+    assert command.packed_data.size == expected_size
 
 
 @pytest.mark.parametrize(
@@ -396,7 +393,6 @@ def test_command_packed_data_sizes(command_class: type, kwargs: dict[str, Any], 
 )
 def test_parameters_packed_data_validation(parameter_class: type, kwargs: dict[str, Any]) -> None:
     """Verifies that parameter classes correctly pack their data."""
-    # noinspection PyArgumentList
     params = parameter_class(**kwargs)
     assert params.packed_data is not None
     assert params.parameters_size is not None
@@ -456,21 +452,21 @@ def test_reception_code_init(transport_layer: TransportLayer) -> None:
 
 def test_controller_identification_init(transport_layer: TransportLayer) -> None:
     """Verifies ControllerIdentification initialization."""
-    ident = ControllerIdentification()
+    identification = ControllerIdentification()
 
-    assert isinstance(ident.message, np.ndarray)
-    assert ident.controller_id == 0
+    assert isinstance(identification.message, np.ndarray)
+    assert identification.controller_id == 0
 
 
 def test_module_identification_init(transport_layer: TransportLayer) -> None:
     """Verifies ModuleIdentification initialization."""
-    ident = ModuleIdentification()
-    assert ident.module_type_id == 0
+    identification = ModuleIdentification()
+    assert identification.module_type_id == 0
 
 
 def test_serial_communication_init_and_repr(logger_queue: Queue[Any]) -> None:
     """Verifies SerialCommunication's initialization and string representation."""
-    comm = SerialCommunication(
+    communication = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
         controller_id=np.uint8(1),
@@ -479,25 +475,25 @@ def test_serial_communication_init_and_repr(logger_queue: Queue[Any]) -> None:
     )
 
     # Verifies initialization.
-    assert comm._transport_layer is not None
-    assert isinstance(comm._module_data, ModuleData)
-    assert isinstance(comm._kernel_data, KernelData)
-    assert isinstance(comm._module_state, ModuleState)
-    assert isinstance(comm._kernel_state, KernelState)
-    assert isinstance(comm._controller_identification, ControllerIdentification)
-    assert isinstance(comm._module_identification, ModuleIdentification)
-    assert isinstance(comm._reception_code, ReceptionCode)
-    assert comm._source_id == 1
-    assert comm._usb_port == "TEST"
+    assert communication._transport_layer is not None
+    assert isinstance(communication._module_data, ModuleData)
+    assert isinstance(communication._kernel_data, KernelData)
+    assert isinstance(communication._module_state, ModuleState)
+    assert isinstance(communication._kernel_state, KernelState)
+    assert isinstance(communication._controller_identification, ControllerIdentification)
+    assert isinstance(communication._module_identification, ModuleIdentification)
+    assert isinstance(communication._reception_code, ReceptionCode)
+    assert communication._source_id == 1
+    assert communication._usb_port == "TEST"
 
     # Verifies string representation.
     expected_repr = "SerialCommunication(usb_port=TEST, controller_id=1)"
-    assert repr(comm) == expected_repr
+    assert repr(communication) == expected_repr
 
 
 def test_serial_communication_send_message(logger_queue: Queue[Any]) -> None:
     """Verifies the functionality of the SerialCommunication send_message() method."""
-    comm = SerialCommunication(
+    communication = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
         controller_id=np.uint8(1),
@@ -505,15 +501,12 @@ def test_serial_communication_send_message(logger_queue: Queue[Any]) -> None:
         microcontroller_serial_buffer_size=300,
     )
 
-    # Creates the test message
     message = KernelCommand(command=np.uint8(1))
 
-    # Sends the message
-    # noinspection PyTypeChecker
-    comm.send_message(message)
+    communication.send_message(message=message)
 
-    # Verifies data was written to transport layer
-    assert comm._transport_layer._transmission_buffer[:3].tobytes() == message.packed_data.tobytes()
+    # Verifies the data was written to the transport layer.
+    assert communication._transport_layer._transmission_buffer[:3].tobytes() == message.packed_data.tobytes()
 
 
 @pytest.mark.parametrize(
@@ -591,8 +584,7 @@ def test_serial_communication_receive_message(
     logger_queue: Queue[Any], message_data: NDArray[np.uint8], expected_type: type, expected_values: dict[str, Any]
 ) -> None:
     """Verifies the functioning of SerialCommunication receive_message() method."""
-    # Initialize communication
-    comm = SerialCommunication(
+    communication = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
         controller_id=np.uint8(1),
@@ -601,16 +593,15 @@ def test_serial_communication_receive_message(
     )
 
     # First verifies that the method returns None when there is no data to receive.
-    assert comm.receive_message() is None
+    assert communication.receive_message() is None
 
     # Next, transforms the tested payload into the message format that can be received via the TransportLayer. This is
     # done by first 'sending' it and then using the 'sent' (well-formatted) data for the reception test.
-    comm._transport_layer.write_data(message_data)
-    comm._transport_layer.send_data()
-    comm._transport_layer._port.rx_buffer = comm._transport_layer._port.tx_buffer
+    communication._transport_layer.write_data(message_data)
+    communication._transport_layer.send_data()
+    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
 
-    # Receives and verifies the received data
-    received = comm.receive_message()
+    received = communication.receive_message()
     assert isinstance(received, expected_type)
     for attr, value in expected_values.items():
         assert getattr(received, attr) == value
@@ -623,7 +614,7 @@ def test_serial_communication_receive_message(
 
 def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) -> None:
     """Verifies the error handling of the SerialCommunication receive_message() method."""
-    comm = SerialCommunication(
+    communication = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
         controller_id=np.uint8(1),
@@ -635,12 +626,12 @@ def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) ->
     message_data = np.array([255, 1, 2], dtype=np.uint8)  # Invalid protocol code
 
     # Sends the message to the SerialMock class, which COBS-encodes and CRC-stamps the message.
-    comm._transport_layer.write_data(message_data)
-    comm._transport_layer.send_data()
+    communication._transport_layer.write_data(message_data)
+    communication._transport_layer.send_data()
 
     # Transfers the message from the tx_buffer to the rx_buffer. The message then can be 'received' and it now
     # has the correct format to pass TransportLayer verification steps that ensure message integrity.
-    comm._transport_layer._port.rx_buffer = comm._transport_layer._port.tx_buffer
+    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
 
     # Ensures that a message with an invalid protocol raises a ValueError.
     message = (
@@ -649,12 +640,12 @@ def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) ->
         f"available from the SerialProtocols enumeration."
     )
     with pytest.raises(ValueError, match=error_format(message)):
-        comm.receive_message()
+        communication.receive_message()
 
 
 def test_serial_communication_module_data_invalid_prototype(logger_queue: Queue[Any]) -> None:
     """Verifies error handling when ModuleData has invalid prototype code."""
-    comm = SerialCommunication(
+    communication = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
         controller_id=np.uint8(1),
@@ -665,23 +656,23 @@ def test_serial_communication_module_data_invalid_prototype(logger_queue: Queue[
     # Sets up mock message with invalid prototype (255).
     message_data = np.array([6, 1, 2, 3, 4, 255, 42], dtype=np.uint8)
 
-    comm._transport_layer.write_data(message_data)
-    comm._transport_layer.send_data()
-    comm._transport_layer._port.rx_buffer = comm._transport_layer._port.tx_buffer
+    communication._transport_layer.write_data(message_data)
+    communication._transport_layer.send_data()
+    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
 
     expected_error = (
         "Invalid prototype code 255 encountered when extracting the data object from "
-        "the received ModuleData message sent my module 2 of type 1. All messages must use one of the valid prototype "
+        "the received ModuleData message sent by module 2 of type 1. All messages must use one of the valid prototype "
         "codes available from the SerialPrototypes enumeration."
     )
 
     with pytest.raises(ValueError, match=error_format(expected_error)):
-        comm.receive_message()
+        communication.receive_message()
 
 
 def test_serial_communication_kernel_data_invalid_prototype(logger_queue: Queue[Any]) -> None:
     """Verifies error handling when KernelData has invalid prototype code."""
-    comm = SerialCommunication(
+    communication = SerialCommunication(
         port="TEST",
         logger_queue=logger_queue,
         controller_id=np.uint8(1),
@@ -692,9 +683,9 @@ def test_serial_communication_kernel_data_invalid_prototype(logger_queue: Queue[
     # Sets up mock message with invalid prototype (255).
     message_data = np.array([7, 1, 2, 255, 42], dtype=np.uint8)
 
-    comm._transport_layer.write_data(message_data)
-    comm._transport_layer.send_data()
-    comm._transport_layer._port.rx_buffer = comm._transport_layer._port.tx_buffer
+    communication._transport_layer.write_data(message_data)
+    communication._transport_layer.send_data()
+    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
 
     expected_error = (
         "Invalid prototype code 255 encountered when extracting the data object from "
@@ -703,21 +694,25 @@ def test_serial_communication_kernel_data_invalid_prototype(logger_queue: Queue[
     )
 
     with pytest.raises(ValueError, match=error_format(expected_error)):
-        comm.receive_message()
+        communication.receive_message()
 
 
-# MQTT Communication Tests
-# These tests require a local MQTT broker running
-BROKER_IP = "127.0.0.1"
-BROKER_PORT = 1883
-TEST_TOPICS = ("test/topic1", "test/topic2")
+# The MQTT communication tests below require a local MQTT broker running at the address configured by these constants.
+BROKER_IP: str = "127.0.0.1"
+"""The loopback address of the local MQTT broker used by the MQTT communication tests."""
+
+BROKER_PORT: int = 1883
+"""The default MQTT port of the local broker used by the MQTT communication tests."""
+
+TEST_TOPICS: tuple[str, str] = ("test/topic1", "test/topic2")
+"""The MQTT topics monitored by the MQTTCommunication instances exercised in the MQTT communication tests."""
 
 
 def broker_available() -> bool:
     """Checks if an MQTT broker is available at the configured address."""
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
-        result = client.connect(BROKER_IP, BROKER_PORT, keepalive=1)
+        result = client.connect(host=BROKER_IP, port=BROKER_PORT, keepalive=1)
         client.disconnect()
         return result == mqtt.MQTT_ERR_SUCCESS
     except Exception:
@@ -731,14 +726,14 @@ def test_mqtt_communication_initialization() -> None:
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
 
     # Verifies initialization.
-    assert comm._ip == BROKER_IP
-    assert comm._port == BROKER_PORT
-    assert comm._monitored_topics == TEST_TOPICS
-    assert not comm._connected
-    assert not comm.has_data
+    assert communication._ip == BROKER_IP
+    assert communication._port == BROKER_PORT
+    assert communication._monitored_topics == TEST_TOPICS
+    assert not communication._connected
+    assert not communication.has_data
 
 
 @pytest.mark.xdist_group(name="group1")
@@ -748,61 +743,60 @@ def test_mqtt_communication_connection() -> None:
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
+    # Verifies that connecting to an invalid broker raises a ConnectionError.
     with pytest.raises(ConnectionError):
-        # Test connection failure with invalid broker
-        comm = MQTTCommunication(ip="192.0.2.1", port=1880, monitored_topics=TEST_TOPICS)
-        comm.connect()
+        communication = MQTTCommunication(ip="192.0.2.1", port=1880, monitored_topics=TEST_TOPICS)
+        communication.connect()
 
-    # Test successful connection
-    comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
-    comm.connect()
-    assert comm._connected
+    # Verifies a successful connection.
+    communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    communication.connect()
+    assert communication._connected
 
-    # Test disconnection
-    comm.disconnect()
-    assert not comm._connected
+    # Verifies disconnection.
+    communication.disconnect()
+    assert not communication._connected
 
-    # Test reconnection
-    comm.connect()
-    assert comm._connected
+    # Verifies reconnection.
+    communication.connect()
+    assert communication._connected
 
 
 @pytest.mark.xdist_group(name="group1")
 def test_mqtt_communication_connection_error() -> None:
     """Verifies that MQTTCommunication raises ConnectionError when connecting to unavailable brokers."""
-    # Only tests error handling, doesn't require broker
+    # Only tests error handling, so it does not require a broker.
     with pytest.raises(ConnectionError):
-        comm = MQTTCommunication(ip="192.0.2.1", port=1880, monitored_topics=TEST_TOPICS)
-        comm.connect()
+        communication = MQTTCommunication(ip="192.0.2.1", port=1880, monitored_topics=TEST_TOPICS)
+        communication.connect()
 
 
 @pytest.mark.xdist_group(name="group1")
 def test_mqtt_communication_send_receive() -> None:
     """Verifies the bidirectional communication between MQTTCommunication and another simulated client (e.g., Unity
-    game engine)"""
+    game engine)
+    """
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
-    unity_comm.connect()
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
-    unity_client.connect(BROKER_IP, BROKER_PORT)
+    unity_client.connect(host=BROKER_IP, port=BROKER_PORT)
     unity_client.loop_start()
 
-    # Stores received messages.
     received_messages = []
 
-    # Creates Unity client receiver function
-    def on_message(_client, _userdata, message):
+    def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        """Stores each received message for later verification."""
         received_messages.append((message.topic, message.payload))
 
     unity_client.on_message = on_message
 
-    # Subscribes the Unity client to the test topic
     test_topic = "test/output"
-    unity_client.subscribe(test_topic)
-    time.sleep(0.1)  # Allow subscription to establish
+    unity_client.subscribe(topic=test_topic)
+    time.sleep(0.1)  # Allows the subscription to establish.
 
     # Verifies sending data from MQTTCommunication to Unity.
     test_data = [
@@ -812,10 +806,9 @@ def test_mqtt_communication_send_receive() -> None:
     ]
 
     for data, data_type in test_data:
-        unity_comm.send_data(test_topic, data)
-        time.sleep(0.1)  # Allows the message to be received
+        unity_communication.send_data(topic=test_topic, payload=data)
+        time.sleep(0.1)  # Allows the message to be received.
 
-        # Verifies that the 'Unity' client has received the message
         assert len(received_messages) > 0
         topic, payload = received_messages[-1]
         assert topic == test_topic
@@ -827,12 +820,11 @@ def test_mqtt_communication_send_receive() -> None:
     # Verifies sending data from Unity to MQTTCommunication.
     for topic in TEST_TOPICS:
         test_message = f"Unity message for {topic}"
-        unity_client.publish(topic, test_message)
-        time.sleep(0.1)  # Allows the message to be received
+        unity_client.publish(topic=topic, payload=test_message)
+        time.sleep(0.1)  # Allows the message to be received.
 
-        # Verifies MQTTCommunication received the message
-        assert unity_comm.has_data
-        received = unity_comm.get_data()
+        assert unity_communication.has_data
+        received = unity_communication.get_data()
         assert received is not None
         received_topic, received_payload = received
         assert received_topic == topic
@@ -841,27 +833,26 @@ def test_mqtt_communication_send_receive() -> None:
 
 def test_mqtt_communication_send_receive_errors() -> None:
     """Verifies the error handling behavior of MQTTCommunication's send_data() and get_data() methods."""
-
     # Skips the test if the test MQTT broker is not available
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
     # Both methods raise ConnectionErrors if they are called when the class is not connected to the MQTT broker.
-    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
     message = (
-        f"Cannot send data to the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
+        f"Unable to send data to the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
         f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
         f"sending data."
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
-        unity_comm.send_data("test/ topic1")
+        unity_communication.send_data(topic="test/ topic1")
     message = (
-        f"Cannot get data from the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
+        f"Unable to get data from the MQTT broker at {BROKER_IP}:{BROKER_PORT} via the MQTTCommunication instance. "
         f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-        f"sending data."
+        f"retrieving data."
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
-        unity_comm.get_data()
+        unity_communication.get_data()
 
 
 @pytest.mark.xdist_group(name="group1")
@@ -871,27 +862,27 @@ def test_unity_communication_queue_management() -> None:
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
-    unity_comm.connect()
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
-    unity_client.connect(BROKER_IP, BROKER_PORT)
+    unity_client.connect(host=BROKER_IP, port=BROKER_PORT)
     unity_client.loop_start()
 
-    # Sends multiple messages from Unity
+    # Sends multiple messages from Unity.
     messages = [
         (TEST_TOPICS[0], "message1"),
         (TEST_TOPICS[0], "message2"),
         (TEST_TOPICS[1], "message3"),
     ]
 
-    for topic, msg in messages:
-        unity_client.publish(topic, msg)
-        time.sleep(0.1)  # Allows the message to be received
+    for topic, message in messages:
+        unity_client.publish(topic=topic, payload=message)
+        time.sleep(0.1)  # Allows the message to be received.
 
-    # Verifies all messages are received in order
+    # Verifies all messages are received in order.
     received_messages = []
-    while unity_comm.has_data:
-        data = unity_comm.get_data()
+    while unity_communication.has_data:
+        data = unity_communication.get_data()
         assert data is not None
         received_messages.append((data[0], data[1].decode()))
 
@@ -905,43 +896,39 @@ def test_unity_communication_reconnection() -> None:
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
-    unity_comm.connect()
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
-    unity_client.connect(BROKER_IP, BROKER_PORT)
+    unity_client.connect(host=BROKER_IP, port=BROKER_PORT)
     unity_client.loop_start()
 
-    # Sends the initial message
     test_message = "before disconnect"
-    unity_client.publish(TEST_TOPICS[0], test_message)
+    unity_client.publish(topic=TEST_TOPICS[0], payload=test_message)
     time.sleep(1)
 
-    # Verifies that the message was received
-    assert unity_comm.has_data
-    data = unity_comm.get_data()
+    assert unity_communication.has_data
+    data = unity_communication.get_data()
     assert data is not None
     assert data[1].decode() == test_message
 
     # Disconnects and reconnects. Also verifies that calling each method the second time has no effect.
-    unity_comm.disconnect()
-    unity_comm.disconnect()
-    unity_comm.connect()
-    unity_comm.connect()
-    time.sleep(0.1)  # Allows reconnection to be established
+    unity_communication.disconnect()
+    unity_communication.disconnect()
+    unity_communication.connect()
+    unity_communication.connect()
+    time.sleep(0.1)  # Allows reconnection to be established.
 
-    # Sends the new message
     test_message = "after reconnect"
-    unity_client.publish(TEST_TOPICS[0], test_message)
+    unity_client.publish(topic=TEST_TOPICS[0], payload=test_message)
     time.sleep(0.1)
 
-    # Verifies the message was received after reconnection
-    assert unity_comm.has_data
-    data = unity_comm.get_data()
+    assert unity_communication.has_data
+    data = unity_communication.get_data()
     assert data is not None
     assert data[1].decode() == test_message
 
-    # Verifies that if there is no data to receive, get_data returns None
-    assert unity_comm.get_data() is None
+    # Verifies that if there is no data to receive, get_data returns None.
+    assert unity_communication.get_data() is None
 
 
 @pytest.mark.xdist_group(name="group1")
@@ -951,38 +938,39 @@ def test_unity_communication_large_message() -> None:
     if not broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {BROKER_IP} and port {BROKER_PORT}.")
 
-    unity_comm = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
-    unity_comm.connect()
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication.connect()
     unity_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
-    unity_client.connect(BROKER_IP, BROKER_PORT)
+    unity_client.connect(host=BROKER_IP, port=BROKER_PORT)
     unity_client.loop_start()
 
-    # Creates a large test message (100KB)
+    # Uses a 100 KB payload to exercise message handling above the typical single-packet size.
     large_message = b"x" * 100000
 
-    # Sends from MQTTCommunication to Unity
+    # Sends from MQTTCommunication to Unity.
     test_topic = "test/large"
-    unity_client.subscribe(test_topic)
+    unity_client.subscribe(topic=test_topic)
     time.sleep(0.1)
 
     received_large_message = None
 
-    def on_message(_client, _userdata, message):
+    def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        """Stores the received large message for later verification."""
         nonlocal received_large_message
         received_large_message = message.payload
 
     unity_client.on_message = on_message
 
-    unity_comm.send_data(test_topic, large_message)
-    time.sleep(0.2)  # Waits a bit longer for the larger message
+    unity_communication.send_data(topic=test_topic, payload=large_message)
+    time.sleep(0.2)  # Waits a bit longer for the larger message.
 
     assert received_large_message == large_message
 
-    # Sends from Unity to MQTTCommunication
-    unity_client.publish(TEST_TOPICS[0], large_message)
+    # Sends from Unity to MQTTCommunication.
+    unity_client.publish(topic=TEST_TOPICS[0], payload=large_message)
     time.sleep(0.2)
 
-    assert unity_comm.has_data
-    data = unity_comm.get_data()
+    assert unity_communication.has_data
+    data = unity_communication.get_data()
     assert data is not None
     assert data[1] == large_message

@@ -3,7 +3,6 @@ import importlib_metadata
 
 # -- Project information -----------------------------------------------------
 project = 'ataraxis-communication-interface'
-# noinspection PyShadowingBuiltins
 copyright = '2026, Sun (NeuroAI) lab'
 authors = ['Ivan Kondratyev', 'Jacob Groner']
 # Extracts the project version from the metadata .toml file.
@@ -11,7 +10,7 @@ release = importlib_metadata.version("ataraxis-communication-interface")
 
 # -- General configuration ---------------------------------------------------
 extensions = [
-    'sphinx.ext.autodoc',        # To build documentation from python source code docstrings.
+    'sphinx.ext.autodoc',        # To build documentation from Python source code docstrings.
     'sphinx.ext.napoleon',       # To read google-style docstrings (works with autodoc module).
     'sphinx_click',              # Must load before sphinx_autodoc_typehints to avoid mock import shadowing.
     'sphinx_autodoc_typehints',  # To parse typehints into documentation

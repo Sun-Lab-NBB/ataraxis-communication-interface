@@ -13,20 +13,20 @@ API documentation: https://ataraxis-communication-interface-api.netlify.app/
 Authors: Ivan Kondratyev (Inkaros), Jacob Groner
 """
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import numpy as np
-from ataraxis_base_utilities import LogLevel, console
-from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from example_interface import TestModuleInterface
+from ataraxis_base_utilities import LogLevel, console
+from ataraxis_data_structures import DataLogger, assemble_log_archives
 
 from ataraxis_communication_interface import (
     MICROCONTROLLER_MANIFEST_FILENAME,
-    MicroControllerInterface,
-    ModuleExtractionConfig,
     KernelExtractionConfig,
+    ModuleExtractionConfig,
+    MicroControllerInterface,
     ControllerExtractionConfig,
     create_extraction_config,
     run_log_processing_pipeline,
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # To process the data logged during runtime, first generate a precursor extraction configuration from the
-    # microcontroller manifest. The manifest is automatically created by MicroControllerInterface during start().
+    # microcontroller manifest. The manifest is automatically created during MicroControllerInterface construction.
     console.echo(message="Creating extraction configuration from manifest...")
     manifest_path = data_logger.output_directory / MICROCONTROLLER_MANIFEST_FILENAME
     config = create_extraction_config(manifest_path=manifest_path)
@@ -176,7 +176,7 @@ if __name__ == "__main__":
             ModuleExtractionConfig(module_type=1, module_id=1, event_codes=(52, 53, 54)),
             ModuleExtractionConfig(module_type=1, module_id=2, event_codes=(52, 53, 54)),
         ),
-        kernel=KernelExtractionConfig(event_codes=(2,)),  # Extracts kernel status code 2 (module setup) events.
+        kernel=KernelExtractionConfig(event_codes=(1,)),  # Extracts kernel status code 1 (setup complete) events.
     )
 
     # Saves the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
