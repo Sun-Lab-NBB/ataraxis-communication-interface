@@ -63,7 +63,6 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
     file_results: list[dict[str, Any]] = []
     all_valid = True
 
-    # Scans for all feather files in the data directory.
     feather_files = sorted(data_path.glob(f"*{FEATHER_SUFFIX}"))
 
     for feather_file in feather_files:
@@ -282,7 +281,6 @@ def _analyze_single_event_feather(
         "duration_seconds": duration_seconds,
     }
 
-    # Computes per-event-code frequency distribution.
     event_distribution: list[dict[str, Any]] = []
     if "event" in dataframe.columns:
         event_counts = dataframe.group_by("event").len().sort("event")
@@ -290,7 +288,6 @@ def _analyze_single_event_feather(
             {"event_code": int(row["event"]), "count": int(row["len"])} for row in event_counts.iter_rows(named=True)
         ]
 
-    # Computes per-command-code frequency distribution.
     command_distribution: list[dict[str, Any]] = []
     if "command" in dataframe.columns:
         command_counts = dataframe.group_by("command").len().sort("command")
@@ -299,7 +296,6 @@ def _analyze_single_event_feather(
             for row in command_counts.iter_rows(named=True)
         ]
 
-    # Computes inter-event timing statistics.
     inter_event_timing: dict[str, Any] = {}
     if total_rows >= _MINIMUM_ROWS_FOR_INTERVALS:
         intervals_us = np.diff(timestamps).astype(np.int64)

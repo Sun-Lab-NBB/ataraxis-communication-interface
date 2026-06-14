@@ -208,14 +208,13 @@ class ModuleParameters:
 
     def __post_init__(self) -> None:
         """Serializes the instance's data."""
-        # Calculates the total size of serialized parameters in bytes directly from item sizes
-        parameters_size = np.uint8(sum(param.itemsize for param in self.parameter_data))
+        # Calculates the total size of serialized parameters in bytes directly from item sizes.
+        parameters_size = np.uint8(sum(parameter.itemsize for parameter in self.parameter_data))
         object.__setattr__(self, "parameters_size", parameters_size)
 
-        # Pre-allocates the full array with the exact size (header and parameters object)
+        # Pre-allocates the full array with the exact size (header and parameters object).
         packed_data = np.empty(4 + parameters_size, dtype=np.uint8)
 
-        # Packs the header data into the pre-created array
         packed_data[0:4] = [
             self.protocol_code,
             self.module_type,
@@ -223,15 +222,13 @@ class ModuleParameters:
             self.return_code,
         ]
 
-        # Loops over and sequentially serializes each parameter directly into the pre-allocated array.
         current_position = 4
-        for param in self.parameter_data:
-            param_bytes = np.frombuffer(param.tobytes(), dtype=np.uint8)
-            param_size = param_bytes.size
-            packed_data[current_position : current_position + param_size] = param_bytes
-            current_position += param_size
+        for parameter in self.parameter_data:
+            parameter_bytes = np.frombuffer(parameter.tobytes(), dtype=np.uint8)
+            parameter_size = parameter_bytes.size
+            packed_data[current_position : current_position + parameter_size] = parameter_bytes
+            current_position += parameter_size
 
-        # Writes the constructed packed data object to the packed_data attribute
         object.__setattr__(self, "packed_data", packed_data)
 
     def __repr__(self) -> str:

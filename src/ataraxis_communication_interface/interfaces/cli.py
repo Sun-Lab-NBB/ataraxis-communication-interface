@@ -15,11 +15,13 @@ from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
 
 from .mcp_server import run_server as run_mcp  # pragma: no cover
 from ..communication import MQTTCommunication  # pragma: no cover
-from ..microcontroller.interface import evaluate_port  # pragma: no cover
-from ..microcontroller.dataclasses import ExtractionConfig, create_extraction_config  # pragma: no cover
-from ..microcontroller.log_processing import run_log_processing_pipeline  # pragma: no cover
+from ..microcontroller import (  # pragma: no cover
+    ExtractionConfig,
+    evaluate_port,
+    create_extraction_config,
+    run_log_processing_pipeline,
+)
 
-# Enables console output.
 console.enable()  # pragma: no cover
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}  # pragma: no cover
@@ -48,39 +50,32 @@ def identify(baudrate: int) -> None:  # pragma: no cover
 
     Use this command to identify the hardware available to the local host-machine.
     """
-    # Gets all available serial ports.
     available_ports = list_available_ports()
 
     # Filters out invalid ports (PID == None) - primarily for Linux systems.
     valid_ports = [port for port in available_ports if port.pid is not None]
 
-    # If there are no valid candidates to evaluate, aborts the runtime early.
     if not valid_ports:
-        console.echo("No valid serial ports detected.")
+        console.echo(message="No valid serial ports detected.")
         return
 
-    console.echo(f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
+    console.echo(message=f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
 
-    # Prepares the parallel evaluation tasks.
     port_names = [port.device for port in valid_ports]
 
-    # Uses ProcessPoolExecutor to evaluate all ports in parallel.
     results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
     with ProcessPoolExecutor() as executor:
-        # Submits all port evaluation tasks.
         future_to_port = {
-            executor.submit(evaluate_port, port_name, baudrate): (port_name, port_info)
+            executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
         }
 
-        # Collects results as they complete.
         for future in as_completed(future_to_port):
             port_name, port_info = future_to_port[future]
             controller_id, error_message = future.result()
             results[port_name] = (port_info, controller_id, error_message)
 
-    # Prints the results in the original port order.
     count = 0
     for port_name in port_names:
         if port_name in results:
@@ -90,15 +85,17 @@ def identify(baudrate: int) -> None:  # pragma: no cover
             if error_message is not None:
                 # Port encountered a connection error.
                 console.echo(
-                    f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_message}]"
+                    message=f"{count}: {port_info.device} -> {port_info.description} "
+                    f"[Connection Failed: {error_message}]"
                 )
             elif controller_id == -1:
                 # Port did not respond or is not a valid microcontroller.
-                console.echo(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
+                console.echo(message=f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
             else:
                 # Port is connected to a valid microcontroller with identified ID.
                 console.echo(
-                    f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
+                    message=f"{count}: {port_info.device} -> {port_info.description} "
+                    f"[Microcontroller ID: {controller_id}]"
                 )
 
 
@@ -125,19 +122,17 @@ def check_mqtt(host: str, port: int) -> None:  # pragma: no cover
     Attempts to connect to the MQTT broker and reports the result. Use this command to verify MQTT broker
     availability before running code that depends on MQTT communication.
     """
-    console.echo(f"Checking MQTT broker connectivity at {host}:{port}...")
+    console.echo(message=f"Checking MQTT broker connectivity at {host}:{port}...")
 
-    # Creates a temporary MQTTCommunication instance to test connectivity.
     mqtt_client = MQTTCommunication(ip=host, port=port)
 
-    # Attempts to connect to the MQTT broker.
     try:
         mqtt_client.connect()
-        console.echo(f"MQTT broker at {host}:{port} is reachable.", level=LogLevel.SUCCESS)
+        console.echo(message=f"MQTT broker at {host}:{port} is reachable.", level=LogLevel.SUCCESS)
         mqtt_client.disconnect()
     except ConnectionError:
         console.echo(
-            f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
+            message=f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the "
             f"host/port are correct.",
             level=LogLevel.ERROR,
         )

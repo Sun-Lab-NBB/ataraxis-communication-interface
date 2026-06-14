@@ -244,7 +244,7 @@ def _group_worker(jobs: list[PendingJob], workers: int, state: JobExecutionState
             # Loads the extraction config and finds the matching controller configuration.
             try:
                 config = ExtractionConfig.load(file_path=job.config_path)
-                controller_configs = {str(c.controller_id): c for c in config.controllers}
+                controller_configs = {str(controller.controller_id): controller for controller in config.controllers}
                 controller_config = controller_configs.get(job.source_id)
             except Exception:  # noqa: BLE001
                 tracker.fail_job(

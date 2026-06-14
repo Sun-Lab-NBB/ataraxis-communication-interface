@@ -45,7 +45,6 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
         A numbered list of evaluated serial ports with their device descriptions and identified microcontroller IDs,
         or a message indicating no valid ports were detected.
     """
-    # Gets all available serial ports.
     available_ports = list_available_ports()
 
     # Filters out invalid ports (PID is None) — primarily for Linux systems.
@@ -68,13 +67,11 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
         }
 
-        # Collects results as they complete.
         for future in as_completed(future_to_port):
             port_name, port_info = future_to_port[future]
             controller_id, error_message = future.result()
             results[port_name] = (port_info, controller_id, error_message)
 
-    # Builds the output string.
     lines: list[str] = [f"Evaluated {len(valid_ports)} serial port(s) at baudrate {baudrate}:"]
     count = 0
     for port_name in port_names:
@@ -113,10 +110,8 @@ def check_mqtt_broker_tool(host: str = "127.0.0.1", port: int = 1883) -> str:
     Returns:
         A message indicating whether the MQTT broker is reachable at the specified host and port.
     """
-    # Creates a temporary MQTTCommunication instance to test connectivity.
     mqtt_client = MQTTCommunication(ip=host, port=port)
 
-    # Attempts to connect to the MQTT broker.
     try:
         mqtt_client.connect()
         mqtt_client.disconnect()
@@ -215,7 +210,6 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:
     if not path.is_file():
         return {"error": f"Path is not a file: {manifest_path}"}
 
-    # Loads the manifest from the YAML file.
     try:
         manifest = MicroControllerManifest.load(file_path=path)
     except Exception as error:  # noqa: BLE001

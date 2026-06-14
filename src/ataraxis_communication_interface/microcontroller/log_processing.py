@@ -40,6 +40,10 @@ PARALLEL_PROCESSING_THRESHOLD: int = 2000
 """The minimum number of messages in a log archive required to enable parallel processing. Archives with fewer messages
 are processed sequentially to avoid multiprocessing overhead."""
 
+_BATCH_MULTIPLIER: int = 4
+"""The number of message batches created per worker process during parallel processing. Splitting each worker's share
+into four batches improves load distribution across workers."""
+
 CONTROLLER_FEATHER_PREFIX: str = "controller_"
 """Filename prefix for controller feather output files."""
 
@@ -71,8 +75,8 @@ class _ExtractedMessages:
     """The event code of each message."""
     dtypes: tuple[str | None, ...]
     """The numpy dtype string for the data payload of each message (e.g., ``'float32'``, ``'uint16'``), or None for
-    state-only messages that carry no data. Combined with ``data_payloads``, this allows reconstruction of the
-    original numpy array via ``np.frombuffer(payload, dtype=dtype_str)`` without any library dependency."""
+    state-only messages that carry no data. Combined with the corresponding ``data_payloads`` entry, the stored dtype
+    string allows reconstructing the original numpy array from the payload bytes without any library dependency."""
     data_payloads: tuple[bytes | None, ...]
     """The serialized binary payload of each message, or None for state-only messages. Each entry is the raw byte
     representation of the numpy data array, decodable via the corresponding ``dtypes`` entry."""
@@ -429,9 +433,8 @@ def execute_job(
             if worker_count < 1:
                 worker_count = resolve_worker_count(requested_workers=0)
 
-            # Uses LogArchiveReader to create batches optimized for parallel processing. The batch multiplier of 4
-            # creates four batches per worker for better load distribution across workers.
-            batch_keys = reader.get_batches(workers=worker_count, batch_multiplier=4)
+            # Uses LogArchiveReader to create batches optimized for parallel processing.
+            batch_keys = reader.get_batches(workers=worker_count, batch_multiplier=_BATCH_MULTIPLIER)
 
             # Uses the provided executor or creates a managed one for this invocation.
             managed = executor is None
@@ -515,7 +518,7 @@ def execute_job(
             )
 
         # Writes kernel messages to a feather file when kernel extraction was configured.
-        if kernel_data.count > 0:
+        if kernel_data.count:
             _write_kernel_feather(
                 kernel_data=kernel_data,
                 source_id=source_id,
@@ -660,6 +663,21 @@ def prepare_tracker(tracker: ProcessingTracker, jobs: list[tuple[str, str]], uni
         tracker.initialize_jobs(jobs=jobs)
 
 
+def generate_job_ids(source_ids: list[str]) -> dict[str, str]:
+    """Generates unique processing job identifiers for each source ID.
+
+    Args:
+        source_ids: The list of source ID strings for which to generate job IDs.
+
+    Returns:
+        A dictionary mapping source IDs to their generated hexadecimal job identifiers.
+    """
+    return {
+        source_id: ProcessingTracker.generate_job_id(job_name=EXTRACTION_JOB_NAME, specifier=source_id)
+        for source_id in source_ids
+    }
+
+
 def _process_message_batch(
     log_path: Path,
     file_names: list[str],
@@ -766,14 +784,15 @@ def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[st
     """Extracts the first component from the end of each input path that uniquely identifies each path globally.
 
     Adapts the processing pipeline to directory structures where the unique recording identifier appears at different
-    levels of the path hierarchy. For example, given paths like ``/data/day1/recording`` and ``/data/day2/recording``,
-    identifies ``day1`` and ``day2`` as the unique components (not ``recording``, which is shared).
+    levels of the path hierarchy. For each path, the selected component is the first one, scanning from the end of the
+    path toward the root, that is unique across all input paths. Shared trailing components are skipped in favor of the
+    distinguishing ancestor.
 
     Uses a frequency counter to count how many distinct paths contain each component, then selects the first
     component (from the end) that appears in exactly one path.
 
     Args:
-        paths: The list or tuple of Path objects to extract unique components from.
+        paths: The directories from which to extract unique identifying components.
 
     Returns:
         A tuple of unique component strings, one for each path, stored in the same order as the input paths.
@@ -804,21 +823,6 @@ def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[st
             console.error(message=message, error=RuntimeError)
 
     return tuple(unique_components)
-
-
-def generate_job_ids(source_ids: list[str]) -> dict[str, str]:
-    """Generates unique processing job identifiers for each source ID.
-
-    Args:
-        source_ids: The list of source ID strings for which to generate job IDs.
-
-    Returns:
-        A dictionary mapping source IDs to their generated hexadecimal job identifiers.
-    """
-    return {
-        source_id: ProcessingTracker.generate_job_id(job_name=EXTRACTION_JOB_NAME, specifier=source_id)
-        for source_id in source_ids
-    }
 
 
 def _finalize_accumulator(accumulator: _ColumnAccumulator) -> _ExtractedMessages:

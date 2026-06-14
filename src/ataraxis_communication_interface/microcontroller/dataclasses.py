@@ -5,7 +5,7 @@ extraction configurations.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from dataclasses import field, dataclass
+from dataclasses import dataclass
 
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
@@ -44,7 +44,9 @@ def write_microcontroller_manifest(
     # Reads the existing manifest if one has already been written by another MicroControllerInterface instance sharing
     # this DataLogger.
     manifest = (
-        MicroControllerManifest.load(file_path=manifest_path) if manifest_path.exists() else MicroControllerManifest()
+        MicroControllerManifest.load(file_path=manifest_path)
+        if manifest_path.exists()
+        else MicroControllerManifest(controllers=[])
     )
 
     # Appends the new controller entry and writes the updated manifest back to disk.
@@ -146,7 +148,7 @@ class MicroControllerManifest(YamlConfig):
     produced by ataraxis-communication-interface and to associate controller IDs with human-readable names.
     """
 
-    controllers: list[MicroControllerSourceData] = field(default_factory=list)
+    controllers: list[MicroControllerSourceData]
     """The list of microcontroller source entries registered in this manifest."""
 
     def save(self, file_path: Path) -> None:
@@ -155,7 +157,7 @@ class MicroControllerManifest(YamlConfig):
         Args:
             file_path: The path to the .yaml file where to save the manifest data.
         """
-        ensure_directory_exists(file_path)
+        ensure_directory_exists(path=file_path)
         self.to_yaml(file_path=file_path)
 
     @classmethod
@@ -176,7 +178,7 @@ class ModuleExtractionConfig:
     """Defines extraction parameters for a single hardware module.
 
     Notes:
-        Event codes must be globally unique within each module -- the same event code must not be reused with
+        Event codes must be globally unique within each module. The same event code must not be reused with
         different semantics across commands. This invariance is enforced by the microcontroller firmware and enables
         extraction to filter by event code alone without requiring command code disambiguation.
     """
@@ -194,7 +196,7 @@ class KernelExtractionConfig:
     """Defines extraction parameters for kernel messages.
 
     Notes:
-        Event codes must be globally unique within the kernel -- the same event code must not be reused with
+        Event codes must be globally unique within the kernel. The same event code must not be reused with
         different semantics across commands.
     """
 
@@ -233,7 +235,7 @@ class ExtractionConfig(YamlConfig):
         Args:
             file_path: The path to the .yaml file where to save the configuration data.
         """
-        ensure_directory_exists(file_path)
+        ensure_directory_exists(path=file_path)
         self.to_yaml(file_path=file_path)
 
     @classmethod

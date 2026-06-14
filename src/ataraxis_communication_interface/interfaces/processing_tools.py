@@ -71,7 +71,6 @@ def prepare_log_processing_batch_tool(
         A dictionary containing per-log-directory manifests in 'log_directories' with tracker paths and job
         lists, total counts, and any invalid paths.
     """
-    # Validates the extraction configuration up front.
     config_file = Path(config_path)
     if not config_file.exists() or not config_file.is_file():
         return {"error": f"Extraction config not found: {config_path}"}
@@ -90,31 +89,36 @@ def prepare_log_processing_batch_tool(
         }
 
     source_id_set = set(source_ids)
-    result_log_dirs: dict[str, Any] = {}
+    result_log_directories: dict[str, Any] = {}
     invalid_paths: list[str] = []
     total_jobs = 0
 
-    for entry_index, log_dir_str in enumerate(log_directories):
-        log_dir_path = Path(log_dir_str)
+    for entry_index, log_directory_string in enumerate(log_directories):
+        log_directory_path = Path(log_directory_string)
 
-        if not log_dir_path.exists() or not log_dir_path.is_dir():
-            invalid_paths.append(log_dir_str)
+        if not log_directory_path.exists() or not log_directory_path.is_dir():
+            invalid_paths.append(log_directory_string)
             continue
 
         # Filters the requested source IDs to those that have a matching archive in this log directory.
         # Discovery already confirmed these archives exist, but the check guards against stale data.
         filtered_ids = sorted(
-            source_id for source_id in source_id_set if (log_dir_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}").exists()
+            source_id
+            for source_id in source_id_set
+            if (log_directory_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}").exists()
         )
 
         if not filtered_ids:
-            result_log_dirs[log_dir_str] = {"source_ids": [], "jobs": [], "tracker_path": None, "summary": {}}
+            result_log_directories[log_directory_string] = {
+                "source_ids": [],
+                "jobs": [],
+                "tracker_path": None,
+                "summary": {},
+            }
             continue
 
-        # Resolves the output directory for this log directory.
         output_path = Path(output_directories[entry_index])
 
-        # Creates the microcontroller_data subdirectory under the output path for tracker and output files.
         data_path = output_path / MICROCONTROLLER_DATA_DIRECTORY
         data_path.mkdir(parents=True, exist_ok=True)
         tracker_path = data_path / TRACKER_FILENAME
@@ -126,7 +130,7 @@ def prepare_log_processing_batch_tool(
             except Exception:  # noqa: BLE001
                 tracker_status = {"jobs": [], "summary": {}}
 
-            result_log_dirs[log_dir_str] = {
+            result_log_directories[log_directory_string] = {
                 "tracker_path": str(tracker_path),
                 "output_directory": str(data_path),
                 "source_ids": filtered_ids,
@@ -146,7 +150,7 @@ def prepare_log_processing_batch_tool(
                     "job_id": job_ids[source_id],
                     "source_id": source_id,
                     "status": "SCHEDULED",
-                    "log_directory": log_dir_str,
+                    "log_directory": log_directory_string,
                     "output_directory": str(data_path),
                     "tracker_path": str(tracker_path),
                     "config_path": config_path,
@@ -154,7 +158,7 @@ def prepare_log_processing_batch_tool(
                 for source_id in filtered_ids
             ]
 
-            result_log_dirs[log_dir_str] = {
+            result_log_directories[log_directory_string] = {
                 "tracker_path": str(tracker_path),
                 "output_directory": str(data_path),
                 "source_ids": filtered_ids,
@@ -171,8 +175,8 @@ def prepare_log_processing_batch_tool(
 
     result: dict[str, Any] = {
         "success": True,
-        "log_directories": result_log_dirs,
-        "total_log_directories": len(result_log_dirs),
+        "log_directories": result_log_directories,
+        "total_log_directories": len(result_log_directories),
         "total_jobs": total_jobs,
     }
 
@@ -247,7 +251,6 @@ def execute_log_processing_jobs_tool(
     if not pending:
         return {"error": "No valid jobs to execute.", "invalid_jobs": invalid_jobs}
 
-    # Resolves the total worker budget.
     resolved_budget = resolve_worker_count(requested_workers=worker_budget, reserved_cores=_RESERVED_CORES)
 
     # Probes archive message counts for all pending jobs. Reads only the zip directory of each .npz file,
@@ -256,7 +259,6 @@ def execute_log_processing_jobs_tool(
     for job in pending:
         job_message_counts[job.dispatch_key] = _probe_archive_message_count(job=job)
 
-    # Creates execution state and starts the manager thread.
     execution_state = JobExecutionState(
         all_jobs=all_jobs,
         pending_queue=pending,
@@ -409,7 +411,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
                     to_units=TimeUnits.SECOND,
                     as_float=True,
                 )
-                entry["elapsed_seconds"] = round(elapsed_seconds, 2)
+                entry["elapsed_seconds"] = round(number=elapsed_seconds, ndigits=2)
 
             if job_info.completed_at is not None:
                 entry["completed_at"] = int(job_info.completed_at)
@@ -420,7 +422,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
                         to_units=TimeUnits.SECOND,
                         as_float=True,
                     )
-                    entry["duration_seconds"] = round(duration_seconds, 2)
+                    entry["duration_seconds"] = round(number=duration_seconds, ndigits=2)
 
             if job_info.status == ProcessingStatus.SUCCEEDED:
                 completed_count += 1
@@ -433,13 +435,13 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     total_elapsed_seconds = 0.0
     if earliest_start is not None:
         total_elapsed_seconds = round(
-            convert_time(
+            number=convert_time(
                 time=current_us - earliest_start,
                 from_units=TimeUnits.MICROSECOND,
                 to_units=TimeUnits.SECOND,
                 as_float=True,
             ),
-            2,
+            ndigits=2,
         )
 
     running_count = sum(1 for job_entry in job_timing if "elapsed_seconds" in job_entry)
@@ -451,7 +453,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
         "pending_count": len(state.all_jobs) - completed_count - failed_count - running_count,
     }
 
-    if completed_count > 0 and earliest_start is not None:
+    if completed_count and earliest_start is not None:
         elapsed_hours = convert_time(
             time=current_us - earliest_start,
             from_units=TimeUnits.MICROSECOND,
@@ -459,7 +461,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
             as_float=True,
         )
         if elapsed_hours > 0:
-            session["throughput_jobs_per_hour"] = round(completed_count / elapsed_hours, 2)
+            session["throughput_jobs_per_hour"] = round(number=completed_count / elapsed_hours, ndigits=2)
 
     return {"active": manager_alive, "jobs": job_timing, "session": session}
 
@@ -560,7 +562,6 @@ def reset_log_processing_jobs_tool(
         del tracker.jobs[job_id]
     tracker.to_yaml(file_path=path)
 
-    # Re-initializes the reset jobs.
     reset_tracker = ProcessingTracker(file_path=path)
     reset_tracker.initialize_jobs(jobs=reset_jobs)
 
@@ -602,7 +603,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
     aggregate_scheduled = 0
 
     for found_tracker_path in sorted(root_path.rglob(TRACKER_FILENAME)):
-        log_dir = str(found_tracker_path.parent)
+        log_directory = str(found_tracker_path.parent)
         try:
             status = read_tracker_status(tracker_path=found_tracker_path)
             summary = status.get("summary", {})
@@ -616,7 +617,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
 
             log_dir_statuses.append(
                 {
-                    "log_directory": log_dir,
+                    "log_directory": log_directory,
                     "tracker_path": str(found_tracker_path),
                     "status": dir_status,
                     **status,
@@ -625,7 +626,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             log_dir_statuses.append(
                 {
-                    "log_directory": log_dir,
+                    "log_directory": log_directory,
                     "tracker_path": str(found_tracker_path),
                     "status": "error",
                     "error": "Unable to read tracker file.",
@@ -657,11 +658,11 @@ def _derive_tracker_status(summary: dict[str, Any]) -> str:
         A status string: one of 'failed', 'completed', 'processing', 'not_started', or 'in_progress'.
     """
     total = summary.get("total", 0)
-    if summary.get("failed", 0) > 0:
+    if summary.get("failed", 0):
         return "failed"
     if summary.get("succeeded", 0) == total and total > 0:
         return "completed"
-    if summary.get("running", 0) > 0:
+    if summary.get("running", 0):
         return "processing"
     if summary.get("scheduled", 0) == total and total > 0:
         return "not_started"

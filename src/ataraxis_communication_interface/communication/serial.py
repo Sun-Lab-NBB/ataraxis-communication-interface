@@ -131,7 +131,8 @@ class SerialCommunication:
         # Constructs a timezone-aware stamp using the UTC time. This creates a reference point for all later delta time
         # readouts.
         onset: NDArray[np.uint8] = get_timestamp(output_format=TimestampFormats.BYTES)  # type: ignore[assignment]
-        self._timestamp_timer.reset()  # Immediately resets the timer to make it as close as possible to the onset time
+        # Immediately resets the timer to make it as close as possible to the onset time.
+        self._timestamp_timer.reset()
 
         # Logs the onset timestamp. All further timestamps are treated as integer time deltas (in microseconds)
         # relative to the onset timestamp.
@@ -154,14 +155,9 @@ class SerialCommunication:
         Args:
             message: The message to send to the microcontroller.
         """
-        # Writes the pre-packaged data into the transmission buffer.
         self._transport_layer.write_data(data_object=message.packed_data)
-
-        # Constructs and sends the data message to the connected system.
         self._transport_layer.send_data()
-
-        # Logs the transmitted data to disk.
-        self._log_data(self._timestamp_timer.elapsed, message.packed_data)  # type: ignore[arg-type]
+        self._log_data(timestamp=self._timestamp_timer.elapsed, data=message.packed_data)  # type: ignore[arg-type]
 
     def receive_message(
         self,
@@ -199,24 +195,24 @@ class SerialCommunication:
 
         # Timestamps and logs the serialized message data to disk before further processing.
         self._log_data(
-            self._timestamp_timer.elapsed,
-            self._transport_layer.reception_buffer[: self._transport_layer.bytes_in_reception_buffer],
+            timestamp=self._timestamp_timer.elapsed,
+            data=self._transport_layer.reception_buffer[: self._transport_layer.bytes_in_reception_buffer],
         )
 
         # Reads the message protocol code, expected to be found as the first value of every incoming payload. This
-        # code determines how to parse the message's payload
+        # code determines how to parse the message's payload.
         protocol = self._transport_layer.read_data(data_object=np.uint8(0))
 
         # Uses the extracted protocol code to determine the type of the received message and process the received data.
         if protocol == _PROTOCOL_MODULE_DATA:
-            # Parses the static header data from the extracted message
+            # Parses the static header data from the extracted message.
             self._module_data.message = self._transport_layer.read_data(data_object=self._module_data.message)
 
             # Resolves the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
-            # instance
+            # instance.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._module_data.prototype_code)
 
-            # If prototype retrieval fails, raises ValueError
+            # If prototype retrieval fails, raises ValueError.
             if prototype is None:
                 message = (
                     f"Invalid prototype code {self._module_data.prototype_code} encountered when extracting the data "
@@ -232,11 +228,11 @@ class SerialCommunication:
             return self._module_data
 
         if protocol == _PROTOCOL_KERNEL_DATA:
-            # Parses the static header data from the extracted message
+            # Parses the static header data from the extracted message.
             self._kernel_data.message = self._transport_layer.read_data(data_object=self._kernel_data.message)
 
             # Resolves the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
-            # instance
+            # instance.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._kernel_data.prototype_code)
 
             # If the prototype retrieval fails, raises ValueError.
@@ -280,7 +276,7 @@ class SerialCommunication:
             return self._module_identification
 
         # If the protocol code is not resolved by any conditional above, it is not valid. Terminates runtime with a
-        # ValueError
+        # ValueError.
         message = (
             f"Invalid protocol code {protocol} encountered when attempting to parse a message received from the "
             f"microcontroller. All incoming messages have to use one of the valid incoming message protocol codes "
@@ -301,6 +297,4 @@ class SerialCommunication:
         """
         # Packages the data to be logged into the appropriate tuple format (with ID variables).
         package = LogPackage(source_id=self._source_id, acquisition_time=np.uint64(timestamp), serialized_data=data)
-
-        # Sends the data to the logger.
         self._logger_queue.put(package)

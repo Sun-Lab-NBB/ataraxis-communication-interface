@@ -40,11 +40,11 @@ class MQTTCommunication:
         self,
         ip: str = "127.0.0.1",
         port: int = 1883,
-        monitored_topics: None | tuple[str, ...] = None,
+        monitored_topics: tuple[str, ...] | None = None,
     ) -> None:
         self._ip: str = ip
         self._port: int = port
-        self._connected = False
+        self._connected: bool = False
         self._monitored_topics: tuple[str, ...] = monitored_topics if monitored_topics is not None else ()
 
         # Initializes the queue to buffer incoming data. The queue may not be used if the class is not configured to
@@ -98,13 +98,13 @@ class MQTTCommunication:
         if self._connected:
             return
 
-        # Connects to the broker
+        # Connects to the broker.
         try:
-            result = self._client.connect(self._ip, self._port)
-        except TimeoutError:  # Fixed a minor regression in the newest MQTT version that raises Python errors
+            result = self._client.connect(host=self._ip, port=self._port)
+        # Catches the TimeoutError that newer paho-mqtt versions raise instead of returning an error code.
+        except TimeoutError:
             result = mqtt.MQTT_ERR_NO_CONN
         if result != mqtt.MQTT_ERR_SUCCESS:
-            # If the result is not the expected code, raises an exception
             message = (
                 f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
                 f"broker at {self._ip}:{self._port}. This likely indicates that the broker is not running or that "
@@ -115,7 +115,6 @@ class MQTTCommunication:
         # If the class is configured to connect to any topics, enables the connection callback and starts the monitoring
         # thread.
         if self._monitored_topics:
-            # Adds the callback function and starts the monitoring loop.
             self._client.on_message = self._on_message
             self._client.loop_start()
 
@@ -124,7 +123,6 @@ class MQTTCommunication:
         for topic in self._monitored_topics:
             self._client.subscribe(topic=topic, qos=0)
 
-        # Sets the connected flag.
         self._connected = True
 
     def send_data(self, topic: str, payload: str | bytes | bytearray | float | None = None) -> None:
@@ -139,9 +137,9 @@ class MQTTCommunication:
         """
         if not self._connected:
             message = (
-                f"Cannot send data to the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication instance. "
-                f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-                f"sending data."
+                f"Unable to send data to the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication "
+                f"instance. The MQTTCommunication instance is not connected to the MQTT broker, call connect() method "
+                f"before sending data."
             )
             console.error(message=message, error=ConnectionError)
         self._client.publish(topic=topic, payload=payload, qos=0)
@@ -165,9 +163,9 @@ class MQTTCommunication:
         """
         if not self._connected:
             message = (
-                f"Cannot get data from the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication instance. "
-                f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-                f"retrieving data."
+                f"Unable to get data from the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication "
+                f"instance. The MQTTCommunication instance is not connected to the MQTT broker, call connect() method "
+                f"before retrieving data."
             )
             console.error(message=message, error=ConnectionError)
 
@@ -190,5 +188,4 @@ class MQTTCommunication:
         # Disconnects from the client.
         self._client.disconnect()
 
-        # Sets the connection flag.
         self._connected = False

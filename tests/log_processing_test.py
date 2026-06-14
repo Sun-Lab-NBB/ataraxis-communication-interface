@@ -12,6 +12,7 @@ import pytest
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
+from ataraxis_communication_interface.communication import SerialProtocols, SerialPrototypes
 from ataraxis_communication_interface.microcontroller.dataclasses import (
     MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig,
@@ -22,7 +23,6 @@ from ataraxis_communication_interface.microcontroller.dataclasses import (
     MicroControllerSourceData,
     ControllerExtractionConfig,
 )
-from ataraxis_communication_interface.communication import SerialProtocols, SerialPrototypes
 from ataraxis_communication_interface.microcontroller.log_processing import (
     FEATHER_SUFFIX,
     TRACKER_FILENAME,
@@ -129,13 +129,13 @@ def _setup_test_environment(
     # Creates archive with module state and data messages.
     archive_path = log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
-        (2000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (1000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
+        (2000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
         (
             3000,
             _make_module_data_payload(
-                module_type,
-                module_id,
+                module_type=module_type,
+                module_id=module_id,
                 command=2,
                 event=20,
                 prototype_code=SerialPrototypes.ONE_UINT8,
@@ -146,7 +146,7 @@ def _setup_test_environment(
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
 
     # Creates the manifest.
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(
         MicroControllerSourceData(
             id=source_id,
@@ -220,7 +220,7 @@ def test_finalize_accumulator() -> None:
         data_payloads=[None, b"\x01", None],
     )
 
-    result = _finalize_accumulator(accumulator)
+    result = _finalize_accumulator(accumulator=accumulator)
 
     assert isinstance(result, _ExtractedMessages)
     assert result.count == 3
@@ -238,7 +238,7 @@ def test_finalize_accumulator_empty() -> None:
     """Verifies that _finalize_accumulator handles empty accumulators."""
     accumulator = _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
 
-    result = _finalize_accumulator(accumulator)
+    result = _finalize_accumulator(accumulator=accumulator)
 
     assert result.count == 0
     assert len(result.timestamps) == 0
@@ -254,23 +254,23 @@ def test_build_message_dataframe() -> None:
         data_payloads=(b"\x42", None),
     )
 
-    df = _build_message_dataframe(messages)
+    dataframe = _build_message_dataframe(messages=messages)
 
-    assert isinstance(df, pl.DataFrame)
-    assert df.shape == (2, 5)
-    assert df.columns == ["timestamp_us", "command", "event", "dtype", "data"]
-    assert df["timestamp_us"].dtype == pl.UInt64
-    assert df["command"].dtype == pl.UInt8
-    assert df["event"].dtype == pl.UInt8
-    assert df["dtype"].dtype == pl.String
-    assert df["data"].dtype == pl.Binary
-    assert df["timestamp_us"][0] == 100
-    assert df["command"][0] == 1
-    assert df["event"][0] == 10
-    assert df["dtype"][0] == "uint8"
-    assert df["data"][0] == b"\x42"
-    assert df["dtype"][1] is None
-    assert df["data"][1] is None
+    assert isinstance(dataframe, pl.DataFrame)
+    assert dataframe.shape == (2, 5)
+    assert dataframe.columns == ["timestamp_us", "command", "event", "dtype", "data"]
+    assert dataframe["timestamp_us"].dtype == pl.UInt64
+    assert dataframe["command"].dtype == pl.UInt8
+    assert dataframe["event"].dtype == pl.UInt8
+    assert dataframe["dtype"].dtype == pl.String
+    assert dataframe["data"].dtype == pl.Binary
+    assert dataframe["timestamp_us"][0] == 100
+    assert dataframe["command"][0] == 1
+    assert dataframe["event"][0] == 10
+    assert dataframe["dtype"][0] == "uint8"
+    assert dataframe["data"][0] == b"\x42"
+    assert dataframe["dtype"][1] is None
+    assert dataframe["data"][1] is None
 
 
 def test_build_message_dataframe_empty() -> None:
@@ -283,9 +283,9 @@ def test_build_message_dataframe_empty() -> None:
         data_payloads=(),
     )
 
-    df = _build_message_dataframe(messages)
+    dataframe = _build_message_dataframe(messages=messages)
 
-    assert df.shape == (0, 5)
+    assert dataframe.shape == (0, 5)
 
 
 def test_write_module_feather(tmp_path: Path) -> None:
@@ -305,9 +305,9 @@ def test_write_module_feather(tmp_path: Path) -> None:
     feather_path = tmp_path / expected_filename
     assert feather_path.exists()
 
-    df = pl.read_ipc(feather_path)
-    assert df.shape == (2, 5)
-    assert df["timestamp_us"][0] == 100
+    dataframe = pl.read_ipc(feather_path)
+    assert dataframe.shape == (2, 5)
+    assert dataframe["timestamp_us"][0] == 100
 
 
 def test_write_kernel_feather(tmp_path: Path) -> None:
@@ -326,9 +326,9 @@ def test_write_kernel_feather(tmp_path: Path) -> None:
     feather_path = tmp_path / expected_filename
     assert feather_path.exists()
 
-    df = pl.read_ipc(feather_path)
-    assert df.shape == (2, 5)
-    assert df["event"][0] == 5
+    dataframe = pl.read_ipc(feather_path)
+    assert dataframe.shape == (2, 5)
+    assert dataframe["event"][0] == 5
 
 
 def test_find_log_archive(tmp_path: Path) -> None:
@@ -376,13 +376,13 @@ def test_find_log_archive_not_found(tmp_path: Path) -> None:
 
 def test_find_log_archive_multiple(tmp_path: Path) -> None:
     """Verifies that find_log_archive raises ValueError when multiple archives match."""
-    sub1 = tmp_path / "dir1"
-    sub1.mkdir()
-    sub2 = tmp_path / "dir2"
-    sub2.mkdir()
+    first_subdirectory = tmp_path / "dir1"
+    first_subdirectory.mkdir()
+    second_subdirectory = tmp_path / "dir2"
+    second_subdirectory.mkdir()
 
-    _create_test_archive(archive_path=sub1 / f"1{LOG_ARCHIVE_SUFFIX}", source_id=1, messages=[])
-    _create_test_archive(archive_path=sub2 / f"1{LOG_ARCHIVE_SUFFIX}", source_id=1, messages=[])
+    _create_test_archive(archive_path=first_subdirectory / f"1{LOG_ARCHIVE_SUFFIX}", source_id=1, messages=[])
+    _create_test_archive(archive_path=second_subdirectory / f"1{LOG_ARCHIVE_SUFFIX}", source_id=1, messages=[])
 
     message = f"Unable to find log archive for source '1' in '{tmp_path}'. Found 2 matching archives"
     with pytest.raises(ValueError, match=error_format(message)):
@@ -393,7 +393,7 @@ def test_extract_unique_components_basic() -> None:
     """Verifies basic unique component extraction."""
     paths = [Path("/data/day1/recording"), Path("/data/day2/recording")]
 
-    result = _extract_unique_components(paths)
+    result = _extract_unique_components(paths=paths)
 
     assert result == ("day1", "day2")
 
@@ -402,7 +402,7 @@ def test_extract_unique_components_single() -> None:
     """Verifies unique component extraction with a single path."""
     paths = [Path("/data/experiment/session1")]
 
-    result = _extract_unique_components(paths)
+    result = _extract_unique_components(paths=paths)
 
     # All components are unique when there's only one path; selects from the end.
     assert result == ("session1",)
@@ -415,7 +415,7 @@ def test_extract_unique_components_deep_nesting() -> None:
         Path("/data/project/exp2/session/recording"),
     ]
 
-    result = _extract_unique_components(paths)
+    result = _extract_unique_components(paths=paths)
 
     assert result == ("exp1", "exp2")
 
@@ -426,7 +426,7 @@ def test_extract_unique_components_no_unique() -> None:
 
     message = "Unable to extract a unique component from the given path"
     with pytest.raises(RuntimeError, match=error_format(message)):
-        _extract_unique_components(paths)
+        _extract_unique_components(paths=paths)
 
 
 def test_resolve_recording_roots() -> None:
@@ -451,7 +451,7 @@ def test_resolve_recording_roots_deduplicates() -> None:
     assert len(result) == 2
 
 
-def testgenerate_job_ids() -> None:
+def test_generate_job_ids() -> None:
     """Verifies that generate_job_ids returns a mapping of source IDs to hex job IDs."""
     source_ids = ["1", "2", "3"]
 
@@ -462,15 +462,15 @@ def testgenerate_job_ids() -> None:
     # Validates that job IDs are hex strings.
     for job_id in result.values():
         assert isinstance(job_id, str)
-        int(job_id, 16)  # Validates hex format
+        int(job_id, 16)
 
 
-def testgenerate_job_ids_deterministic() -> None:
+def test_generate_job_ids_deterministic() -> None:
     """Verifies that generate_job_ids produces deterministic results."""
-    result1 = generate_job_ids(source_ids=["1", "2"])
-    result2 = generate_job_ids(source_ids=["1", "2"])
+    first_result = generate_job_ids(source_ids=["1", "2"])
+    second_result = generate_job_ids(source_ids=["1", "2"])
 
-    assert result1 == result2
+    assert first_result == second_result
 
 
 def test_execute_job_empty_event_codes(tmp_path: Path) -> None:
@@ -584,16 +584,21 @@ def test_execute_job_sequential_module_only(tmp_path: Path) -> None:
     # Creates archive with module messages.
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
-        (2000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (1000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
+        (2000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
         (
             3000,
             _make_module_data_payload(
-                module_type, module_id, command=2, event=20, prototype_code=SerialPrototypes.ONE_UINT8, data_bytes=[42]
+                module_type=module_type,
+                module_id=module_id,
+                command=2,
+                event=20,
+                prototype_code=SerialPrototypes.ONE_UINT8,
+                data_bytes=[42],
             ),
         ),
         # This message uses event=99 which is NOT in the filter and should be excluded.
-        (4000, _make_module_state_payload(module_type, module_id, command=1, event=99)),
+        (4000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=99)),
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
 
@@ -628,8 +633,8 @@ def test_execute_job_sequential_module_only(tmp_path: Path) -> None:
     feather_path = output_dir / expected_filename
     assert feather_path.exists()
 
-    df = pl.read_ipc(feather_path)
-    assert df.shape[0] == 3  # 3 matching messages (event=10 x2, event=20 x1)
+    dataframe = pl.read_ipc(feather_path)
+    assert dataframe.shape[0] == 3  # 3 matching messages (event=10 x2, event=20 x1)
 
 
 def test_execute_job_sequential_kernel_only(tmp_path: Path) -> None:
@@ -676,8 +681,8 @@ def test_execute_job_sequential_kernel_only(tmp_path: Path) -> None:
     feather_path = output_dir / expected_filename
     assert feather_path.exists()
 
-    df = pl.read_ipc(feather_path)
-    assert df.shape[0] == 3  # 3 matching messages (event=5 x2, event=6 x1)
+    dataframe = pl.read_ipc(feather_path)
+    assert dataframe.shape[0] == 3  # 3 matching messages (event=5 x2, event=6 x1)
 
 
 def test_execute_job_empty_archive(tmp_path: Path) -> None:
@@ -723,9 +728,9 @@ def test_execute_job_module_and_kernel(tmp_path: Path) -> None:
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (1000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
         (2000, _make_kernel_state_payload(command=1, event=5)),
-        (3000, _make_module_state_payload(module_type, module_id, command=2, event=10)),
+        (3000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=2, event=10)),
         (4000, _make_kernel_state_payload(command=2, event=5)),
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -761,10 +766,10 @@ def test_execute_job_module_and_kernel(tmp_path: Path) -> None:
     assert module_feather.exists()
     assert kernel_feather.exists()
 
-    module_df = pl.read_ipc(module_feather)
-    kernel_df = pl.read_ipc(kernel_feather)
-    assert module_df.shape[0] == 2
-    assert kernel_df.shape[0] == 2
+    module_dataframe = pl.read_ipc(module_feather)
+    kernel_dataframe = pl.read_ipc(kernel_feather)
+    assert module_dataframe.shape[0] == 2
+    assert kernel_dataframe.shape[0] == 2
 
 
 def test_execute_job_no_matching_messages(tmp_path: Path) -> None:
@@ -773,7 +778,7 @@ def test_execute_job_no_matching_messages(tmp_path: Path) -> None:
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(1, 2, command=1, event=99)),  # Wrong event.
+        (1000, _make_module_state_payload(module_type=1, module_id=2, command=1, event=99)),  # Wrong event.
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
 
@@ -853,7 +858,7 @@ def test_run_log_processing_pipeline_unregistered_ids(tmp_path: Path) -> None:
     log_dir.mkdir()
 
     # Creates manifest with controller ID=1 only.
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(
         MicroControllerSourceData(id=1, name="ctrl", modules=(ModuleSourceData(module_type=1, module_id=1, name="m"),))
     )
@@ -942,16 +947,21 @@ def test_run_log_processing_pipeline_remote_jobs_share_tracker(tmp_path: Path) -
 
     module_type, module_id = 1, 2
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (1000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
         (
             2000,
             _make_module_data_payload(
-                module_type, module_id, command=2, event=20, prototype_code=SerialPrototypes.ONE_UINT8, data_bytes=[42]
+                module_type=module_type,
+                module_id=module_id,
+                command=2,
+                event=20,
+                prototype_code=SerialPrototypes.ONE_UINT8,
+                data_bytes=[42],
             ),
         ),
     ]
 
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     controllers: list[ControllerExtractionConfig] = []
     for source_id in (1, 2):
         _create_test_archive(
@@ -1024,16 +1034,16 @@ def test_run_log_processing_pipeline_multiple_directories(tmp_path: Path) -> Non
     log_dir.mkdir()
 
     # Creates archives in different subdirectories.
-    sub1 = log_dir / "dir1"
-    sub1.mkdir()
-    sub2 = log_dir / "dir2"
-    sub2.mkdir()
+    first_subdirectory = log_dir / "dir1"
+    first_subdirectory.mkdir()
+    second_subdirectory = log_dir / "dir2"
+    second_subdirectory.mkdir()
 
-    _create_test_archive(archive_path=sub1 / f"1{LOG_ARCHIVE_SUFFIX}", source_id=1, messages=[])
-    _create_test_archive(archive_path=sub2 / f"2{LOG_ARCHIVE_SUFFIX}", source_id=2, messages=[])
+    _create_test_archive(archive_path=first_subdirectory / f"1{LOG_ARCHIVE_SUFFIX}", source_id=1, messages=[])
+    _create_test_archive(archive_path=second_subdirectory / f"2{LOG_ARCHIVE_SUFFIX}", source_id=2, messages=[])
 
     # Creates manifest with both controllers.
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(
         MicroControllerSourceData(
             id=1, name="ctrl_1", modules=(ModuleSourceData(module_type=1, module_id=1, name="m1"),)
@@ -1084,12 +1094,12 @@ def test_run_log_processing_pipeline_with_kernel(tmp_path: Path) -> None:
 
     archive_path = log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (1000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
         (2000, _make_kernel_state_payload(command=1, event=5)),
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
 
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(
         MicroControllerSourceData(
             id=source_id,
@@ -1133,7 +1143,7 @@ def test_execute_job_parallel_processing(tmp_path: Path) -> None:
     # Creates an archive with PARALLEL_PROCESSING_THRESHOLD messages to trigger parallel path.
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
+        (i * 10, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -1168,8 +1178,8 @@ def test_execute_job_parallel_processing(tmp_path: Path) -> None:
     feather_path = output_dir / expected_filename
     assert feather_path.exists()
 
-    df = pl.read_ipc(feather_path)
-    assert df.shape[0] == PARALLEL_PROCESSING_THRESHOLD
+    dataframe = pl.read_ipc(feather_path)
+    assert dataframe.shape[0] == PARALLEL_PROCESSING_THRESHOLD
 
 
 def test_execute_job_parallel_with_progress(tmp_path: Path) -> None:
@@ -1180,7 +1190,7 @@ def test_execute_job_parallel_with_progress(tmp_path: Path) -> None:
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
+        (i * 10, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -1222,7 +1232,7 @@ def test_execute_job_parallel_with_external_executor(tmp_path: Path) -> None:
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
+        (i * 10, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -1296,8 +1306,8 @@ def test_execute_job_parallel_kernel(tmp_path: Path) -> None:
     feather_path = output_dir / expected_filename
     assert feather_path.exists()
 
-    df = pl.read_ipc(feather_path)
-    assert df.shape[0] == PARALLEL_PROCESSING_THRESHOLD
+    dataframe = pl.read_ipc(feather_path)
+    assert dataframe.shape[0] == PARALLEL_PROCESSING_THRESHOLD
 
 
 def test_execute_job_exception_handling(tmp_path: Path) -> None:
@@ -1313,12 +1323,12 @@ def test_execute_job_exception_handling(tmp_path: Path) -> None:
     onset_data = np.array([source_id, 0, 0, 0, 0, 0, 0, 0, 0], dtype=np.uint8)  # 9 bytes header, no payload
     entries[onset_key] = onset_data
     # Valid-looking message key.
-    msg_key = f"{source_id:03d}_00000000000000001000"
-    msg_header = np.empty(9, dtype=np.uint8)
-    msg_header[0] = np.uint8(source_id)
-    msg_header[1:9] = np.frombuffer(np.uint64(1000).tobytes(), dtype=np.uint8)
-    msg_payload = np.array([8, 1, 2, 3, 4], dtype=np.uint8)
-    entries[msg_key] = np.concatenate([msg_header, msg_payload])
+    message_key = f"{source_id:03d}_00000000000000001000"
+    message_header = np.empty(9, dtype=np.uint8)
+    message_header[0] = np.uint8(source_id)
+    message_header[1:9] = np.frombuffer(np.uint64(1000).tobytes(), dtype=np.uint8)
+    message_payload = np.array([8, 1, 2, 3, 4], dtype=np.uint8)
+    entries[message_key] = np.concatenate([message_header, message_payload])
     np.savez(str(archive_path), **entries)
 
     output_dir = tmp_path / "output"
@@ -1357,7 +1367,7 @@ def test_execute_job_parallel_auto_workers(tmp_path: Path) -> None:
 
     archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (i * 10, _make_module_state_payload(module_type, module_id, command=1, event=10))
+        (i * 10, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10))
         for i in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
@@ -1404,11 +1414,11 @@ def test_run_log_processing_pipeline_local_mode_multi_worker(tmp_path: Path) -> 
 
     archive_path = log_dir / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        (1000, _make_module_state_payload(module_type, module_id, command=1, event=10)),
+        (1000, _make_module_state_payload(module_type=module_type, module_id=module_id, command=1, event=10)),
     ]
     _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
 
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(
         MicroControllerSourceData(
             id=source_id,

@@ -60,7 +60,7 @@ def test_microcontroller_source_data() -> None:
 
 def test_microcontroller_source_data_frozen() -> None:
     """Verifies that MicroControllerSourceData instances are immutable."""
-    controller = MicroControllerSourceData(id=10, name="ctrl", modules=())
+    controller = MicroControllerSourceData(id=10, name="controller", modules=())
 
     with pytest.raises(AttributeError):
         controller.id = 20  # type: ignore[misc]
@@ -107,7 +107,7 @@ def test_controller_extraction_config_no_kernel() -> None:
 
 def test_microcontroller_manifest_empty() -> None:
     """Verifies that an empty MicroControllerManifest can be created."""
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
 
     assert manifest.controllers == []
 
@@ -117,7 +117,7 @@ def test_microcontroller_manifest_save_load_roundtrip(tmp_path: Path) -> None:
     modules = (ModuleSourceData(module_type=1, module_id=1, name="encoder"),)
     controller = MicroControllerSourceData(id=10, name="actor_controller", modules=modules)
 
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(controller)
 
     file_path = tmp_path / "manifest.yaml"
@@ -139,13 +139,13 @@ def test_microcontroller_manifest_save_load_roundtrip(tmp_path: Path) -> None:
 def test_microcontroller_manifest_multiple_controllers(tmp_path: Path) -> None:
     """Verifies that a manifest with multiple controllers roundtrips correctly."""
     controller_1 = MicroControllerSourceData(
-        id=1, name="ctrl_1", modules=(ModuleSourceData(module_type=1, module_id=1, name="m1"),)
+        id=1, name="controller_1", modules=(ModuleSourceData(module_type=1, module_id=1, name="module_1"),)
     )
     controller_2 = MicroControllerSourceData(
-        id=2, name="ctrl_2", modules=(ModuleSourceData(module_type=2, module_id=1, name="m2"),)
+        id=2, name="controller_2", modules=(ModuleSourceData(module_type=2, module_id=1, name="module_2"),)
     )
 
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.extend([controller_1, controller_2])
 
     file_path = tmp_path / "manifest.yaml"
@@ -203,7 +203,7 @@ def test_write_microcontroller_manifest_new(tmp_path: Path) -> None:
     """Verifies that write_microcontroller_manifest creates a new manifest file."""
     modules = (ModuleSourceData(module_type=1, module_id=1, name="encoder"),)
     write_microcontroller_manifest(
-        log_directory=tmp_path, controller_id=10, controller_name="actor_ctrl", modules=modules
+        log_directory=tmp_path, controller_id=10, controller_name="actor_controller", modules=modules
     )
 
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
@@ -212,7 +212,7 @@ def test_write_microcontroller_manifest_new(tmp_path: Path) -> None:
     loaded = MicroControllerManifest.load(file_path=manifest_path)
     assert len(loaded.controllers) == 1
     assert loaded.controllers[0].id == 10
-    assert loaded.controllers[0].name == "actor_ctrl"
+    assert loaded.controllers[0].name == "actor_controller"
 
 
 def test_write_microcontroller_manifest_append(tmp_path: Path) -> None:
@@ -221,10 +221,10 @@ def test_write_microcontroller_manifest_append(tmp_path: Path) -> None:
     modules_2 = (ModuleSourceData(module_type=2, module_id=1, name="lick_sensor"),)
 
     write_microcontroller_manifest(
-        log_directory=tmp_path, controller_id=10, controller_name="ctrl_1", modules=modules_1
+        log_directory=tmp_path, controller_id=10, controller_name="controller_1", modules=modules_1
     )
     write_microcontroller_manifest(
-        log_directory=tmp_path, controller_id=20, controller_name="ctrl_2", modules=modules_2
+        log_directory=tmp_path, controller_id=20, controller_name="controller_2", modules=modules_2
     )
 
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
@@ -241,8 +241,8 @@ def test_create_extraction_config(tmp_path: Path) -> None:
         ModuleSourceData(module_type=1, module_id=1, name="encoder"),
         ModuleSourceData(module_type=2, module_id=1, name="lick_sensor"),
     )
-    manifest = MicroControllerManifest()
-    manifest.controllers.append(MicroControllerSourceData(id=10, name="ctrl", modules=modules))
+    manifest = MicroControllerManifest(controllers=[])
+    manifest.controllers.append(MicroControllerSourceData(id=10, name="controller", modules=modules))
 
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
     manifest.save(file_path=manifest_path)
@@ -260,15 +260,15 @@ def test_create_extraction_config(tmp_path: Path) -> None:
 
 def test_create_extraction_config_multiple_controllers(tmp_path: Path) -> None:
     """Verifies that create_extraction_config handles multiple controllers."""
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest.controllers.append(
         MicroControllerSourceData(
-            id=1, name="ctrl_1", modules=(ModuleSourceData(module_type=1, module_id=1, name="m1"),)
+            id=1, name="controller_1", modules=(ModuleSourceData(module_type=1, module_id=1, name="module_1"),)
         )
     )
     manifest.controllers.append(
         MicroControllerSourceData(
-            id=2, name="ctrl_2", modules=(ModuleSourceData(module_type=2, module_id=1, name="m2"),)
+            id=2, name="controller_2", modules=(ModuleSourceData(module_type=2, module_id=1, name="module_2"),)
         )
     )
 
@@ -293,7 +293,7 @@ def test_create_extraction_config_missing_file(tmp_path: Path) -> None:
 
 def test_create_extraction_config_empty_manifest(tmp_path: Path) -> None:
     """Verifies that create_extraction_config raises ValueError for an empty manifest."""
-    manifest = MicroControllerManifest()
+    manifest = MicroControllerManifest(controllers=[])
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
     manifest.save(file_path=manifest_path)
 

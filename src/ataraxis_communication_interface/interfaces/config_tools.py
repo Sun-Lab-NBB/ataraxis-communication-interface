@@ -38,7 +38,6 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
     if not path.is_file():
         return {"error": f"Path is not a file: {config_path}"}
 
-    # Loads the extraction configuration from the YAML file.
     try:
         config = ExtractionConfig.load(file_path=path)
     except Exception as error:  # noqa: BLE001
@@ -130,7 +129,6 @@ def write_extraction_config_tool(config_path: str, controllers: list[dict[str, A
     except (KeyError, TypeError, ValueError) as error:
         return {"error": f"Invalid controller data: {error}"}
 
-    # Serializes the assembled config to the specified YAML file path.
     output = Path(config_path)
 
     try:
@@ -194,7 +192,6 @@ def validate_extraction_config_tool(
         if not has_modules and not has_kernel:
             errors.append(f"{controller_label}: No modules and no kernel configured. At least one is required.")
 
-        # Validates module entries.
         seen_module_keys: set[tuple[int, int]] = set()
         for module in controller.modules:
             total_modules += 1
@@ -210,7 +207,6 @@ def validate_extraction_config_tool(
             elif len(module.event_codes) != len(set(module.event_codes)):
                 errors.append(f"{module_label}: event_codes contains duplicates.")
 
-        # Validates kernel entry.
         if controller.kernel is not None:
             kernel_label = f"{controller_label}, kernel"
             if not controller.kernel.event_codes:
@@ -240,7 +236,9 @@ def validate_extraction_config_tool(
 
                 for manifest_entry in manifest.controllers:
                     manifest_controller_ids.add(manifest_entry.id)
-                    manifest_modules[manifest_entry.id] = {(m.module_type, m.module_id) for m in manifest_entry.modules}
+                    manifest_modules[manifest_entry.id] = {
+                        (module.module_type, module.module_id) for module in manifest_entry.modules
+                    }
 
                 # Validates each config controller against the manifest.
                 for config_controller in config.controllers:
@@ -269,6 +267,6 @@ def validate_extraction_config_tool(
         "summary": {
             "total_controllers": len(config.controllers),
             "total_modules": total_modules,
-            "controllers_with_kernel": sum(1 for c in config.controllers if c.kernel is not None),
+            "controllers_with_kernel": sum(1 for controller in config.controllers if controller.kernel is not None),
         },
     }
