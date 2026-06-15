@@ -64,7 +64,7 @@ def _create_archive_entry(source_id: int, elapsed_us: int, payload: NDArray[np.u
 
 def _create_onset_entry(source_id: int, onset_us: int) -> tuple[str, NDArray[np.uint8]]:
     """Creates the onset timestamp entry for a log archive."""
-    onset_payload = np.frombuffer(np.int64(onset_us).tobytes(), dtype=np.uint8)
+    onset_payload = np.frombuffer(np.uint64(onset_us).tobytes(), dtype=np.uint8)
     return _create_archive_entry(source_id=source_id, elapsed_us=0, payload=onset_payload)
 
 
