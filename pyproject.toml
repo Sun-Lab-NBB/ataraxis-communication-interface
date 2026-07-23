@@ -45,7 +45,7 @@ dependencies = [
     # Ataraxis Libraries
     "ataraxis-time>=6,<7",
     "ataraxis-base-utilities>=6,<7",
-    "ataraxis-data-structures>=6,<7",
+    "ataraxis-data-structures>=6.1.1,<7",
     "ataraxis-transport-layer-pc>=4,<5",
 
     # Data Processing

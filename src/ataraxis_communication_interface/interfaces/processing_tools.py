@@ -25,7 +25,6 @@ from ..microcontroller import (
     EXTRACTION_JOB_NAME,
     MICROCONTROLLER_DATA_DIRECTORY,
     ExtractionConfig,
-    prepare_tracker,
     generate_job_ids,
 )
 
@@ -138,11 +137,11 @@ def prepare_log_processing_batch_tool(
             }
             total_jobs += len(tracker_status.get("jobs", []))
         else:
-            # Initializes a new tracker with jobs for the filtered source IDs. Uses prepare_tracker so the MCP
+            # Initializes a new tracker with jobs for the filtered source IDs. Uses align_jobs so the MCP
             # batch-preparation path inherits the same regeneration logic as run_log_processing_pipeline.
             tracker = ProcessingTracker(file_path=tracker_path)
             tracker_jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in filtered_ids]
-            prepare_tracker(tracker=tracker, jobs=tracker_jobs, universe=tracker_jobs)
+            tracker.align_jobs(jobs=tracker_jobs, universe=tracker_jobs)
             job_ids = generate_job_ids(source_ids=filtered_ids)
 
             jobs: list[dict[str, str]] = [
@@ -311,7 +310,7 @@ def get_log_processing_status_tool() -> dict[str, Any]:
 
     for tracker_path, path_jobs in _group_jobs_by_tracker(state=state).items():
         try:
-            tracker = ProcessingTracker.from_yaml(file_path=tracker_path)
+            registry = ProcessingTracker(file_path=tracker_path).snapshot()
         except Exception:  # noqa: BLE001
             job_details.extend(
                 {"job_id": job.job_id, "source_id": job.source_id, "status": "UNKNOWN"} for job in path_jobs
@@ -319,8 +318,8 @@ def get_log_processing_status_tool() -> dict[str, Any]:
             continue
 
         for job in path_jobs:
-            if job.job_id in tracker.jobs:
-                job_state = tracker.jobs[job.job_id]
+            if job.job_id in registry:
+                job_state = registry[job.job_id]
                 status = job_state.status
 
                 if status == ProcessingStatus.SUCCEEDED:
@@ -384,15 +383,15 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
 
     for tracker_path, path_jobs in _group_jobs_by_tracker(state=state).items():
         try:
-            tracker = ProcessingTracker.from_yaml(file_path=tracker_path)
+            registry = ProcessingTracker(file_path=tracker_path).snapshot()
         except Exception:  # noqa: BLE001, S112
             continue
 
         for job in path_jobs:
-            if job.job_id not in tracker.jobs:
+            if job.job_id not in registry:
                 continue
 
-            job_info = tracker.jobs[job.job_id]
+            job_info = registry[job.job_id]
             entry: dict[str, Any] = {"job_id": job.job_id, "source_id": job.source_id}
 
             if job_info.executor_id is not None:
@@ -495,8 +494,8 @@ def cancel_log_processing_tool() -> dict[str, Any]:
 
     for tracker_path in tracker_paths:
         try:
-            tracker = ProcessingTracker.from_yaml(file_path=tracker_path)
-            for job_state in tracker.jobs.values():
+            registry = ProcessingTracker(file_path=tracker_path).snapshot()
+            for job_state in registry.values():
                 if job_state.status == ProcessingStatus.SUCCEEDED:
                     succeeded += 1
                 elif job_state.status == ProcessingStatus.FAILED:
@@ -534,36 +533,24 @@ def reset_log_processing_jobs_tool(
     if not path.exists():
         return {"error": f"Tracker file not found: {tracker_path}"}
 
+    tracker = ProcessingTracker(file_path=path)
     try:
-        tracker = ProcessingTracker.from_yaml(file_path=path)
+        registry = tracker.snapshot()
     except Exception as error:  # noqa: BLE001
         return {"error": f"Unable to read tracker: {error}"}
 
-    # Identifies which job IDs to reset based on source_ids filter.
-    target_ids: set[str] = set()
+    # Identifies which job IDs to reset based on the source_ids filter.
     if source_ids is not None:
         source_id_set = set(source_ids)
-        for job_id, job_state in tracker.jobs.items():
-            if job_state.specifier in source_id_set:
-                target_ids.add(job_id)
+        target_ids = [job_id for job_id, job_state in registry.items() if job_state.specifier in source_id_set]
     else:
-        target_ids = set(tracker.jobs.keys())
+        target_ids = list(registry)
 
     if not target_ids:
         return {"reset": False, "message": "No matching jobs found to reset."}
 
-    # Collects (job_name, specifier) tuples for the jobs to reset.
-    reset_jobs: list[tuple[str, str]] = [
-        (tracker.jobs[job_id].job_name, tracker.jobs[job_id].specifier) for job_id in target_ids
-    ]
-
-    # Removes target jobs and re-initializes them.
-    for job_id in target_ids:
-        del tracker.jobs[job_id]
-    tracker.to_yaml(file_path=path)
-
-    reset_tracker = ProcessingTracker(file_path=path)
-    reset_tracker.initialize_jobs(jobs=reset_jobs)
+    # Resets the targeted jobs back to SCHEDULED under the tracker's lock, leaving every other job untouched.
+    tracker.reset_jobs(job_ids=target_ids)
 
     # Reads back the updated state for the response.
     try:

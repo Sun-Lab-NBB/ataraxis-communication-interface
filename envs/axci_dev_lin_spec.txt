@@ -142,7 +142,6 @@ https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
 
 
 https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
-https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tomli-w-1.2.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tox-4.55.1-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tox-uv-1.29.0-pyhd8ed1ab_0.conda

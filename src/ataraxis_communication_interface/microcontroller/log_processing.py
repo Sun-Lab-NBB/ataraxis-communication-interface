@@ -245,7 +245,7 @@ def run_log_processing_pipeline(
             )
             console.error(message=message, error=ValueError)
 
-        prepare_tracker(tracker=tracker, jobs=universe, universe=universe)
+        tracker.align_jobs(jobs=universe, universe=universe)
 
         source_id = id_to_source[job_id]
         execute_job(
@@ -275,7 +275,7 @@ def run_log_processing_pipeline(
 
         # Aligns the tracker with the requested jobs while detecting foreign entries against the full universe.
         jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
-        prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
+        tracker.align_jobs(jobs=jobs, universe=universe)
 
         # Resolves workers once and creates a shared ProcessPoolExecutor to reuse across all jobs, avoiding
         # repeated process pool creation.
@@ -605,62 +605,6 @@ def find_log_archive(log_directory: Path, source_id: str) -> Path:
         console.error(message=message, error=ValueError)
 
     return matches[0]
-
-
-def prepare_tracker(tracker: ProcessingTracker, jobs: list[tuple[str, str]], universe: list[tuple[str, str]]) -> None:
-    """Aligns the processing tracker's job registry with the jobs requested for the current pipeline invocation.
-
-    Notes:
-        Foreign entries are detected by comparing the tracker's existing job IDs against the configuration-derived
-        universe of all possible jobs for the current extraction config, not against the invocation's requested
-        subset. This lets a subset invocation or a single concurrent remote job align the tracker without wiping
-        previously-completed state for sibling jobs. Any existing entries that are not part of the universe are
-        treated as architectural drift (the extraction config itself has changed since the tracker was last
-        written) and surfaced through a warning before the tracker is rebuilt.
-
-        If the tracker file does not yet exist on disk, the helper initializes it with the requested jobs. If the
-        file exists and contains job IDs that are not part of the universe, those entries are classified as
-        foreign and the helper emits a warning before resetting and reinitializing the tracker. If the file
-        exists with only universe-valid entries but is missing some requested jobs, the helper performs an
-        additive ``initialize_jobs`` call that registers the missing entries without clobbering any existing
-        state. If the file already contains every requested job, the helper is a no-op, which keeps
-        ``initialize_jobs`` from emitting duplicate-entry warnings for the fully-aligned case.
-
-    Args:
-        tracker: The ProcessingTracker instance bound to the microcontroller_data output directory.
-        jobs: The list of (job_name, specifier) tuples the current pipeline invocation intends to execute.
-        universe: The list of (job_name, specifier) tuples enumerating every job the extraction config could
-            produce. Used exclusively for foreign-entry detection.
-    """
-    universe_ids = {
-        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in universe
-    }
-    requested_ids = {
-        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in jobs
-    }
-
-    if not tracker.file_path.exists():
-        tracker.initialize_jobs(jobs=jobs)
-        return
-
-    existing_ids = set(tracker.find_jobs(job_name="").keys())
-    foreign_ids = existing_ids - universe_ids
-
-    if foreign_ids:
-        console.echo(
-            message=(
-                f"The processing tracker at '{tracker.file_path}' contains {len(foreign_ids)} job entries "
-                f"that are not part of the current extraction config's job universe. Resetting and "
-                f"reinitializing the tracker to match the requested jobs. Foreign job IDs: {sorted(foreign_ids)}."
-            ),
-            level=LogLevel.WARNING,
-        )
-        tracker.reset()
-        tracker.initialize_jobs(jobs=jobs)
-        return
-
-    if not requested_ids.issubset(existing_ids):
-        tracker.initialize_jobs(jobs=jobs)
 
 
 def generate_job_ids(source_ids: list[str]) -> dict[str, str]:
