@@ -23,7 +23,7 @@ def read_tracker_status(tracker_path: Path) -> dict[str, Any]:
     Returns:
         A dictionary containing per-job status details and summary counts.
     """
-    tracker = ProcessingTracker.from_yaml(file_path=tracker_path)
+    registry = ProcessingTracker(file_path=tracker_path).snapshot()
 
     job_details: list[dict[str, Any]] = []
     succeeded_count = 0
@@ -31,7 +31,7 @@ def read_tracker_status(tracker_path: Path) -> dict[str, Any]:
     running_count = 0
     scheduled_count = 0
 
-    for job_id, job_state in tracker.jobs.items():
+    for job_id, job_state in registry.items():
         source_id = job_state.specifier or job_id[:8]
         status = job_state.status
 
@@ -52,7 +52,7 @@ def read_tracker_status(tracker_path: Path) -> dict[str, Any]:
     return {
         "jobs": job_details,
         "summary": {
-            "total": len(tracker.jobs),
+            "total": len(registry),
             "succeeded": succeeded_count,
             "failed": failed_count,
             "running": running_count,

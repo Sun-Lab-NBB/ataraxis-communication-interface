@@ -18,7 +18,6 @@ from ..microcontroller import (
     EXTRACTION_JOB_NAME as EXTRACTION_JOB_NAME,
     MICROCONTROLLER_DATA_DIRECTORY as MICROCONTROLLER_DATA_DIRECTORY,
     ExtractionConfig as ExtractionConfig,
-    prepare_tracker as prepare_tracker,
     generate_job_ids as generate_job_ids,
 )
 

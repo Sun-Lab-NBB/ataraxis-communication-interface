@@ -277,9 +277,9 @@ def _group_worker(jobs: list[PendingJob], workers: int, state: JobExecutionState
 
             # Failsafe: if the tracker was not updated to a terminal state, marks the job as failed.
             try:
-                reloaded = ProcessingTracker.from_yaml(file_path=job.tracker_path)
-                if job.job_id in reloaded.jobs:
-                    status = reloaded.jobs[job.job_id].status
+                reloaded = ProcessingTracker(file_path=job.tracker_path).snapshot()
+                if job.job_id in reloaded:
+                    status = reloaded[job.job_id].status
                     if status not in (ProcessingStatus.SUCCEEDED, ProcessingStatus.FAILED):
                         tracker.fail_job(
                             job_id=job.job_id, error_message="Job terminated without updating tracker status."
