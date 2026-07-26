@@ -648,6 +648,9 @@ def _process_message_batch(
     Returns:
         A tuple of (module_accumulators, kernel_accumulator). module_accumulators maps module (type, id) tuples
         to column accumulators. kernel_accumulator stores kernel messages in chronological order.
+
+    Raises:
+        ValueError: If a data message carries a data payload of a different size than its prototype code declares.
     """
     # Pre-creates columnar accumulators for each requested module and the kernel.
     extract_modules = module_filters is not None
@@ -688,9 +691,22 @@ def _process_message_batch(
             dtype_str: str | None = None
             data_payload: bytes | None = None
             if protocol == SerialProtocols.MODULE_DATA:
-                dtype_str = SerialPrototypes.get_dtype_for_code(code=int(payload[5]))
+                prototype_code = int(payload[5])
+                dtype_str = SerialPrototypes.get_dtype_for_code(code=prototype_code)
                 if dtype_str is not None:
                     data_payload = payload[6:].tobytes()
+
+                    # The prototype code declares both the dtype and the width of the data object that follows it, so
+                    # a payload of any other width cannot be decoded through the dtype stored alongside it.
+                    declared_size = SerialPrototypes.get_byte_size_for_code(code=prototype_code)
+                    if declared_size is not None and len(data_payload) != declared_size:
+                        message = (
+                            f"Unable to extract the data message logged by the module {current_module[0]} "
+                            f"{current_module[1]} to '{log_path}'. The message declares the prototype code "
+                            f"{prototype_code}, whose data object occupies {declared_size} bytes, but it carries a "
+                            f"{len(data_payload)}-byte data payload."
+                        )
+                        console.error(message=message, error=ValueError)
 
             # Appends directly to the module's columnar accumulator.
             accumulator = module_data[current_module]

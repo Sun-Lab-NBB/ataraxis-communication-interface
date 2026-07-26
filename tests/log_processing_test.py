@@ -774,6 +774,118 @@ def test_execute_job_empty_archive(tmp_path: Path) -> None:
     assert len(feather_files) == 0
 
 
+def test_execute_job_oversized_data_payload(tmp_path: Path) -> None:
+    """Verifies that extraction rejects a data payload wider than its prototype code declares."""
+    source_id = 1
+    module_type = 1
+    module_id = 2
+
+    archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
+    # Prototype code 7 (kOneUint16) declares a 2-byte data object, so a 4-byte payload cannot be decoded through it.
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
+        (
+            1000,
+            _make_module_data_payload(
+                module_type=module_type,
+                module_id=module_id,
+                command=1,
+                event=10,
+                prototype_code=7,
+                data_bytes=[0, 0, 0, 0],
+            ),
+        ),
+    ]
+    _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    tracker = ProcessingTracker(file_path=output_dir / TRACKER_FILENAME)
+    tracker.initialize_jobs(jobs=[("microcontroller_data_extraction", str(source_id))])
+    job_id = ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier=str(source_id))
+
+    config = ControllerExtractionConfig(
+        controller_id=source_id,
+        modules=(ModuleExtractionConfig(module_type=module_type, module_id=module_id, event_codes=(10,)),),
+        kernel=None,
+    )
+
+    with pytest.raises(ValueError, match="4-byte data payload"):
+        execute_job(
+            log_path=archive_path,
+            output_directory=output_dir,
+            source_id=str(source_id),
+            job_id=job_id,
+            workers=1,
+            tracker=tracker,
+            controller_config=config,
+        )
+
+
+def test_execute_job_matching_data_payload(tmp_path: Path) -> None:
+    """Verifies that extraction accepts a data payload of the width its prototype code declares."""
+    source_id = 1
+    module_type = 1
+    module_id = 2
+
+    archive_path = tmp_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
+    messages: list[tuple[int, NDArray[np.uint8]]] = [
+        (
+            1000,
+            _make_module_data_payload(
+                module_type=module_type,
+                module_id=module_id,
+                command=1,
+                event=10,
+                prototype_code=7,
+                data_bytes=[172, 5],
+            ),
+        ),
+    ]
+    _create_test_archive(archive_path=archive_path, source_id=source_id, messages=messages)
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    tracker = ProcessingTracker(file_path=output_dir / TRACKER_FILENAME)
+    tracker.initialize_jobs(jobs=[("microcontroller_data_extraction", str(source_id))])
+    job_id = ProcessingTracker.generate_job_id(job_name="microcontroller_data_extraction", specifier=str(source_id))
+
+    config = ControllerExtractionConfig(
+        controller_id=source_id,
+        modules=(ModuleExtractionConfig(module_type=module_type, module_id=module_id, event_codes=(10,)),),
+        kernel=None,
+    )
+
+    execute_job(
+        log_path=archive_path,
+        output_directory=output_dir,
+        source_id=str(source_id),
+        job_id=job_id,
+        workers=1,
+        tracker=tracker,
+        controller_config=config,
+    )
+
+    feather_path = (
+        output_dir / f"{CONTROLLER_FEATHER_PREFIX}{source_id}{MODULE_FEATHER_INFIX}{module_type}_{module_id}"
+        f"{FEATHER_SUFFIX}"
+    )
+    extracted = pl.read_ipc(feather_path)
+    assert extracted.height == 1
+    assert extracted["dtype"][0] == "uint16"
+    assert extracted["data"][0] == b"\xac\x05"
+
+
+def test_prototype_byte_sizes_match_prototypes() -> None:
+    """Verifies that every prototype code reports the byte size of the object its factory produces."""
+    for prototype_member in SerialPrototypes:
+        code = int(prototype_member.value)
+        prototype = SerialPrototypes.get_prototype_for_code(code=np.uint8(code))
+        assert prototype is not None
+        assert SerialPrototypes.get_byte_size_for_code(code=code) == np.asarray(prototype).nbytes
+
+    assert SerialPrototypes.get_byte_size_for_code(code=0) is None
+
+
 def test_execute_job_module_and_kernel(tmp_path: Path) -> None:
     """Verifies execute_job with both module and kernel extraction."""
     source_id = 1

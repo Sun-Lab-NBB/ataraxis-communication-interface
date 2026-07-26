@@ -650,9 +650,9 @@ class MicroControllerInterface:  # pragma: no cover
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
         # data between the communication process and the main process managing the overall runtime.
         self._input_queue: MPQueue = self._mp_manager.Queue()  # type: ignore[assignment, type-arg]
-        self._terminator_array: None | SharedMemoryArray = None
-        self._communication_process: None | Process = None
-        self._watchdog_thread: None | Thread = None
+        self._terminator_array: SharedMemoryArray | None = None
+        self._communication_process: Process | None = None
+        self._watchdog_thread: Thread | None = None
 
         # Initializes class attributes used to track the current microcontroller configuration and communication
         # runtime parameters.
@@ -1028,7 +1028,7 @@ class MicroControllerInterface:  # pragma: no cover
             message = (
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{incoming_data.command}. Error code: {incoming_data.event}. The hardware module with type "
-                f"{incoming_data.data_object[0]} and id {incoming_data.data_object[1]} has failed its setup "  # type: ignore[index]
+                f"{incoming_data.data_object[0]} and id {incoming_data.data_object[1]} has failed its setup "  # type: ignore[call-overload]
                 f"sequence. Firmware re-upload is required to restart the controller."
             )
             console.error(message=message, error=RuntimeError)
@@ -1040,8 +1040,8 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{incoming_data.command}. Error code: {incoming_data.event}. "
                 f"The microcontroller was not able to receive (parse) the PC-sent data and had to "
                 f"abort the reception. Last Communication status code was "
-                f"{incoming_data.data_object[0]} and last TransportLayer status code was "  # type: ignore[index]
-                f"{incoming_data.data_object[1]}. Overall, this indicates broader issues with the "  # type: ignore[index]
+                f"{incoming_data.data_object[0]} and last TransportLayer status code was "  # type: ignore[call-overload]
+                f"{incoming_data.data_object[1]}. Overall, this indicates broader issues with the "  # type: ignore[call-overload]
                 f"microcontroller-PC communication."
             )
             console.error(message=message, error=RuntimeError)
@@ -1052,8 +1052,8 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{incoming_data.command}. Error code: {incoming_data.event}. "
                 f"The microcontroller's Kernel class was not able to send data to the PC and had to abort "
-                f"the transmission. Last Communication status code was {incoming_data.data_object[0]} "  # type: ignore[index]
-                f"and last TransportLayer status code was {incoming_data.data_object[1]}. Overall, "  # type: ignore[index]
+                f"the transmission. Last Communication status code was {incoming_data.data_object[0]} "  # type: ignore[call-overload]
+                f"and last TransportLayer status code was {incoming_data.data_object[1]}. Overall, "  # type: ignore[call-overload]
                 f"this indicates broader issues with the microcontroller-PC communication."
             )
             console.error(message=message, error=RuntimeError)
@@ -1066,7 +1066,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{incoming_data.command}. Error code: {incoming_data.event}. "
                 f"The microcontroller received a message with an invalid (unsupported) message protocol "
-                f"code {incoming_data.data_object[0]}."  # type: ignore[index]
+                f"code {incoming_data.data_object[0]}."  # type: ignore[call-overload]
             )
             console.error(message=message, error=RuntimeError)
 
@@ -1078,8 +1078,8 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{incoming_data.command}. Error code: {incoming_data.event}. "
                 f"The microcontroller was not able to apply new runtime parameters received from the PC to "
-                f"the target hardware module with type {incoming_data.data_object[0]} and id "  # type: ignore[index]
-                f"{incoming_data.data_object[1]}."  # type: ignore[index]
+                f"the target hardware module with type {incoming_data.data_object[0]} and id "  # type: ignore[call-overload]
+                f"{incoming_data.data_object[1]}."  # type: ignore[call-overload]
             )
             console.error(message=message, error=RuntimeError)
 
@@ -1102,7 +1102,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"{incoming_data.command}. Error code: {incoming_data.event}. "
                 f"The microcontroller was not able to find the module addressed by the incoming command or "
                 f"parameters message. The target hardware module with type "
-                f"{incoming_data.data_object[0]} and id {incoming_data.data_object[1]} "  # type: ignore[index]
+                f"{incoming_data.data_object[0]} and id {incoming_data.data_object[1]} "  # type: ignore[call-overload]
                 f"does not exist for that microcontroller."
             )
             console.error(message=message, error=RuntimeError)
@@ -1136,8 +1136,8 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The module with type {incoming_data.module_type} and id {incoming_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {incoming_data.command}. "
                 f"Error code: {incoming_data.event}. The module was not able to send data to the PC and had to "
-                f"abort the transmission. Last Communication status code was {incoming_data.data_object[0]} "  # type: ignore[index]
-                f"and last TransportLayer status code was {incoming_data.data_object[1]}. Overall, "  # type: ignore[index]
+                f"abort the transmission. Last Communication status code was {incoming_data.data_object[0]} "  # type: ignore[call-overload]
+                f"and last TransportLayer status code was {incoming_data.data_object[1]}. Overall, "  # type: ignore[call-overload]
                 f"this indicates broader issues with the microcontroller-PC communication."
             )
             console.error(message=message, error=RuntimeError)

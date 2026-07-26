@@ -30,6 +30,7 @@ type PrototypeType = (
 )
 _PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]]
 _PROTOTYPE_DTYPE_STRINGS: dict[int, str]
+_PROTOTYPE_BYTE_SIZES: dict[int, int]
 
 class SerialProtocols(IntEnum):
     UNDEFINED = 0
@@ -304,5 +305,7 @@ class SerialPrototypes(IntEnum):
     def get_prototype(self) -> PrototypeType: ...
     @staticmethod
     def get_prototype_for_code(code: np.uint8) -> PrototypeType | None: ...
+    @staticmethod
+    def get_byte_size_for_code(code: int) -> int | None: ...
     @staticmethod
     def get_dtype_for_code(code: int) -> str | None: ...

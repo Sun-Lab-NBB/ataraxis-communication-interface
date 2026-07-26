@@ -114,6 +114,8 @@ lint.ignore = [
     "PLR0912", # Sometimes complex functions are necessary
     "PLR0915", # Sometimes complex type definitions are necessary
     "PLR0911", # Sometimes complex return graphs are necessary
+    "PLR0917", # Call sites pass keyword arguments, so the positional count is immaterial
+    "CPY001",  # The license is declared in the LICENSE file and the project metadata
     "COM812",  # Conflicts with the formatter
     "ISC001",  # Conflicts with the formatter
     "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771

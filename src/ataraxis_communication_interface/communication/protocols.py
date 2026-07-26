@@ -353,6 +353,11 @@ _PROTOTYPE_DTYPE_STRINGS: dict[int, str] = {
 """Maps prototype integer codes to their numpy dtype strings (e.g., ``'float32'``, ``'uint16'``). Built once at module
 load by calling each factory and caching the dtype, avoiding per-message object allocation during log processing."""
 
+_PROTOTYPE_BYTE_SIZES: dict[int, int] = {code: int(factory().nbytes) for code, factory in _PROTOTYPE_FACTORIES.items()}
+"""Maps prototype integer codes to the byte size of the data object each code declares. Built once at module load
+alongside the dtype strings, so log processing can check a message's data payload against the size its prototype
+code promises without allocating a prototype object."""
+
 
 class SerialProtocols(IntEnum):
     """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
@@ -1043,6 +1048,21 @@ class SerialPrototypes(IntEnum):
         if factory is None:
             return None
         return factory()
+
+    @staticmethod
+    def get_byte_size_for_code(code: int) -> int | None:
+        """Returns the byte size of the data object associated with the input prototype code.
+
+        Uses a pre-built lookup table to avoid instantiating a prototype object, making this suitable for hot paths
+        where only the size is needed (e.g., validating a logged data payload against its declared prototype).
+
+        Args:
+            code: The prototype integer code for which to retrieve the data object's byte size.
+
+        Returns:
+            The byte size of the data object the code declares, or None if the code is not recognized.
+        """
+        return _PROTOTYPE_BYTE_SIZES.get(code)
 
     @staticmethod
     def get_dtype_for_code(code: int) -> str | None:
