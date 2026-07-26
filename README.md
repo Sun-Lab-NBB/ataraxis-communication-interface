@@ -470,6 +470,7 @@ This example demonstrates the implementation of the processing method to send th
 ```python
 from ataraxis_communication_interface import ModuleData, ModuleState
 
+
 def process_received_data(self, message: ModuleData | ModuleState) -> None:
     # Event codes 52 and 53 are used to communicate the current state of the output pin managed by the example
     # module. State messages transmit these event-codes, so there is no additional data to parse other than

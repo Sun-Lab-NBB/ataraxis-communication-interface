@@ -283,7 +283,9 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   `create_extraction_config()` builds a precursor config with empty event codes.
 - **Log processing** (`microcontroller/log_processing.py`): `run_log_processing_pipeline()` supports local (all jobs)
   and remote (single job by ID) modes; the `config` parameter is a `Path` loaded internally; the parallelization
-  threshold is 2000 messages; `ProcessingTracker` manages job lifecycle via YAML state files.
+  threshold is 2000 messages; `ProcessingTracker` manages job lifecycle via YAML state files. Extraction rejects any
+  data message whose payload size disagrees with the size its prototype code declares, because the extracted feather
+  stores that prototype's dtype alongside the raw payload bytes and a mismatched pair cannot be decoded.
 - **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors; the `config`
   subgroup demonstrates nested Click command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via

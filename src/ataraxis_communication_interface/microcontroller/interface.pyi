@@ -136,9 +136,9 @@ class MicroControllerInterface:
     _logger_queue: MPQueue
     _log_directory: Path
     _input_queue: MPQueue
-    _terminator_array: None | SharedMemoryArray
-    _communication_process: None | Process
-    _watchdog_thread: None | Thread
+    _terminator_array: SharedMemoryArray | None
+    _communication_process: Process | None
+    _watchdog_thread: Thread | None
     _keepalive_interval: Incomplete
     def __init__(
         self,

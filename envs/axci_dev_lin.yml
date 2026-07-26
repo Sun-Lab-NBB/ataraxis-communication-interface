@@ -59,7 +59,7 @@ dependencies:
     - ast_serialize==0.5.0
     - ataraxis-automation==8.1.1
     - ataraxis-base-utilities==6.0.1
-    - ataraxis-data-structures==6.0.0
+    - ataraxis-data-structures==6.1.1
     - ataraxis-time==6.0.1
     - ataraxis-transport-layer-pc==4.0.0
     - attrs==26.1.0
