@@ -1066,7 +1066,7 @@ class MicroControllerInterface:  # pragma: no cover
                 f"The microcontroller {controller_id} encountered an error when executing command "
                 f"{incoming_data.command}. Error code: {incoming_data.event}. "
                 f"The microcontroller received a message with an invalid (unsupported) message protocol "
-                f"code {incoming_data.data_object[0]}."  # type: ignore[call-overload]
+                f"code {incoming_data.data_object}."
             )
             console.error(message=message, error=RuntimeError)
 
