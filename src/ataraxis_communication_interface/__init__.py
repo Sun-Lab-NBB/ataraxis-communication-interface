@@ -13,6 +13,7 @@ from .communication import (
     ModuleState,
     MQTTCommunication,
 )
+from .orchestration import run_log_processing_pipeline
 from .microcontroller import (
     EXTRACTION_CONFIGURATION_FILENAME,
     MICROCONTROLLER_MANIFEST_FILENAME,
@@ -26,7 +27,6 @@ from .microcontroller import (
     MicroControllerSourceData,
     ControllerExtractionConfig,
     create_extraction_config,
-    run_log_processing_pipeline,
     write_microcontroller_manifest,
 )
 

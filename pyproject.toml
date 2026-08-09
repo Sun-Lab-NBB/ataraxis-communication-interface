@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metadata section. Provides the general ID information about the project.
 [project]
 name = "ataraxis-communication-interface"
-version = "6.0.1"
+version = "7.0.0"
 description = "Provides the centralized interface for exchanging commands and data between Arduino and Teensy microcontrollers and host-computers."
 readme = "README.md"
 license = "Apache-2.0"
@@ -43,14 +43,17 @@ classifiers = [
 # Runtime project dependencies.
 dependencies = [
     # Ataraxis Libraries
-    "ataraxis-time>=6,<7",
-    "ataraxis-base-utilities>=6,<7",
-    "ataraxis-data-structures>=6.1.1,<7",
-    "ataraxis-transport-layer-pc>=4,<5",
+    "ataraxis-time>=7,<8",
+    "ataraxis-base-utilities>=7,<8",
+    "ataraxis-data-structures>=7.1,<8",  # 7.1 first exports the archive discovery and worker-pinning assets
+    "ataraxis-transport-layer-pc>=5,<6",
 
     # Data Processing
     "numpy>=2,<3",
     "polars>=1,<2",
+
+    # Host Resource Introspection
+    "psutil>=7,<8",
 
     # CLI
     "click>=8,<9",
@@ -82,6 +85,7 @@ dev = [
 
     # Types
     "types-paho-mqtt>=1,<2",
+    "types-psutil>=7,<8",
     "types-pyserial>=3,<4",
 ]
 

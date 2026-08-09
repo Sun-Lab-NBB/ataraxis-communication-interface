@@ -45,6 +45,10 @@ if TYPE_CHECKING:
 
 _MAXIMUM_BYTE_VALUE: int = 255
 """The maximum valid uint8 byte value, used to validate that byte-codes fall within the allowed range."""
+_MINIMUM_SERIAL_BUFFER_SIZE: int = 9
+"""The smallest microcontroller serial buffer size the TransportLayer accepts, which is the width of the packet
+preamble and postamble that leaves room for a single payload byte. Checking the value here attributes an invalid
+buffer size to the constructor call rather than to the spawned communication process that builds the TransportLayer."""
 _ZERO_BYTE: np.uint8 = np.uint8(0)
 """The uint8 zero value, used as the default return code for command and parameter messages."""
 _ZERO_LONG: np.uint32 = np.uint32(0)
@@ -84,8 +88,6 @@ class _RuntimeParameters(IntEnum):
     WATCHDOG_INTERVAL = 20
     """The frequency, in milliseconds, at which the MicroControllerInterface's watchdog thread checks the state 
     of the remote communication process."""
-    PARALLEL_PROCESSING_THRESHOLD = 2000
-    """The minimum number of logged messages that warrants parallel log processing."""
     MINIMUM_MODULE_DATA_SIZE = 5
     """The smallest non-service data payload size currently used by hardware module instances to communicate with the 
     PC."""
@@ -527,7 +529,8 @@ class MicroControllerInterface:  # pragma: no cover
             microcontroller. Note, each module instance requires a unique interface instance.
         buffer_size: The size, in bytes, of the buffer used by the microcontroller's serial communication interface.
             Usually, this information is available from the microcontroller's manufacturer (UART / USB controller
-            specification).
+            specification). Must be at least 9 bytes. The value bounds the size of the payloads the PC transmits,
+            while reception is bounded by the 254-byte ceiling the COBS encoding imposes.
         port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci id' CLI
             command to discover the available microcontrollers and their respective communication port names.
         name: A colloquial human-readable name for this microcontroller (e.g., 'actor_controller'). Written to the
@@ -615,6 +618,13 @@ class MicroControllerInterface:  # pragma: no cover
                 f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
                 f"{controller_id}. Expected an initialized DataLogger instance for 'data_logger' argument, but "
                 f"encountered {data_logger} of type {type(data_logger).__name__}."
+            )
+            console.error(message=message, error=TypeError)
+        if not isinstance(buffer_size, int) or buffer_size < _MINIMUM_SERIAL_BUFFER_SIZE:
+            message = (
+                f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
+                f"{controller_id}. Expected an integer value of at least {_MINIMUM_SERIAL_BUFFER_SIZE} for the "
+                f"'buffer_size' argument, but encountered {buffer_size} of type {type(buffer_size).__name__}."
             )
             console.error(message=message, error=TypeError)
         if not isinstance(keepalive_interval, int) or keepalive_interval < 0:
@@ -816,12 +826,6 @@ class MicroControllerInterface:  # pragma: no cover
             daemon=True,
         )
         self._communication_process.start()
-
-        # Connects to the shared memory array to send and receive control signals. This has to be done after
-        # initializing the communication process.
-        self._terminator_array.connect()
-        # Ensures the buffer is destroyed if the instance is garbage-collected to prevent memory leaks.
-        self._terminator_array.enable_buffer_destruction()
 
         initialization_timer.reset()
         # Blocks until the microcontroller has finished all initialization steps or encounters an initialization error.

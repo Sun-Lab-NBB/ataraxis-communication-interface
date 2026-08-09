@@ -6,31 +6,27 @@ from typing import Any
 from pathlib import Path
 from threading import Thread
 
-import numpy as np
 from ataraxis_time import TimeUnits, TimestampFormats, TimestampPrecisions, convert_time, get_timestamp
-from ataraxis_base_utilities import resolve_worker_count
-from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
+from ataraxis_data_structures import ProcessingStatus, ProcessingTracker, discover_marker_files
 
 from .mcp_instance import mcp, read_tracker_status
-from .mcp_execution import (
-    PendingJob,
-    JobExecutionState,
-    get_execution_state,
-    set_execution_state,
-    job_execution_manager,
-)
-from ..microcontroller import (
+from ..orchestration import (
     TRACKER_FILENAME,
-    LOG_ARCHIVE_SUFFIX,
     EXTRACTION_JOB_NAME,
     MICROCONTROLLER_DATA_DIRECTORY,
-    ExtractionConfig,
+    PendingJob,
+    JobExecutionState,
     generate_job_ids,
+    size_pending_job,
+    get_execution_state,
+    resolve_core_budget,
+    set_execution_state,
+    group_jobs_by_tracker,
+    job_execution_manager,
+    resolve_memory_budget_mb,
+    discover_microcontroller_jobs,
 )
-
-_RESERVED_CORES: int = 2
-"""The number of CPU cores reserved for system operations. The worker budget is computed as available cores minus this
-value, with a minimum of 1."""
+from ..microcontroller import ExtractionConfig
 
 
 @mcp.tool()
@@ -71,11 +67,11 @@ def prepare_log_processing_batch_tool(
         lists, total counts, and any invalid paths.
     """
     config_file = Path(config_path)
-    if not config_file.exists() or not config_file.is_file():
+    if not config_file.is_file():
         return {"error": f"Extraction config not found: {config_path}"}
 
     try:
-        ExtractionConfig.load(file_path=config_file)
+        ExtractionConfig.from_yaml(file_path=config_file)
     except Exception as error:
         return {"error": f"Invalid extraction config: {error}"}
 
@@ -95,17 +91,20 @@ def prepare_log_processing_batch_tool(
     for entry_index, log_directory_string in enumerate(log_directories):
         log_directory_path = Path(log_directory_string)
 
-        if not log_directory_path.exists() or not log_directory_path.is_dir():
+        if not log_directory_path.is_dir():
             invalid_paths.append(log_directory_string)
             continue
 
-        # Filters the requested source IDs to those that have a matching archive in this log directory.
-        # Discovery already confirmed these archives exist, but the check guards against stale data.
-        filtered_ids = sorted(
-            source_id
-            for source_id in source_id_set
-            if (log_directory_path / f"{source_id}{LOG_ARCHIVE_SUFFIX}").exists()
-        )
+        # Filters the requested source IDs to those the manifest registers and whose archive resolves under this log
+        # directory. Discovery already confirmed both, but the check guards against stale data. The resolution runs
+        # through the same recursive search the jobs themselves use, so a nested archive is prepared as it is run.
+        try:
+            _, possible = discover_microcontroller_jobs(log_directory=log_directory_path)
+        except Exception:
+            invalid_paths.append(log_directory_string)
+            continue
+
+        filtered_ids = sorted(specifier for _, specifier in possible if specifier in source_id_set)
 
         if not filtered_ids:
             result_log_directories[log_directory_string] = {
@@ -190,16 +189,17 @@ def execute_log_processing_jobs_tool(
     jobs: list[dict[str, str]],
     *,
     worker_budget: int = -1,
+    memory_budget_mb: int = -1,
 ) -> dict[str, Any]:
-    """Dispatches log processing jobs for background execution with budget-based worker allocation.
+    """Dispatches log processing jobs for background execution against a core and a memory budget.
 
     Takes job descriptors from the manifest produced by prepare_log_processing_batch_tool and starts a background
-    execution manager that allocates CPU cores to each job based on its archive size. Each job descriptor must
-    include its own 'config_path' key pointing to the ExtractionConfig YAML file for that job. The worker budget
-    directly controls memory footprint since each worker spawns a separate process. Large archives (>= 2000
-    messages) receive more workers, while small archives receive 1 worker since they process sequentially
-    regardless. The manager fills available budget greedily, dispatching smaller jobs alongside large ones when
-    cores are available.
+    execution manager. Each job descriptor must include its own 'config_path' key pointing to the ExtractionConfig
+    YAML file for that job. Each job's cores and memory are resolved from the archive it reads before dispatch, so a
+    long recording and a short one are admitted at their own sizes. A job runs at the declared stage width narrowed
+    to the workers its own archive repays, and an archive below the parallel processing threshold takes a single
+    core. The manager admits a job once the running set has room for both its cores and its memory, and it admits an
+    oversized job alone rather than leaving it queued forever.
 
     Important:
         Only one execution session can be active at a time. Use cancel_log_processing_tool to cancel an active
@@ -208,16 +208,23 @@ def execute_log_processing_jobs_tool(
     Args:
         jobs: The list of job descriptors from prepare_log_processing_batch_tool. Each dictionary must have
             'log_directory', 'output_directory', 'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
-        worker_budget: The total number of CPU cores available for the execution session. Directly controls memory
-            footprint. Set to -1 for automatic resolution via resolve_worker_count.
+        worker_budget: The total number of CPU cores available for the execution session. Set to -1 to auto-resolve
+            to every available core minus the reserved host cores.
+        memory_budget_mb: The total memory in megabytes available for the execution session. Set to -1 to
+            auto-resolve to a share of the host's physical memory.
 
     Returns:
-        A dictionary containing a 'started' flag, 'total_jobs', resolved worker budget, per-job message counts,
-        and any invalid jobs.
+        A dictionary containing a 'started' flag, 'total_jobs', the resolved 'worker_budget' and 'memory_budget_mb',
+        a 'job_allocations' entry per job naming its resolved cores, memory, and archive message count, and any
+        invalid jobs.
     """
     # Enforces single-session constraint.
-    active_state = get_execution_state()
-    if active_state is not None and active_state.manager_thread is not None and active_state.manager_thread.is_alive():
+    existing_state = get_execution_state()
+    if (
+        existing_state is not None
+        and existing_state.manager_thread is not None
+        and existing_state.manager_thread.is_alive()
+    ):
         return {"error": "An execution session is already active. Cancel it first or wait for completion."}
 
     # Validates and builds pending jobs.
@@ -250,31 +257,45 @@ def execute_log_processing_jobs_tool(
     if not pending:
         return {"error": "No valid jobs to execute.", "invalid_jobs": invalid_jobs}
 
-    resolved_budget = resolve_worker_count(requested_workers=worker_budget, reserved_cores=_RESERVED_CORES)
+    # Resolves both budgets before sizing, since the core budget bounds the width any single job receives.
+    resolved_cores = resolve_core_budget(requested_budget=worker_budget)
+    resolved_memory = resolve_memory_budget_mb(requested_budget_mb=memory_budget_mb)
 
-    # Probes archive message counts for all pending jobs. Reads only the zip directory of each .npz file,
-    # avoiding loading message data into memory.
-    job_message_counts: dict[tuple[str, str], int] = {}
+    # Sizes every pending job from the archive it reads. This reads the zip directory and the file metadata of each
+    # .npz archive, which is fast and loads no message data into memory.
+    job_allocations: list[dict[str, Any]] = []
     for job in pending:
-        job_message_counts[job.dispatch_key] = _probe_archive_message_count(job=job)
+        footprint = size_pending_job(job=job, core_budget=resolved_cores)
+        job_allocations.append(
+            {
+                "job_id": job.job_id,
+                "source_id": job.source_id,
+                "cores": job.core_weight,
+                "memory_mb": job.memory_mb,
+                "message_count": footprint.message_count,
+                "modeled": footprint.modeled,
+            }
+        )
 
-    execution_state = JobExecutionState(
+    # Creates execution state and starts the manager thread.
+    state = JobExecutionState(
         all_jobs=all_jobs,
-        pending_queue=pending,
-        job_message_counts=job_message_counts,
-        worker_budget=resolved_budget,
+        pending_jobs=pending,
+        core_budget=resolved_cores,
+        memory_budget_mb=resolved_memory,
     )
-    set_execution_state(execution_state)
+    set_execution_state(state)
 
-    manager = Thread(target=job_execution_manager, daemon=True)
+    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
-    execution_state.manager_thread = manager
+    state.manager_thread = manager
 
     result: dict[str, Any] = {
         "started": True,
         "total_jobs": len(pending),
-        "worker_budget": resolved_budget,
-        "job_message_counts": job_message_counts,
+        "worker_budget": resolved_cores,
+        "memory_budget_mb": resolved_memory,
+        "job_allocations": job_allocations,
     }
 
     if invalid_jobs:
@@ -308,7 +329,7 @@ def get_log_processing_status_tool() -> dict[str, Any]:
     running_count = 0
     scheduled_count = 0
 
-    for tracker_path, path_jobs in _group_jobs_by_tracker(state=state).items():
+    for tracker_path, path_jobs in group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
         except Exception:
@@ -381,7 +402,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     completed_count = 0
     failed_count = 0
 
-    for tracker_path, path_jobs in _group_jobs_by_tracker(state=state).items():
+    for tracker_path, path_jobs in group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
         except Exception:  # noqa: S112
@@ -480,12 +501,12 @@ def cancel_log_processing_tool() -> dict[str, Any]:
     if state is None:
         return {"canceled": False, "message": "No execution session is active."}
 
-    # Sets the canceled flag and clears pending jobs under the lock. Active groups complete naturally.
+    # Sets the canceled flag and clears pending jobs under the lock. Active jobs complete naturally.
     with state.lock:
         state.canceled = True
-        cleared_count = len(state.pending_queue)
-        state.pending_queue.clear()
-        active_count = len(state.active_groups)
+        cleared_count = len(state.pending_jobs)
+        state.pending_jobs.clear()
+        active_count = len(state.active_jobs)
 
     # Counts final job statuses from tracker files.
     succeeded = 0
@@ -505,7 +526,7 @@ def cancel_log_processing_tool() -> dict[str, Any]:
 
     return {
         "canceled": True,
-        "message": f"Canceled. Cleared {cleared_count} pending job(s). {active_count} group(s) still completing.",
+        "message": f"Canceled. Cleared {cleared_count} pending job(s). {active_count} job(s) still completing.",
         "final_state": {
             "succeeded_jobs": succeeded,
             "failed_jobs": failed,
@@ -539,7 +560,8 @@ def reset_log_processing_jobs_tool(
     except Exception as error:
         return {"error": f"Unable to read tracker: {error}"}
 
-    # Identifies which job IDs to reset based on the source_ids filter.
+    # Identifies which job IDs to reset based on the source_ids filter. The comparison is exact, since the tracker's
+    # own substring search would also match a source whose identifier merely contains a requested one.
     if source_ids is not None:
         source_id_set = set(source_ids)
         target_ids = [job_id for job_id, job_state in registry.items() if job_state.specifier in source_id_set]
@@ -583,13 +605,18 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
         return {"error": f"Path is not a directory: {root_directory}"}
 
     # Discovers all tracker files recursively and aggregates their job statuses.
-    log_dir_statuses: list[dict[str, Any]] = []
+    log_directory_statuses: list[dict[str, Any]] = []
     aggregate_succeeded = 0
     aggregate_failed = 0
     aggregate_running = 0
     aggregate_scheduled = 0
 
-    for found_tracker_path in sorted(root_path.rglob(TRACKER_FILENAME)):
+    try:
+        tracker_paths = discover_marker_files(directory=root_path, marker_name=TRACKER_FILENAME)
+    except OSError as error:
+        return {"error": f"Unable to search '{root_directory}': {error}"}
+
+    for found_tracker_path in tracker_paths:
         log_directory = str(found_tracker_path.parent)
         try:
             status = read_tracker_status(tracker_path=found_tracker_path)
@@ -600,18 +627,18 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
             aggregate_running += summary.get("running", 0)
             aggregate_scheduled += summary.get("scheduled", 0)
 
-            dir_status = _derive_tracker_status(summary=summary)
+            directory_status = ProcessingTracker.resolve_status(summary=summary).value
 
-            log_dir_statuses.append(
+            log_directory_statuses.append(
                 {
                     "log_directory": log_directory,
                     "tracker_path": str(found_tracker_path),
-                    "status": dir_status,
+                    "status": directory_status,
                     **status,
                 }
             )
         except Exception:
-            log_dir_statuses.append(
+            log_directory_statuses.append(
                 {
                     "log_directory": log_directory,
                     "tracker_path": str(found_tracker_path),
@@ -621,8 +648,8 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
             )
 
     return {
-        "log_directories": log_dir_statuses,
-        "total_log_directories": len(log_dir_statuses),
+        "log_directories": log_directory_statuses,
+        "total_log_directories": len(log_directory_statuses),
         "summary": {
             "succeeded": aggregate_succeeded,
             "failed": aggregate_failed,
@@ -630,69 +657,3 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
             "scheduled": aggregate_scheduled,
         },
     }
-
-
-def _derive_tracker_status(summary: dict[str, Any]) -> str:
-    """Derives a high-level processing status label from a tracker summary's job counts.
-
-    Applies a fixed priority: ``failed`` if any job failed, ``completed`` if all succeeded, ``processing`` if any
-    are running, ``not_started`` if all are scheduled, and ``in_progress`` otherwise.
-
-    Args:
-        summary: A dictionary containing 'total', 'succeeded', 'failed', 'running', and 'scheduled' counts.
-
-    Returns:
-        A status string: one of 'failed', 'completed', 'processing', 'not_started', or 'in_progress'.
-    """
-    total = summary.get("total", 0)
-    if summary.get("failed", 0):
-        return "failed"
-    if summary.get("succeeded", 0) == total and total > 0:
-        return "completed"
-    if summary.get("running", 0):
-        return "processing"
-    if summary.get("scheduled", 0) == total and total > 0:
-        return "not_started"
-    return "in_progress"
-
-
-def _group_jobs_by_tracker(state: JobExecutionState) -> dict[Path, list[PendingJob]]:
-    """Groups all jobs in an execution state by their tracker file path.
-
-    Minimizes redundant file reads by batching jobs that share the same tracker, so each tracker YAML file is
-    deserialized only once when iterating over the groups.
-
-    Args:
-        state: The active job execution state containing the job registry.
-
-    Returns:
-        A dictionary mapping each tracker path to its list of pending job descriptors.
-    """
-    tracker_jobs: dict[Path, list[PendingJob]] = {}
-    for job in state.all_jobs.values():
-        tracker_jobs.setdefault(job.tracker_path, []).append(job)
-    return tracker_jobs
-
-
-def _probe_archive_message_count(job: PendingJob) -> int:
-    """Probes the message count of a job's log archive by reading the .npz zip directory.
-
-    Reconstructs the archive path from the job's log directory and source ID, then reads the file list from the .npz
-    archive without loading any message data. The message count is the total entry count minus one (excluding the onset
-    message).
-
-    Args:
-        job: The pending job descriptor containing the log directory and source ID.
-
-    Returns:
-        The number of data messages in the archive, or 0 if the archive cannot be read.
-    """
-    archive_path = job.log_directory / f"{job.source_id}{LOG_ARCHIVE_SUFFIX}"
-    if not archive_path.exists():
-        return 0
-
-    try:
-        with np.load(file=archive_path, allow_pickle=False) as archive:
-            return max(0, len(archive.files) - 1)
-    except Exception:
-        return 0

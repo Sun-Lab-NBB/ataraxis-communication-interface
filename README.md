@@ -282,7 +282,7 @@ if __name__ == "__main__":
 
     # Saves the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
     config_path = data_logger.output_directory / "extraction_config.yaml"
-    config.save(file_path=config_path)
+    config.to_yaml(file_path=config_path)
     console.echo(message=f"Extraction config written to: {config_path}", level=LogLevel.SUCCESS)
 
     # Runs the log processing pipeline. Extracts hardware module and kernel message data from the log archives and
@@ -407,10 +407,15 @@ enabling distributed processing across multiple compute nodes. Both modes use a 
 manage job lifecycle (scheduled, running, succeeded, or failed). All output files (tracker and Feather) are written
 into a `microcontroller_data/` subdirectory under the specified output directory.
 
+Every job is sized from the archive it reads before it runs. The pipeline reads the archive's message count and its
+size on disk, gives the job the cores that archive repays, and estimates the memory it will hold, so a run mixing a
+long recording with a short one gives each the width its own archive earns rather than one width chosen for the whole
+run.
+
 For single-directory processing, use the `axci process` CLI command or the `run_log_processing_pipeline()` function
 directly. For multi-directory batch workflows, use the [MCP server](#mcp-server) log processing tools, which handle
-archive discovery, batch preparation, concurrent execution, and status monitoring across multiple recording
-directories.
+archive discovery, batch preparation, concurrent execution against a core and a memory budget, and status monitoring
+across multiple recording directories.
 
 ### Custom Module Interfaces
 For this library, an interface is a class that contains the logic for sending the command and parameter data to the
@@ -551,7 +556,7 @@ axci mcp
 | `write_extraction_config_tool`        | Writes an extraction configuration to a YAML file from structured data        |
 | `validate_extraction_config_tool`     | Validates an extraction config against a manifest for completeness            |
 | `prepare_log_processing_batch_tool`   | Prepares a batch of log processing jobs across multiple directories           |
-| `execute_log_processing_jobs_tool`    | Executes prepared log processing jobs with concurrent worker threads          |
+| `execute_log_processing_jobs_tool`    | Executes prepared log processing jobs against a core and a memory budget      |
 | `get_log_processing_status_tool`      | Returns the current status of the active log processing session               |
 | `get_log_processing_timing_tool`      | Returns timing information for all jobs in the active session                 |
 | `cancel_log_processing_tool`          | Cancels the active log processing execution session                           |

@@ -1,35 +1,31 @@
 """Provides the Command Line Interface (CLI) installed into the Python environment together with the library."""
 
-from __future__ import annotations  # pragma: no cover
+from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal  # pragma: no cover
-from pathlib import Path  # pragma: no cover
-from concurrent.futures import ProcessPoolExecutor, as_completed  # pragma: no cover
+from typing import TYPE_CHECKING, Literal
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-if TYPE_CHECKING:  # pragma: no cover
-    from serial.tools.list_ports_common import ListPortInfo  # pragma: no cover
+if TYPE_CHECKING:
+    from serial.tools.list_ports_common import ListPortInfo
 
-import click  # pragma: no cover
-from ataraxis_base_utilities import LogLevel, console  # pragma: no cover
-from ataraxis_transport_layer_pc import list_available_ports  # pragma: no cover
+import click
+from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
+from ataraxis_transport_layer_pc import list_available_ports
 
-from .mcp_server import run_server as run_mcp  # pragma: no cover
-from ..communication import MQTTCommunication  # pragma: no cover
-from ..microcontroller import (  # pragma: no cover
-    ExtractionConfig,
-    evaluate_port,
-    create_extraction_config,
-    run_log_processing_pipeline,
-)
+from .mcp_server import run_server as run_mcp
+from ..communication import MQTTCommunication
+from ..orchestration import run_log_processing_pipeline
+from ..microcontroller import ExtractionConfig, evaluate_port, create_extraction_config
 
-console.enable()  # pragma: no cover
+console.enable()
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}  # pragma: no cover
-"""Ensures that displayed Click help messages are formatted according to the lab standard."""  # pragma: no cover
+CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+"""Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 
 @click.group("axci", context_settings=CONTEXT_SETTINGS)
-def axci_cli() -> None:  # pragma: no cover
+def axci_cli() -> None:
     """Serves as the entry-point for interfacing with all interactive components of the
     ataraxis-communication-interface (AXCI) library.
     """
@@ -45,7 +41,7 @@ def axci_cli() -> None:  # pragma: no cover
     help="The baudrate to use for communication during identification. Only used by microcontrollers that communicate "
     "via the UART serial interface; ignored by microcontrollers that use the USB interface.",
 )
-def identify(baudrate: int) -> None:  # pragma: no cover
+def identify(baudrate: int) -> None:
     """Discovers all connected Arduino or Teensy microcontrollers running the ataraxis-micro-controller library.
 
     Use this command to identify the hardware available to the local host-machine.
@@ -65,7 +61,7 @@ def identify(baudrate: int) -> None:  # pragma: no cover
 
     results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=min(len(valid_ports), resolve_worker_count())) as executor:
         future_to_port = {
             executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
@@ -116,7 +112,7 @@ def identify(baudrate: int) -> None:  # pragma: no cover
     show_default=True,
     help="The socket port used by the MQTT broker.",
 )
-def check_mqtt(host: str, port: int) -> None:  # pragma: no cover
+def check_mqtt(host: str, port: int) -> None:
     """Checks whether an MQTT broker is reachable at the specified host and port.
 
     Attempts to connect to the MQTT broker and reports the result. Use this command to verify MQTT broker
@@ -139,7 +135,7 @@ def check_mqtt(host: str, port: int) -> None:  # pragma: no cover
 
 
 @axci_cli.group("config")
-def config_group() -> None:  # pragma: no cover
+def config_group() -> None:
     """Manages extraction configuration files for the log processing pipeline."""
 
 
@@ -158,7 +154,7 @@ def config_group() -> None:  # pragma: no cover
     type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
     help="The path to the output .yaml file where to save the generated configuration data.",
 )
-def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no cover
+def config_create(manifest_path: Path, output_path: Path) -> None:
     """Generates a precursor extraction configuration from a microcontroller manifest.
 
     Creates an extraction_config.yaml with all controllers and modules populated from the manifest,
@@ -166,7 +162,7 @@ def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no
     specify the event codes for each module and kernel entry.
     """
     config = create_extraction_config(manifest_path=manifest_path)
-    config.save(file_path=output_path)
+    config.to_yaml(file_path=output_path)
     console.echo(
         message=f"Extraction config written to {output_path}. Fill in event_codes before processing.",
         level=LogLevel.SUCCESS,
@@ -181,12 +177,12 @@ def config_create(manifest_path: Path, output_path: Path) -> None:  # pragma: no
     type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path),
     help="The path to the extraction configuration .yaml file to display.",
 )
-def config_show(config_path: Path) -> None:  # pragma: no cover
+def config_show(config_path: Path) -> None:
     """Displays the contents of an extraction configuration file.
 
     Reads the specified .yaml file and prints each controller's modules, event codes, and kernel settings.
     """
-    config = ExtractionConfig.load(file_path=config_path)
+    config = ExtractionConfig.from_yaml(file_path=config_path)
 
     console.echo(message=f"Extraction config: {config_path}", level=LogLevel.INFO)
     for controller in config.controllers:
@@ -257,7 +253,7 @@ def process(
     *,
     workers: int,
     progress: bool,
-) -> None:  # pragma: no cover
+) -> None:
     """Processes MicroControllerInterface log archives to extract hardware module and kernel message data.
 
     Extracts data as specified by the extraction configuration and writes the results to feather (IPC) files.
@@ -284,7 +280,7 @@ def process(
     help="The transport protocol to use for MCP communication. Use 'stdio' for standard input/output communication "
     "(default, recommended for Claude Desktop integration) or 'streamable-http' for HTTP-based communication.",
 )
-def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:  # pragma: no cover
+def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic interaction with the library.
 
     The MCP server exposes microcontroller discovery, MQTT connectivity checking, extraction configuration

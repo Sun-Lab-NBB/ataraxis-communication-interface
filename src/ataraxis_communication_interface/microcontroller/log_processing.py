@@ -1,67 +1,46 @@
-"""Provides the log data processing pipeline for extracting hardware module and kernel message data from
-MicroControllerInterface log archives.
+"""Provides the extraction algorithm that reads hardware module and kernel message data from MicroControllerInterface
+log archives and the columnar structures it returns.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from contextlib import ExitStack
 from dataclasses import dataclass
+from multiprocessing import get_context
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
-import polars as pl
-from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
-from ataraxis_data_structures import LogArchiveReader, ProcessingTracker
-
-from .dataclasses import (
-    MICROCONTROLLER_MANIFEST_FILENAME,
-    ExtractionConfig,
-    MicroControllerManifest,
-    ControllerExtractionConfig,
+from ataraxis_base_utilities import console, resolve_worker_count
+from ataraxis_data_structures import (
+    PARALLEL_PROCESSING_THRESHOLD,
+    LogArchiveReader,
+    limit_worker_threads,
+    initialize_worker_threads,
 )
+
 from ..communication import SerialProtocols, SerialPrototypes
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from multiprocessing.context import SpawnContext
 
     from numpy.typing import NDArray
-
-LOG_ARCHIVE_SUFFIX: str = "_log.npz"
-"""Naming convention suffix for log archives produced by assemble_log_archives()."""
-
-TRACKER_FILENAME: str = "microcontroller_processing_tracker.yaml"
-"""Filename for the processing tracker file placed in the output directory."""
-
-MICROCONTROLLER_DATA_DIRECTORY: str = "microcontroller_data"
-"""Name of the subdirectory created under the output path for microcontroller data processing results. All tracker
-files and processed outputs are written into this subdirectory."""
-
-PARALLEL_PROCESSING_THRESHOLD: int = 2000
-"""The minimum number of messages in a log archive required to enable parallel processing. Archives with fewer messages
-are processed sequentially to avoid multiprocessing overhead."""
 
 _BATCH_MULTIPLIER: int = 4
 """The number of message batches created per worker process during parallel processing. Splitting each worker's share
 into four batches improves load distribution across workers."""
 
-CONTROLLER_FEATHER_PREFIX: str = "controller_"
-"""Filename prefix for controller feather output files."""
+_WORKER_THREAD_CEILING: int = 1
+"""The number of threads each worker of a self-owned pool pins its numeric backends to."""
 
-MODULE_FEATHER_INFIX: str = "_module_"
-"""Filename infix separating the controller source ID from the module type code and ID code."""
-
-KERNEL_FEATHER_INFIX: str = "_kernel"
-"""Filename infix identifying kernel message feather files."""
-
-FEATHER_SUFFIX: str = ".feather"
-"""Filename suffix for all feather (IPC) output files."""
-
-EXTRACTION_JOB_NAME: str = "microcontroller_data_extraction"
-"""The job name used by the processing pipeline for microcontroller data extraction."""
+_MULTIPROCESSING_CONTEXT: SpawnContext = get_context("spawn")
+"""The spawn-based multiprocessing context used to create the process pool that extracts message data, ensuring
+identical cross-platform behavior on all supported platforms."""
 
 
-@dataclass(slots=True)
-class _ExtractedMessages:
+@dataclass(frozen=True, slots=True)
+class ExtractedMessages:
     """Stores the data parsed from a set of incoming messages received by the PC from the microcontroller during
     runtime, in columnar form. All arrays share the same length, with each index position corresponding to a single
     message.
@@ -87,8 +66,8 @@ class _ExtractedMessages:
         return len(self.timestamps)
 
 
-@dataclass(slots=True)
-class _ExtractedModuleData:
+@dataclass(frozen=True, slots=True)
+class ExtractedModuleData:
     """Stores the data extracted from all messages sent to the PC by a hardware module instance during runtime that
     matched the caller's event code filter, in columnar form.
     """
@@ -97,8 +76,18 @@ class _ExtractedModuleData:
     """The type (family) code of the hardware module instance."""
     module_id: int
     """The unique identifier code of the hardware module instance."""
-    messages: _ExtractedMessages
+    messages: ExtractedMessages
     """Columnar storage for all extracted messages from this module."""
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedControllerData:
+    """Stores every message one extraction pass over a microcontroller log archive resolved."""
+
+    modules: tuple[ExtractedModuleData, ...]
+    """The data of each hardware module that produced at least one matching message."""
+    kernel: ExtractedMessages
+    """Columnar storage for the extracted kernel messages, empty when kernel extraction was not configured."""
 
 
 @dataclass(slots=True)
@@ -127,499 +116,194 @@ type _BatchResult = tuple[
 column accumulators, and a column accumulator for kernel messages."""
 
 
-def run_log_processing_pipeline(
-    log_directory: Path,
-    output_directory: Path,
-    config: Path,
-    job_id: str | None = None,
-    *,
-    workers: int = -1,
-    display_progress: bool = True,
-) -> None:
-    """Processes the requested MicroControllerInterface log archives from a single DataLogger output directory.
-
-    Extracts hardware module and / or kernel message data as specified by the extraction configuration and writes the
-    results to feather (IPC) files. The controller IDs to process are resolved directly from the extraction
-    configuration. Each controller ID is validated against the microcontroller manifest to confirm the corresponding
-    log archives were produced by ataraxis-communication-interface.
-
-    Supports both local and remote processing modes. In local mode (job_id is None), resolves each requested log
-    archive by controller ID, initializes a processing tracker in the output directory, and executes all jobs
-    sequentially. In remote mode (job_id is provided), generates all possible job IDs for the configured controllers
-    and executes only the matching job.
-
-    All resolved archives must reside in the same directory. If the log_directory contains archives from multiple
-    DataLogger instances (in separate subdirectories), each must be processed independently. Use the MCP batch
-    processing tools to orchestrate multi-directory workflows.
-
-    Args:
-        log_directory: The path to the root directory to search for .npz log archives. The directory is searched
-            recursively, so archives may be nested at any depth below this path.
-        output_directory: The path to the root output directory. A ``microcontroller_data/`` subdirectory is created
-            automatically under this path, and all tracker and output files are written there.
-        config: The path to the extraction_config.yaml file specifying which controllers, modules, and events to
-            extract. Controller IDs in the config determine which archives are processed.
-        job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
-            matching this ID is executed (remote mode). If not provided, all configured jobs are run sequentially
-            with automatic tracker management (local mode).
-        workers: The number of worker processes to use for parallel processing. Setting this to a value less than 1
-            uses all available CPU cores minus two reserved cores (at least one). Setting this to 1 conducts
-            processing sequentially.
-        display_progress: Determines whether to display progress bars during extraction. Defaults to True for
-            interactive CLI use. Set to False for MCP batch processing.
-
-    Raises:
-        FileNotFoundError: If the log_directory does not exist, the config path does not exist, a controller ID
-            has no matching archive, or no microcontroller manifest is found.
-        ValueError: If the provided job_id does not match any discoverable job, if controller IDs are not
-            registered in the microcontroller manifest, if resolved archives span multiple directories, if more than
-            one log archive matches a configured controller ID, or if the extraction config has empty event codes.
-    """
-    if not log_directory.exists() or not log_directory.is_dir():
-        message = f"Unable to process logs in '{log_directory}'. The path does not exist or is not a directory."
-        console.error(message=message, error=FileNotFoundError)
-
-    # Loads the extraction configuration from the provided file path.
-    if not config.exists() or not config.is_file():
-        message = f"Unable to load extraction config from '{config}'. The path does not exist or is not a file."
-        console.error(message=message, error=FileNotFoundError)
-    resolved_config = ExtractionConfig.load(file_path=config)
-
-    # Builds a lookup from controller ID to its extraction configuration. Controller IDs from the config are the
-    # sole source of truth for which archives to process.
-    controller_configs: dict[str, ControllerExtractionConfig] = {
-        str(controller.controller_id): controller for controller in resolved_config.controllers
-    }
-    source_ids = sorted(controller_configs.keys())
-    console.echo(message=f"Resolved {len(source_ids)} controller ID(s) from config: {', '.join(source_ids)}")
-
-    # Validates controller IDs against the microcontroller manifest to confirm they are axci-produced log archives,
-    # preventing accidental processing of archives from other libraries (e.g., ataraxis-video-system).
-    candidates = sorted(log_directory.rglob(MICROCONTROLLER_MANIFEST_FILENAME))
-    if not candidates:
-        message = (
-            f"Unable to process logs in '{log_directory}'. No {MICROCONTROLLER_MANIFEST_FILENAME} was found. "
-            f"A microcontroller manifest is required to confirm the log archives were produced by "
-            f"ataraxis-communication-interface."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    manifest = MicroControllerManifest.load(file_path=candidates[0])
-    manifest_ids = {str(controller.id) for controller in manifest.controllers}
-
-    unregistered_ids = [source_id for source_id in source_ids if source_id not in manifest_ids]
-    if unregistered_ids:
-        message = (
-            f"Unable to process logs in '{log_directory}'. The following controller IDs are not registered in "
-            f"the {MICROCONTROLLER_MANIFEST_FILENAME}: {', '.join(unregistered_ids)}. The corresponding log "
-            f"archives were not produced by ataraxis-communication-interface. Registered IDs: "
-            f"{sorted(manifest_ids)}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Builds the universe of every job the extraction config could produce: one extraction job per configured
-    # controller ID. The universe is a configuration fingerprint, not an invocation fingerprint, so every
-    # invocation (local or a single remote job) aligns the tracker against the same set and never resets sibling
-    # jobs.
-    universe: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
-
-    # Creates the microcontroller_data subdirectory under the output path.
-    data_path = output_directory / MICROCONTROLLER_DATA_DIRECTORY
-    data_path.mkdir(parents=True, exist_ok=True)
-
-    tracker = ProcessingTracker(file_path=data_path / TRACKER_FILENAME)
-
-    if job_id is not None:
-        # Remote mode: selects the job to run solely by ID, validated against the configuration universe. Aligns
-        # the tracker with the full universe so start_job finds the requested ID and concurrent remote jobs do not
-        # treat each other's entries as foreign. Resolves only the matched archive so a missing or late sibling
-        # archive cannot fail this job.
-        all_job_ids = generate_job_ids(source_ids=source_ids)
-        id_to_source: dict[str, str] = {generated_id: source for source, generated_id in all_job_ids.items()}
-
-        if job_id not in id_to_source:
-            message = (
-                f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match "
-                f"any jobs available for the provided extraction config. Valid job IDs: "
-                f"{list(all_job_ids.values())}."
-            )
-            console.error(message=message, error=ValueError)
-
-        tracker.align_jobs(jobs=universe, universe=universe)
-
-        source_id = id_to_source[job_id]
-        execute_job(
-            log_path=find_log_archive(log_directory=log_directory, source_id=source_id),
-            output_directory=data_path,
-            source_id=source_id,
-            job_id=job_id,
-            workers=workers,
-            tracker=tracker,
-            controller_config=controller_configs[source_id],
-            display_progress=display_progress,
-        )
-    else:
-        # Local mode: resolves all requested archive paths upfront and validates they belong to the same
-        # DataLogger output directory.
-        archive_paths = {
-            source_id: find_log_archive(log_directory=log_directory, source_id=source_id) for source_id in source_ids
-        }
-        parent_directories = {path.parent for path in archive_paths.values()}
-        if len(parent_directories) > 1:
-            message = (
-                f"Unable to process logs in '{log_directory}'. The requested log archives span multiple "
-                f"directories: {sorted(str(parent) for parent in parent_directories)}. Each DataLogger output "
-                f"directory must be processed independently."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Aligns the tracker with the requested jobs while detecting foreign entries against the full universe.
-        jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
-        tracker.align_jobs(jobs=jobs, universe=universe)
-
-        # Resolves workers once and creates a shared ProcessPoolExecutor to reuse across all jobs, avoiding
-        # repeated process pool creation.
-        job_ids = generate_job_ids(source_ids=source_ids)
-        resolved_workers = resolve_worker_count(requested_workers=workers)
-        shared_executor = ProcessPoolExecutor(max_workers=resolved_workers) if resolved_workers > 1 else None
-
-        try:
-            for source_id in source_ids:
-                execute_job(
-                    log_path=archive_paths[source_id],
-                    output_directory=data_path,
-                    source_id=source_id,
-                    job_id=job_ids[source_id],
-                    workers=resolved_workers,
-                    tracker=tracker,
-                    controller_config=controller_configs[source_id],
-                    display_progress=display_progress,
-                    executor=shared_executor,
-                )
-        finally:
-            if shared_executor is not None:
-                shared_executor.shutdown(wait=True)
-
-    console.echo(message="All processing jobs completed successfully.", level=LogLevel.SUCCESS)
-
-
-def execute_job(
+def extract_logged_microcontroller_data(
     log_path: Path,
-    output_directory: Path,
-    source_id: str,
-    job_id: str,
-    workers: int,
-    tracker: ProcessingTracker,
-    controller_config: ControllerExtractionConfig,
+    module_filters: dict[tuple[int, int], frozenset[int]] | None,
+    kernel_event_codes: frozenset[int] | None,
+    workers: int = -1,
     *,
     display_progress: bool = True,
     executor: ProcessPoolExecutor | None = None,
-) -> None:
-    """Executes a single data extraction job for the target log archive.
+) -> ExtractedControllerData:
+    """Extracts the hardware module and kernel message data from the target .npz log archive.
 
-    Reads the archive once and routes each incoming message (MODULE_DATA, MODULE_STATE, KERNEL_DATA, KERNEL_STATE)
-    through event code filters specified by the controller extraction configuration. Only messages whose event codes
-    match the configuration are extracted. Writes the results to feather (IPC) files in the output directory — each
-    module produces a separate feather file, and kernel messages (when configured) produce an additional feather file.
-    Manages tracker state (start / complete / fail) for the job.
+    Reads the archive that the assemble_log_archives() function of ataraxis-data-structures builds from a
+    MicroControllerInterface instance's DataLogger output and returns every incoming message whose event code the
+    caller's filters admit.
 
     Notes:
-        At this time, the function exclusively works with incoming messages sent by the microcontroller to the PC.
+        Works exclusively with the incoming messages the microcontroller sent to the PC. Each module is filtered
+        against its own event code set, which prevents off-target extraction across modules that reuse an event code
+        with different semantics.
 
-        If the target .npz archive contains fewer than 2000 messages, the processing is carried out sequentially
-        regardless of the specified worker-count.
-
-        When an external executor is provided, batch processing is submitted to that executor instead of creating a
-        new ProcessPoolExecutor. The caller is responsible for executor lifecycle management.
-
-        If an error occurs during processing, the job is marked as failed in the tracker before the exception is
-        propagated to the caller.
+        An archive holding fewer messages than the parallel processing threshold is read sequentially whatever
+        worker count it is given, since the worker startup and the message transfer cost more than the parallel
+        decode saves.
 
     Args:
         log_path: The path to the .npz log archive to process.
-        output_directory: The path to the directory where feather output files and the tracker are written.
-        source_id: The source ID string identifying the log archive.
-        job_id: The unique hexadecimal identifier for this processing job.
-        workers: The number of worker processes to use for parallel processing.
-        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
-        controller_config: The extraction configuration for the controller whose archive is being processed.
-        display_progress: Determines whether to display a progress bar during extraction.
-        executor: An optional pre-created ProcessPoolExecutor to reuse for parallel processing.
+        module_filters: The event codes to extract for each module, keyed by the module type and identifier pair, or
+            None to skip module extraction.
+        kernel_event_codes: The event codes to extract for kernel messages, or None to skip kernel extraction.
+        workers: The number of parallel worker processes (CPU cores) to use for processing. Setting this to a value
+            below 1 auto-resolves the count to every available CPU core minus the cores reserved for the host system.
+            Setting this to a value of 1 conducts the processing sequentially.
+        display_progress: Determines whether to display a progress bar during parallel batch processing.
+        executor: When provided, parallel batch work is submitted to this pool instead of a newly created one, and
+            the caller owns the pool's lifecycle. Its worker count must match the workers value used for batch
+            generation, and the caller is responsible for the worker thread limit its processes inherit.
+
+    Returns:
+        The extracted module and kernel messages in columnar form.
 
     Raises:
-        ValueError: If the controller config has modules with empty event codes, has no extraction targets configured,
-            or the log archive does not exist.
+        ValueError: If the target path does not exist, does not have a .npz suffix, or does not point to a file. Also
+            raised if a data message carries a data payload of a different size than its prototype code declares.
     """
-    # Unpacks the controller config into per-module event code filters. Each module maps to its own frozenset of
-    # event codes to prevent off-target extraction across modules that share the same controller.
-    module_filters: dict[tuple[int, int], frozenset[int]] | None = None
-    kernel_event_codes: frozenset[int] | None = None
-
-    if controller_config.modules:
-        module_filters = {}
-        for module in controller_config.modules:
-            if not module.event_codes:
-                message = (
-                    f"Unable to execute the data extraction job for source '{source_id}'. Module with type code "
-                    f"{module.module_type} and ID code {module.module_id} has empty event_codes."
-                )
-                console.error(message=message, error=ValueError)
-            module_filters[(module.module_type, module.module_id)] = frozenset(module.event_codes)
-
-    if controller_config.kernel is not None:
-        if not controller_config.kernel.event_codes:
-            message = (
-                f"Unable to execute the data extraction job for source '{source_id}'. Kernel extraction "
-                f"has empty event_codes."
-            )
-            console.error(message=message, error=ValueError)
-        kernel_event_codes = frozenset(controller_config.kernel.event_codes)
-
-    if module_filters is None and kernel_event_codes is None:
-        message = (
-            f"Unable to execute the data extraction job for source '{source_id}'. The controller config "
-            f"has no modules and no kernel extraction configured."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Validates the log archive path.
+    # Validates the archive path. LogArchiveReader checks existence, but not the .npz suffix or file type.
     if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
         message = (
-            f"Unable to execute the data extraction job for source '{source_id}'. The log archive "
-            f"'{log_path}' does not exist or is not a valid .npz file."
+            f"Unable to extract microcontroller message data from the log file {log_path}, as it does not exist or "
+            f"does not point to a valid .npz archive."
         )
         console.error(message=message, error=ValueError)
 
-    console.echo(message=f"Running '{EXTRACTION_JOB_NAME}' job for source '{source_id}' (ID: {job_id})...")
-    tracker.start_job(job_id=job_id)
+    # Creates a reader for the target archive. The reader handles onset timestamp discovery and message key management.
+    reader = LogArchiveReader(archive_path=log_path)
 
-    try:
-        # Uses LogArchiveReader to handle archive access, onset timestamp discovery, and batch creation.
-        reader = LogArchiveReader(archive_path=log_path)
+    # An archive holding no data messages yields empty columns for every requested target.
+    if not reader.message_count:
+        return _finalize_batch(
+            module_accumulators=_create_accumulators(module_filters=module_filters),
+            kernel_accumulator=_create_accumulator(),
+            module_filters=module_filters,
+        )
 
-        # Skips extraction and writes no output files if the archive contains no messages.
-        if not reader.message_count:
-            tracker.complete_job(job_id=job_id)
-            return
+    onset_us = reader.onset_timestamp_us
 
-        onset_us = reader.onset_timestamp_us
-        worker_count = workers
+    # Processes small archives sequentially to avoid the unnecessary overhead of setting up the multiprocessing
+    # runtime. Also applies when the caller explicitly requests a single worker process.
+    if workers == 1 or reader.message_count < PARALLEL_PROCESSING_THRESHOLD:
+        single_batch = reader.get_batches(workers=1, batch_multiplier=1)
+        module_accumulators, kernel_accumulator = _process_message_batch(
+            log_path=log_path,
+            file_names=single_batch[0],
+            onset_us=onset_us,
+            module_filters=module_filters,
+            kernel_event_codes=kernel_event_codes,
+        )
+        return _finalize_batch(
+            module_accumulators=module_accumulators,
+            kernel_accumulator=kernel_accumulator,
+            module_filters=module_filters,
+        )
 
-        # Processes small archives sequentially to avoid the unnecessary overhead of setting up the multiprocessing
-        # runtime. Also applies when the caller explicitly requests a single worker process.
-        if worker_count == 1 or reader.message_count < PARALLEL_PROCESSING_THRESHOLD:
-            all_keys = reader.get_batches(workers=1, batch_multiplier=1)
-            module_batch, kernel_accumulator = _process_message_batch(
+    # Resolves the number of workers if not already resolved by the caller. External executors are pre-sized, so
+    # the caller provides a positive workers value that matches the executor's pool size.
+    if workers < 1:
+        workers = resolve_worker_count(requested_workers=workers)
+
+    batches = reader.get_batches(workers=workers, batch_multiplier=_BATCH_MULTIPLIER)
+
+    results = _run_extraction_batches(
+        log_path=log_path,
+        batches=batches,
+        onset_us=onset_us,
+        module_filters=module_filters,
+        kernel_event_codes=kernel_event_codes,
+        workers=workers,
+        display_progress=display_progress,
+        executor=executor,
+    )
+
+    # Combines the columnar accumulators of every batch, maintaining chronological ordering.
+    combined_modules = _create_accumulators(module_filters=module_filters)
+    combined_kernel = _create_accumulator()
+
+    for batch_modules, batch_kernel in results:
+        for module_key, accumulator in batch_modules.items():
+            _extend_accumulator(target=combined_modules[module_key], source=accumulator)
+        _extend_accumulator(target=combined_kernel, source=batch_kernel)
+
+    return _finalize_batch(
+        module_accumulators=combined_modules,
+        kernel_accumulator=combined_kernel,
+        module_filters=module_filters,
+    )
+
+
+def _run_extraction_batches(
+    log_path: Path,
+    batches: list[list[str]],
+    onset_us: np.uint64,
+    module_filters: dict[tuple[int, int], frozenset[int]] | None,
+    kernel_event_codes: frozenset[int] | None,
+    workers: int,
+    *,
+    display_progress: bool,
+    executor: ProcessPoolExecutor | None,
+) -> list[_BatchResult]:
+    """Processes every message batch of one archive across a worker pool.
+
+    Notes:
+        A pool this function owns pins its workers from both sides. The environment limit reaches the backends that
+        size their pool while importing, and the initializer reaches the backends that read their width the first
+        time they are asked to do work. A caller-supplied pool is left as the caller configured it.
+
+    Args:
+        log_path: The path to the .npz log archive to process.
+        batches: The message keys of each batch, as the archive reader grouped them.
+        onset_us: The onset of the data acquisition, in microseconds elapsed since UTC epoch onset.
+        module_filters: The event codes to extract for each module, keyed by the module type and identifier pair, or
+            None to skip module extraction.
+        kernel_event_codes: The event codes to extract for kernel messages, or None to skip kernel extraction.
+        workers: The number of worker processes to size a self-owned pool at.
+        display_progress: Determines whether to display a progress bar while the batches are processed.
+        executor: When provided, the batches are submitted to this pool instead of a newly created one.
+
+    Returns:
+        The accumulators each batch produced, in the order the batches were generated.
+    """
+    with ExitStack() as pool_scope:
+        if executor is not None:
+            active_executor = executor
+        else:
+            pool_scope.enter_context(limit_worker_threads(thread_count=_WORKER_THREAD_CEILING))
+            active_executor = ProcessPoolExecutor(
+                max_workers=workers,
+                mp_context=_MULTIPROCESSING_CONTEXT,
+                initializer=initialize_worker_threads,
+                initargs=(_WORKER_THREAD_CEILING,),
+            )
+            pool_scope.callback(active_executor.shutdown, wait=True)
+
+        future_to_index = {
+            active_executor.submit(
+                _process_message_batch,
                 log_path=log_path,
-                file_names=all_keys[0],
+                file_names=batch_keys,
                 onset_us=onset_us,
                 module_filters=module_filters,
                 kernel_event_codes=kernel_event_codes,
-            )
+            ): index
+            for index, batch_keys in enumerate(batches)
+        }
 
-            module_data = tuple(
-                _ExtractedModuleData(
-                    module_type=module[0],
-                    module_id=module[1],
-                    messages=_finalize_accumulator(module_batch[module]),
-                )
-                for module in (module_filters or {})
-                if module_batch.get(module) and module_batch[module].timestamps
-            )
-            kernel_data = _finalize_accumulator(kernel_accumulator)
+        # Collects results while maintaining message order.
+        results: list[_BatchResult | None] = [None] * len(batches)
 
+        if display_progress:
+            with console.progress(
+                total=len(batches), description="Extracting microcontroller log data", unit="batch"
+            ) as progress_bar:
+                for future in as_completed(future_to_index):
+                    results[future_to_index[future]] = future.result()
+                    progress_bar.update(1)
         else:
-            # Resolves the number of worker processes to use for parallel processing.
-            if worker_count < 1:
-                worker_count = resolve_worker_count(requested_workers=0)
+            for future in as_completed(future_to_index):
+                results[future_to_index[future]] = future.result()
 
-            # Uses LogArchiveReader to create batches optimized for parallel processing.
-            batch_keys = reader.get_batches(workers=worker_count, batch_multiplier=_BATCH_MULTIPLIER)
-
-            # Uses the provided executor or creates a managed one for this invocation.
-            managed = executor is None
-            active_executor = executor if executor is not None else ProcessPoolExecutor(max_workers=worker_count)
-
-            try:
-                future_to_index = {
-                    active_executor.submit(
-                        _process_message_batch,
-                        log_path=log_path,
-                        file_names=keys,
-                        onset_us=onset_us,
-                        module_filters=module_filters,
-                        kernel_event_codes=kernel_event_codes,
-                    ): index
-                    for index, keys in enumerate(batch_keys)
-                }
-
-                # Collects results while maintaining message order.
-                results: list[_BatchResult | None] = [None] * len(batch_keys)
-
-                if display_progress:
-                    with console.progress(
-                        total=len(batch_keys), description="Extracting microcontroller log data", unit="batch"
-                    ) as progress_bar:
-                        for future in as_completed(future_to_index):
-                            results[future_to_index[future]] = future.result()
-                            progress_bar.update(1)
-                else:
-                    for future in as_completed(future_to_index):
-                        results[future_to_index[future]] = future.result()
-
-            finally:
-                if managed:
-                    active_executor.shutdown(wait=True)
-
-            # Combines columnar accumulators from all batches, maintaining chronological ordering.
-            combined_module_data: dict[tuple[int, int], _ColumnAccumulator] = {
-                module: _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
-                for module in (module_filters or {})
-            }
-            combined_kernel = _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
-
-            for batch_result in results:
-                if batch_result is None:  # pragma: no cover
-                    continue
-
-                module_batch, kernel_accumulator = batch_result
-
-                for module_key, accumulator in module_batch.items():
-                    target = combined_module_data[module_key]
-                    target.timestamps.extend(accumulator.timestamps)
-                    target.commands.extend(accumulator.commands)
-                    target.events.extend(accumulator.events)
-                    target.dtypes.extend(accumulator.dtypes)
-                    target.data_payloads.extend(accumulator.data_payloads)
-
-                combined_kernel.timestamps.extend(kernel_accumulator.timestamps)
-                combined_kernel.commands.extend(kernel_accumulator.commands)
-                combined_kernel.events.extend(kernel_accumulator.events)
-                combined_kernel.dtypes.extend(kernel_accumulator.dtypes)
-                combined_kernel.data_payloads.extend(kernel_accumulator.data_payloads)
-
-            module_data = tuple(
-                _ExtractedModuleData(
-                    module_type=module[0],
-                    module_id=module[1],
-                    messages=_finalize_accumulator(combined_module_data[module]),
-                )
-                for module in (module_filters or {})
-                if combined_module_data[module].timestamps
-            )
-            kernel_data = _finalize_accumulator(combined_kernel)
-
-        # Writes each extracted module's data to a separate feather file.
-        for extracted_module in module_data:
-            _write_module_feather(
-                module_data=extracted_module,
-                source_id=source_id,
-                output_directory=output_directory,
-            )
-
-        # Writes kernel messages to a feather file when kernel extraction was configured.
-        if kernel_data.count:
-            _write_kernel_feather(
-                kernel_data=kernel_data,
-                source_id=source_id,
-                output_directory=output_directory,
-            )
-
-        tracker.complete_job(job_id=job_id)
-
-    except Exception as exception:
-        tracker.fail_job(job_id=job_id, error_message=str(exception))
-        raise
-
-
-def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
-    """Resolves a set of discovered log directories to their recording root directories.
-
-    Recording roots are the meaningful top-level directories that uniquely identify each recording session. Log
-    archives and pipeline outputs may be nested at arbitrary depths below the root, but the root itself is essential
-    for proper recording identification and display labels. Uses _extract_unique_components to identify the first path
-    component (from the end) that uniquely distinguishes each path, then truncates each path at that component to
-    strip shared structural subdirectories without assuming a fixed directory hierarchy.
-
-    Args:
-        paths: The directories containing discovered log archives. Each path is resolved to its recording root
-            by walking up to the ancestor matching its unique component.
-
-    Returns:
-        A deduplicated tuple of recording root paths, one per unique recording.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
-    """
-    unique_ids = _extract_unique_components(paths=list(paths))
-    roots: list[Path] = []
-    for path, unique_id in zip(paths, unique_ids, strict=True):
-        current = path
-        while current.name != unique_id and current != current.parent:
-            current = current.parent
-        if current not in roots:
-            roots.append(current)
-    return tuple(roots)
-
-
-def find_log_archive(log_directory: Path, source_id: str) -> Path:
-    """Searches for a single log archive matching the target source ID under the log directory.
-
-    Recursively searches the log_directory and all subdirectories for an archive file matching the
-    ``{source_id}_log.npz`` naming convention. Expects exactly one match per source ID within the directory tree.
-
-    Args:
-        log_directory: The path to the root directory to search. The directory is searched recursively, so archives
-            may be nested at any depth below this path.
-        source_id: The source ID string to match. Corresponds to the filename prefix before the ``_log.npz`` suffix.
-
-    Returns:
-        The path to the discovered log archive.
-
-    Raises:
-        FileNotFoundError: If the log_directory does not exist, is not a directory, or no archive matching the
-            source ID is found.
-        ValueError: If multiple archives matching the source ID are found under the log directory.
-    """
-    if not log_directory.exists() or not log_directory.is_dir():
-        message = (
-            f"Unable to find log archive for source '{source_id}' in '{log_directory}'. The path does not exist or "
-            f"is not a directory."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    matches = sorted(log_directory.rglob(f"{source_id}{LOG_ARCHIVE_SUFFIX}"))
-
-    if not matches:
-        message = (
-            f"Unable to find log archive for source '{source_id}' in '{log_directory}'. No file matching "
-            f"'{source_id}{LOG_ARCHIVE_SUFFIX}' was found."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    if len(matches) > 1:
-        message = (
-            f"Unable to find log archive for source '{source_id}' in '{log_directory}'. Found {len(matches)} "
-            f"matching archives, but expected exactly one: {[str(p) for p in matches]}."
-        )
-        console.error(message=message, error=ValueError)
-
-    return matches[0]
-
-
-def generate_job_ids(source_ids: list[str]) -> dict[str, str]:
-    """Generates unique processing job identifiers for each source ID.
-
-    Args:
-        source_ids: The list of source ID strings for which to generate job IDs.
-
-    Returns:
-        A dictionary mapping source IDs to their generated hexadecimal job identifiers.
-    """
-    return {
-        source_id: ProcessingTracker.generate_job_id(job_name=EXTRACTION_JOB_NAME, specifier=source_id)
-        for source_id in source_ids
-    }
+    return [batch_result for batch_result in results if batch_result is not None]
 
 
 def _process_message_batch(
@@ -632,10 +316,9 @@ def _process_message_batch(
     """Processes a batch of messages from a MicroControllerInterface log archive, extracting both hardware module
     and kernel messages in a single pass into columnar accumulators.
 
-    This worker function is used by execute_job() to process multiple message batches in parallel. Each message
-    is routed to module or kernel accumulators based on its protocol code, then filtered by per-module event codes.
-    Each module is filtered against its own event code set to prevent off-target extraction across modules. Data
-    payloads are converted to bytes immediately to avoid storing intermediate numpy objects.
+    Each message is routed to module or kernel accumulators based on its protocol code, then filtered by per-module
+    event codes. Each module is filtered against its own event code set to prevent off-target extraction across
+    modules. Data payloads are converted to bytes immediately to avoid storing intermediate numpy objects.
 
     Args:
         log_path: The path to the processed .npz log file.
@@ -656,11 +339,8 @@ def _process_message_batch(
     extract_modules = module_filters is not None
     extract_kernel = kernel_event_codes is not None
 
-    module_data: dict[tuple[int, int], _ColumnAccumulator] = {
-        module: _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
-        for module in (module_filters or {})
-    }
-    kernel_accumulator = _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
+    module_data = _create_accumulators(module_filters=module_filters)
+    kernel_accumulator = _create_accumulator()
 
     # Pre-creates protocol sets outside the per-message loop to avoid re-creating them on every iteration.
     module_protocols = frozenset({SerialProtocols.MODULE_DATA, SerialProtocols.MODULE_STATE})
@@ -695,18 +375,12 @@ def _process_message_batch(
                 dtype_str = SerialPrototypes.get_dtype_for_code(code=prototype_code)
                 if dtype_str is not None:
                     data_payload = payload[6:].tobytes()
-
-                    # The prototype code declares both the dtype and the width of the data object that follows it, so
-                    # a payload of any other width cannot be decoded through the dtype stored alongside it.
-                    declared_size = SerialPrototypes.get_byte_size_for_code(code=prototype_code)
-                    if declared_size is not None and len(data_payload) != declared_size:
-                        message = (
-                            f"Unable to extract the data message logged by the module {current_module[0]} "
-                            f"{current_module[1]} to '{log_path}'. The message declares the prototype code "
-                            f"{prototype_code}, whose data object occupies {declared_size} bytes, but it carries a "
-                            f"{len(data_payload)}-byte data payload."
-                        )
-                        console.error(message=message, error=ValueError)
+                    _validate_payload_size(
+                        prototype_code=prototype_code,
+                        data_payload=data_payload,
+                        source_label=f"the module {current_module[0]} {current_module[1]}",
+                        log_path=log_path,
+                    )
 
             # Appends directly to the module's columnar accumulator.
             accumulator = module_data[current_module]
@@ -726,9 +400,16 @@ def _process_message_batch(
             dtype_str = None
             data_payload = None
             if protocol == SerialProtocols.KERNEL_DATA:
-                dtype_str = SerialPrototypes.get_dtype_for_code(code=int(payload[3]))
+                prototype_code = int(payload[3])
+                dtype_str = SerialPrototypes.get_dtype_for_code(code=prototype_code)
                 if dtype_str is not None:
                     data_payload = payload[4:].tobytes()
+                    _validate_payload_size(
+                        prototype_code=prototype_code,
+                        data_payload=data_payload,
+                        source_label="the kernel",
+                        log_path=log_path,
+                    )
 
             # Appends directly to the kernel's columnar accumulator.
             kernel_accumulator.timestamps.append(int(log_msg.timestamp_us))
@@ -740,61 +421,85 @@ def _process_message_batch(
     return module_data, kernel_accumulator
 
 
-def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
-    """Extracts the first component from the end of each input path that uniquely identifies each path globally.
+def _validate_payload_size(
+    prototype_code: int,
+    data_payload: bytes,
+    source_label: str,
+    log_path: Path,
+) -> None:
+    """Verifies that a data message carries the payload width its prototype code declares.
 
-    Adapts the processing pipeline to directory structures where the unique recording identifier appears at different
-    levels of the path hierarchy. For each path, the selected component is the first one, scanning from the end of the
-    path toward the root, that is unique across all input paths. Shared trailing components are skipped in favor of the
-    distinguishing ancestor.
-
-    Uses a frequency counter to count how many distinct paths contain each component, then selects the first
-    component (from the end) that appears in exactly one path.
+    Notes:
+        The prototype code declares both the dtype and the width of the data object that follows it, so a payload of
+        any other width cannot be decoded through the dtype stored alongside it in the extracted feather.
 
     Args:
-        paths: The directories from which to extract unique identifying components.
-
-    Returns:
-        A tuple of unique component strings, one for each path, stored in the same order as the input paths.
+        prototype_code: The prototype code the message declares.
+        data_payload: The raw payload bytes the message carries.
+        source_label: The description of the message sender, used to attribute the failure.
+        log_path: The path to the archive holding the message, used to attribute the failure.
 
     Raises:
-        RuntimeError: If one or more paths do not contain unique components.
+        ValueError: If the payload width disagrees with the width the prototype code declares.
     """
-    # Builds per-path component sets and a global frequency counter in a single pass. Each component is counted
-    # once per path (not once per occurrence), so shared components get count == number of paths containing them.
-    path_parts: list[tuple[str, ...]] = [path.parts for path in paths]
-    component_path_count: dict[str, int] = {}
-    for parts in path_parts:
-        for component in set(parts):
-            component_path_count[component] = component_path_count.get(component, 0) + 1
-
-    # For each path, finds the first component from the end that appears in exactly one path.
-    unique_components: list[str] = []
-    for path, parts in zip(paths, path_parts, strict=True):
-        found_unique = False
-        for component in reversed(parts):
-            if component_path_count[component] == 1:
-                unique_components.append(component)
-                found_unique = True
-                break
-
-        if not found_unique:
-            message = f"Unable to extract a unique component from the given path: {path}."
-            console.error(message=message, error=RuntimeError)
-
-    return tuple(unique_components)
+    declared_size = SerialPrototypes.get_byte_size_for_code(code=prototype_code)
+    if declared_size is not None and len(data_payload) != declared_size:
+        message = (
+            f"Unable to extract the data message logged by {source_label} to '{log_path}'. The message declares the "
+            f"prototype code {prototype_code}, whose data object occupies {declared_size} bytes, but it carries a "
+            f"{len(data_payload)}-byte data payload."
+        )
+        console.error(message=message, error=ValueError)
 
 
-def _finalize_accumulator(accumulator: _ColumnAccumulator) -> _ExtractedMessages:
-    """Converts a growable column accumulator into a finalized _ExtractedMessages instance with numpy arrays.
+def _create_accumulator() -> _ColumnAccumulator:
+    """Creates an empty column accumulator.
+
+    Returns:
+        A column accumulator holding no messages.
+    """
+    return _ColumnAccumulator(timestamps=[], commands=[], events=[], dtypes=[], data_payloads=[])
+
+
+def _create_accumulators(
+    module_filters: dict[tuple[int, int], frozenset[int]] | None,
+) -> dict[tuple[int, int], _ColumnAccumulator]:
+    """Creates one empty column accumulator per requested module.
+
+    Args:
+        module_filters: The event codes to extract for each module, keyed by the module type and identifier pair, or
+            None when module extraction is not requested.
+
+    Returns:
+        An empty column accumulator for each requested module, keyed by that module's type and identifier pair.
+    """
+    return {module: _create_accumulator() for module in (module_filters or {})}
+
+
+def _extend_accumulator(target: _ColumnAccumulator, source: _ColumnAccumulator) -> None:
+    """Appends every message a source accumulator holds to the target accumulator.
+
+    Args:
+        target: The accumulator the messages are appended to.
+        source: The accumulator the messages are read from.
+    """
+    target.timestamps.extend(source.timestamps)
+    target.commands.extend(source.commands)
+    target.events.extend(source.events)
+    target.dtypes.extend(source.dtypes)
+    target.data_payloads.extend(source.data_payloads)
+
+
+def _finalize_accumulator(accumulator: _ColumnAccumulator) -> ExtractedMessages:
+    """Converts a growable column accumulator into a finalized ExtractedMessages instance with numpy arrays.
 
     Args:
         accumulator: The column accumulator to finalize.
 
     Returns:
-        An _ExtractedMessages instance with numpy arrays built from the accumulator's lists.
+        An ExtractedMessages instance with numpy arrays built from the accumulator's lists.
     """
-    return _ExtractedMessages(
+    return ExtractedMessages(
         timestamps=np.array(accumulator.timestamps, dtype=np.uint64),
         commands=np.array(accumulator.commands, dtype=np.uint8),
         events=np.array(accumulator.events, dtype=np.uint8),
@@ -803,72 +508,34 @@ def _finalize_accumulator(accumulator: _ColumnAccumulator) -> _ExtractedMessages
     )
 
 
-def _build_message_dataframe(messages: _ExtractedMessages) -> pl.DataFrame:
-    """Builds a polars DataFrame directly from an _ExtractedMessages columnar structure.
+def _finalize_batch(
+    module_accumulators: dict[tuple[int, int], _ColumnAccumulator],
+    kernel_accumulator: _ColumnAccumulator,
+    module_filters: dict[tuple[int, int], frozenset[int]] | None,
+) -> ExtractedControllerData:
+    """Converts the accumulators of one extraction pass into the finalized controller data.
 
-    Passes pre-built numpy arrays to polars Series constructors with zero re-iteration. The ``dtype`` column stores
-    the numpy dtype string for each message's data payload, enabling reconstruction via
-    ``np.frombuffer(payload, dtype=dtype_str)`` without any library dependency.
+    Notes:
+        Reports a module only when it produced at least one matching message, so a configured module that stayed
+        silent for the whole recording contributes no entry and therefore no output file.
 
     Args:
-        messages: The columnar message data to serialize.
+        module_accumulators: The column accumulator of each requested module, keyed by the module type and
+            identifier pair.
+        kernel_accumulator: The column accumulator holding the extracted kernel messages.
+        module_filters: The event codes requested for each module, whose key order the reported modules follow.
 
     Returns:
-        A polars DataFrame with columns: timestamp_us (UInt64), command (UInt8), event (UInt8),
-        dtype (String), and data (Binary).
+        The finalized controller data.
     """
-    return pl.DataFrame(
-        {
-            "timestamp_us": pl.Series(name="timestamp_us", values=messages.timestamps, dtype=pl.UInt64),
-            "command": pl.Series(name="command", values=messages.commands, dtype=pl.UInt8),
-            "event": pl.Series(name="event", values=messages.events, dtype=pl.UInt8),
-            "dtype": pl.Series(name="dtype", values=list(messages.dtypes), dtype=pl.String),
-            "data": pl.Series(name="data", values=list(messages.data_payloads), dtype=pl.Binary),
-        }
+    modules = tuple(
+        ExtractedModuleData(
+            module_type=module[0],
+            module_id=module[1],
+            messages=_finalize_accumulator(accumulator=module_accumulators[module]),
+        )
+        for module in (module_filters or {})
+        if module_accumulators[module].timestamps
     )
 
-
-def _write_module_feather(
-    module_data: _ExtractedModuleData,
-    source_id: str,
-    output_directory: Path,
-) -> None:
-    """Serializes extracted module data to a feather (IPC) file.
-
-    Builds a polars DataFrame directly from the module's columnar message data and writes it to the output directory
-    using the ``controller_{source_id}_module_{type}_{id}.feather`` naming convention.
-
-    Args:
-        module_data: The extracted data for a single hardware module.
-        source_id: The source ID string identifying the originating log archive.
-        output_directory: The path to the directory where the feather file is written.
-    """
-    dataframe = _build_message_dataframe(messages=module_data.messages)
-
-    filename = (
-        f"{CONTROLLER_FEATHER_PREFIX}{source_id}"
-        f"{MODULE_FEATHER_INFIX}{module_data.module_type}_{module_data.module_id}"
-        f"{FEATHER_SUFFIX}"
-    )
-    dataframe.write_ipc(file=output_directory / filename)
-
-
-def _write_kernel_feather(
-    kernel_data: _ExtractedMessages,
-    source_id: str,
-    output_directory: Path,
-) -> None:
-    """Serializes extracted kernel messages to a feather (IPC) file.
-
-    Builds a polars DataFrame directly from the kernel's columnar message data and writes it to the output directory
-    using the ``controller_{source_id}_kernel.feather`` naming convention.
-
-    Args:
-        kernel_data: The extracted kernel messages in columnar form.
-        source_id: The source ID string identifying the originating log archive.
-        output_directory: The path to the directory where the feather file is written.
-    """
-    dataframe = _build_message_dataframe(messages=kernel_data)
-
-    filename = f"{CONTROLLER_FEATHER_PREFIX}{source_id}{KERNEL_FEATHER_INFIX}{FEATHER_SUFFIX}"
-    dataframe.write_ipc(file=output_directory / filename)
+    return ExtractedControllerData(modules=modules, kernel=_finalize_accumulator(accumulator=kernel_accumulator))
