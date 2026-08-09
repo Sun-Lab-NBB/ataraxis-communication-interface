@@ -174,7 +174,7 @@ data from DataLogger archives.
 | `src/.../microcontroller/extracted_data.py` | Extracted message table schema, its writer, and the primitives that read it   |
 | `src/.../orchestration/`                    | Job discovery, resource allocation, batch execution, and the pipeline entry   |
 | `src/.../interfaces/`                       | CLI (`axci`), MCP server entry point, shared instance, and MCP tool groups    |
-| `tests/`                                    | Test suite (dataclasses, communication, extraction, and orchestration)        |
+| `tests/`                                    | Test suite, grouped into per-package directories mirroring the source layout  |
 | `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
 | `docs/`                                     | Sphinx API documentation source                                               |
 

@@ -41,7 +41,6 @@ Orchestration
 .. autodata:: ataraxis_communication_interface.orchestration.jobs.MODULE_FEATHER_INFIX
 .. autodata:: ataraxis_communication_interface.orchestration.jobs.KERNEL_FEATHER_INFIX
 .. autodata:: ataraxis_communication_interface.orchestration.jobs.FEATHER_SUFFIX
-.. autodata:: ataraxis_communication_interface.orchestration.allocation.RESERVED_CORES
 .. autodata:: ataraxis_communication_interface.orchestration.allocation.EXTRACTION_JOB_CORES
 
 CLI

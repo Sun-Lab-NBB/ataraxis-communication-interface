@@ -219,6 +219,12 @@ exclude = [
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
 
+# Places the repository root on sys.path, so that the 'tests' package is importable by the test modules that share the
+# synthetic log archive builders. The import mode above resolves test modules without touching sys.path, which leaves a
+# sibling helper unreachable on its own once the test modules live in per-package subdirectories. The src layout keeps
+# this entry from shadowing the installed distribution the tests measure coverage against.
+pythonpath = ["."]
+
 # Lists the source files excluded from coverage measurement in full. The interfaces subpackage holds the CLI and the
 # MCP server tools, which are covered by the tests written for the library functions they wrap. The 'parallel' and
 # 'concurrency' keys extend measurement to the spawned communication and log-processing worker processes and to the
