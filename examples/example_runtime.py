@@ -181,7 +181,7 @@ if __name__ == "__main__":
 
     # Saves the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
     config_path = data_logger.output_directory / "extraction_config.yaml"
-    config.save(file_path=config_path)
+    config.to_yaml(file_path=config_path)
     console.echo(message=f"Extraction config written to: {config_path}", level=LogLevel.SUCCESS)
 
     # Runs the log processing pipeline. Extracts hardware module and kernel message data from the log archives and

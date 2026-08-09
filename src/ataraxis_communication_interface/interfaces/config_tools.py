@@ -39,7 +39,7 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
         return {"error": f"Path is not a file: {config_path}"}
 
     try:
-        config = ExtractionConfig.load(file_path=path)
+        config = ExtractionConfig.from_yaml(file_path=path)
     except Exception as error:
         return {"error": f"Unable to read extraction config: {error}"}
 
@@ -132,7 +132,7 @@ def write_extraction_config_tool(config_path: str, controllers: list[dict[str, A
     output = Path(config_path)
 
     try:
-        config.save(file_path=output)
+        config.to_yaml(file_path=output)
     except Exception as error:
         return {"error": f"Unable to write extraction config: {error}"}
 
@@ -174,7 +174,7 @@ def validate_extraction_config_tool(
         return {"error": f"Path is not a file: {config_path}"}
 
     try:
-        config = ExtractionConfig.load(file_path=path)
+        config = ExtractionConfig.from_yaml(file_path=path)
     except Exception as error:
         return {"error": f"Unable to parse extraction config: {error}"}
 
@@ -224,7 +224,7 @@ def validate_extraction_config_tool(
             errors.append(f"Manifest path is not a file: {manifest_path}")
         else:
             try:
-                manifest = MicroControllerManifest.load(file_path=manifest_file)
+                manifest = MicroControllerManifest.from_yaml(file_path=manifest_file)
             except Exception as error:
                 errors.append(f"Unable to read manifest for cross-referencing: {error}")
                 manifest = None

@@ -1,4 +1,6 @@
-"""Provides the microcontroller interface classes, configuration dataclasses, and the log processing pipeline."""
+"""Provides the microcontroller interface classes, the configuration dataclasses, and the log data extraction
+algorithm.
+"""
 
 from .interface import ModuleInterface, MicroControllerInterface, evaluate_port
 from .dataclasses import (
@@ -14,34 +16,28 @@ from .dataclasses import (
     create_extraction_config,
     write_microcontroller_manifest,
 )
+from .extracted_data import (
+    ExtractedDataColumns,
+    get_event_data,
+    partition_events,
+    get_event_timestamps,
+    build_message_dataframe,
+)
 from .log_processing import (
-    FEATHER_SUFFIX,
-    TRACKER_FILENAME,
-    LOG_ARCHIVE_SUFFIX,
-    EXTRACTION_JOB_NAME,
-    KERNEL_FEATHER_INFIX,
-    MODULE_FEATHER_INFIX,
-    PARALLEL_PROCESSING_THRESHOLD,
-    MICROCONTROLLER_DATA_DIRECTORY,
-    execute_job,
-    find_log_archive,
-    generate_job_ids,
-    resolve_recording_roots,
-    run_log_processing_pipeline,
+    ExtractedMessages,
+    ExtractedModuleData,
+    ExtractedControllerData,
+    extract_logged_microcontroller_data,
 )
 
 __all__ = [
     "EXTRACTION_CONFIGURATION_FILENAME",
-    "EXTRACTION_JOB_NAME",
-    "FEATHER_SUFFIX",
-    "KERNEL_FEATHER_INFIX",
-    "LOG_ARCHIVE_SUFFIX",
-    "MICROCONTROLLER_DATA_DIRECTORY",
     "MICROCONTROLLER_MANIFEST_FILENAME",
-    "MODULE_FEATHER_INFIX",
-    "PARALLEL_PROCESSING_THRESHOLD",
-    "TRACKER_FILENAME",
     "ControllerExtractionConfig",
+    "ExtractedControllerData",
+    "ExtractedDataColumns",
+    "ExtractedMessages",
+    "ExtractedModuleData",
     "ExtractionConfig",
     "KernelExtractionConfig",
     "MicroControllerInterface",
@@ -50,12 +46,12 @@ __all__ = [
     "ModuleExtractionConfig",
     "ModuleInterface",
     "ModuleSourceData",
+    "build_message_dataframe",
     "create_extraction_config",
     "evaluate_port",
-    "execute_job",
-    "find_log_archive",
-    "generate_job_ids",
-    "resolve_recording_roots",
-    "run_log_processing_pipeline",
+    "extract_logged_microcontroller_data",
+    "get_event_data",
+    "get_event_timestamps",
+    "partition_events",
     "write_microcontroller_manifest",
 ]

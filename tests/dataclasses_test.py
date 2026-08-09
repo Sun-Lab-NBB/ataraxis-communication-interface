@@ -121,11 +121,11 @@ def test_microcontroller_manifest_save_load_roundtrip(tmp_path: Path) -> None:
     manifest.controllers.append(controller)
 
     file_path = tmp_path / "manifest.yaml"
-    manifest.save(file_path=file_path)
+    manifest.to_yaml(file_path=file_path)
 
     assert file_path.exists()
 
-    loaded = MicroControllerManifest.load(file_path=file_path)
+    loaded = MicroControllerManifest.from_yaml(file_path=file_path)
 
     assert len(loaded.controllers) == 1
     assert loaded.controllers[0].id == 10
@@ -149,9 +149,9 @@ def test_microcontroller_manifest_multiple_controllers(tmp_path: Path) -> None:
     manifest.controllers.extend([controller_1, controller_2])
 
     file_path = tmp_path / "manifest.yaml"
-    manifest.save(file_path=file_path)
+    manifest.to_yaml(file_path=file_path)
 
-    loaded = MicroControllerManifest.load(file_path=file_path)
+    loaded = MicroControllerManifest.from_yaml(file_path=file_path)
 
     assert len(loaded.controllers) == 2
     assert loaded.controllers[0].id == 1
@@ -167,11 +167,11 @@ def test_extraction_config_save_load_roundtrip(tmp_path: Path) -> None:
     config = ExtractionConfig(controllers=[controller])
 
     file_path = tmp_path / "config.yaml"
-    config.save(file_path=file_path)
+    config.to_yaml(file_path=file_path)
 
     assert file_path.exists()
 
-    loaded = ExtractionConfig.load(file_path=file_path)
+    loaded = ExtractionConfig.from_yaml(file_path=file_path)
 
     assert len(loaded.controllers) == 1
     assert loaded.controllers[0].controller_id == 10
@@ -193,8 +193,8 @@ def test_extraction_config_no_kernel_roundtrip(tmp_path: Path) -> None:
     )
 
     file_path = tmp_path / "config.yaml"
-    config.save(file_path=file_path)
-    loaded = ExtractionConfig.load(file_path=file_path)
+    config.to_yaml(file_path=file_path)
+    loaded = ExtractionConfig.from_yaml(file_path=file_path)
 
     assert loaded.controllers[0].kernel is None
 
@@ -209,7 +209,7 @@ def test_write_microcontroller_manifest_new(tmp_path: Path) -> None:
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
     assert manifest_path.exists()
 
-    loaded = MicroControllerManifest.load(file_path=manifest_path)
+    loaded = MicroControllerManifest.from_yaml(file_path=manifest_path)
     assert len(loaded.controllers) == 1
     assert loaded.controllers[0].id == 10
     assert loaded.controllers[0].name == "actor_controller"
@@ -228,7 +228,7 @@ def test_write_microcontroller_manifest_append(tmp_path: Path) -> None:
     )
 
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
-    loaded = MicroControllerManifest.load(file_path=manifest_path)
+    loaded = MicroControllerManifest.from_yaml(file_path=manifest_path)
 
     assert len(loaded.controllers) == 2
     assert loaded.controllers[0].id == 10
@@ -245,7 +245,7 @@ def test_create_extraction_config(tmp_path: Path) -> None:
     manifest.controllers.append(MicroControllerSourceData(id=10, name="controller", modules=modules))
 
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
-    manifest.save(file_path=manifest_path)
+    manifest.to_yaml(file_path=manifest_path)
 
     config = create_extraction_config(manifest_path=manifest_path)
 
@@ -273,7 +273,7 @@ def test_create_extraction_config_multiple_controllers(tmp_path: Path) -> None:
     )
 
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
-    manifest.save(file_path=manifest_path)
+    manifest.to_yaml(file_path=manifest_path)
 
     config = create_extraction_config(manifest_path=manifest_path)
 
@@ -295,7 +295,7 @@ def test_create_extraction_config_empty_manifest(tmp_path: Path) -> None:
     """Verifies that create_extraction_config raises ValueError for an empty manifest."""
     manifest = MicroControllerManifest(controllers=[])
     manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
-    manifest.save(file_path=manifest_path)
+    manifest.to_yaml(file_path=manifest_path)
 
     message = (
         f"Unable to create extraction config from '{manifest_path}'. The "

@@ -98,7 +98,6 @@ class TestModuleInterface(ModuleInterface):
     def start_shared_memory_array(self) -> None:
         """Connects to the shared memory array from the main process after the communication process starts."""
         self._shared_memory.connect()
-        self._shared_memory.enable_buffer_destruction()
 
     def set_parameters(
         self,

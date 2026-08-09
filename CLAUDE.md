@@ -170,9 +170,11 @@ data from DataLogger archives.
 | `src/.../communication/`                    | Serial/MQTT communication package (`protocols`, `messages`, `serial`, `mqtt`) |
 | `src/.../microcontroller/interface.py`      | Core MicroControllerInterface and ModuleInterface ABC                         |
 | `src/.../microcontroller/dataclasses.py`    | Manifest and extraction configuration data structures                         |
-| `src/.../microcontroller/log_processing.py` | Log data processing pipeline for extracting module/kernel events              |
+| `src/.../microcontroller/log_processing.py` | Log data extraction algorithm and the columnar structures it returns          |
+| `src/.../microcontroller/extracted_data.py` | Extracted message table schema, its writer, and the primitives that read it   |
+| `src/.../orchestration/`                    | Job discovery, resource allocation, batch execution, and the pipeline entry   |
 | `src/.../interfaces/`                       | CLI (`axci`), MCP server entry point, shared instance, and MCP tool groups    |
-| `tests/`                                    | Test suite (dataclasses, communication, log_processing)                       |
+| `tests/`                                    | Test suite (dataclasses, communication, extraction, and orchestration)        |
 | `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
 | `docs/`                                     | Sphinx API documentation source                                               |
 
@@ -209,12 +211,19 @@ data from DataLogger archives.
   and event codes to extract from log archives. `ControllerExtractionConfig` contains per-controller settings with
   `ModuleExtractionConfig` (module_type, module_id, event_codes) and optional `KernelExtractionConfig`.
   `create_extraction_config()` generates a precursor config from a manifest with empty event codes.
-- **Log Processing**: Pipeline for extracting hardware module and kernel event data from DataLogger `.npz` archives.
-  Requires a `microcontroller_manifest.yaml` in the log directory for source ID resolution and validation. Supports
-  sequential and parallel (`ProcessPoolExecutor`) processing with a 2000-message threshold for parallelization.
-  Uses `LogArchiveReader` for archive access and `ProcessingTracker` for job lifecycle management.
-  `run_log_processing_pipeline()` orchestrates local (all jobs) and remote (single job by ID) execution modes.
-  Outputs Polars DataFrames as Feather (Arrow IPC) files in a `microcontroller_data/` subdirectory.
+- **Log Data Extraction**: `extract_logged_microcontroller_data()` (`microcontroller/log_processing.py`) reads a
+  DataLogger `.npz` archive once and returns the matching module and kernel messages as `ExtractedControllerData`.
+  Uses `LogArchiveReader` for archive access and the `PARALLEL_PROCESSING_THRESHOLD` constant from
+  ataraxis-data-structures to choose between the sequential and the `ProcessPoolExecutor` path. A self-owned pool
+  pins its workers through `limit_worker_threads()` and `initialize_worker_threads()`.
+- **Orchestration**: The `orchestration/` package owns everything above the extraction algorithm. `jobs.py` holds the
+  job identity constants, `PendingJob`, and `discover_microcontroller_jobs()`, which derives the job universe from
+  the `microcontroller_manifest.yaml` and indexes the archives backing it in one pass. `allocation.py` sizes each job
+  from `ArchiveFootprint`, resolving cores through `resolve_job_workers()` and memory through
+  `estimate_job_memory_mb()`. `execution.py` runs the batch engine that admits jobs against a core and a memory
+  budget. `pipeline.py` exposes `execute_job()` and `run_log_processing_pipeline()`, which supports local (all jobs)
+  and remote (single job by ID) execution modes. Outputs Polars DataFrames as Feather (Arrow IPC) files written
+  through `atomic_write()` into a `microcontroller_data/` subdirectory.
 - **MCP Server**: `FastMCP` instance (`name="ataraxis-communication-interface"`, `json_response=True`) defined in
   `interfaces/mcp_instance.py`, with 19 tools split across `interfaces/discovery_tools.py`, `config_tools.py`,
   `processing_tools.py`, and `output_tools.py`. The tool modules register on the shared instance via `@mcp.tool()`
@@ -222,10 +231,10 @@ data from DataLogger archives.
   `run_server()`. Tool categories: microcontroller discovery (2), log archive management (1), manifest management (2),
   recording discovery (1), extraction config management (3), batch processing execution (2), processing status and
   management (5), and output verification and cleanup (3). Batch log processing uses `JobExecutionState` (in
-  `interfaces/mcp_execution.py`, accessed via `get_execution_state()` / `set_execution_state()`) with budget-based
-  worker allocation: the execution manager divides the CPU budget evenly among concurrent parallel jobs (snapped to
-  multiples of 5) with a sqrt-derived saturation floor. The MCP server is registered with MCP clients via the
-  **communication** plugin in the ataraxis marketplace, not directly from this repository.
+  `orchestration/execution.py`, accessed via `get_execution_state()` / `set_execution_state()`), which admits each
+  job once the running set has room for both the cores and the memory that job's own archive resolved. The MCP server
+  is registered with MCP clients via the **communication** plugin in the ataraxis marketplace, not directly from this
+  repository.
 - **CLI**: Click command group (`axci`) with `id` for microcontroller discovery, `mqtt` for broker verification,
   `config` subgroup (`create`, `show`) for extraction configuration management, `process` for log data processing,
   and `mcp` for starting the MCP server.
@@ -246,9 +255,21 @@ data from DataLogger archives.
   were produced by ataraxis-communication-interface and to route jobs by source ID.
 - **Columnar Data Extraction**: Log processing accumulates data in parallel lists via `_ColumnAccumulator`, converts
   to numpy arrays, then builds Polars DataFrames for efficient Feather output.
-- **Budget-Based Worker Allocation**: The MCP execution manager computes a worker budget as `available_cores - 2`,
-  divides it among concurrent jobs snapped to multiples of 5, with a sqrt-derived saturation floor based on message
-  count (`ceil(sqrt(messages / 1000))`).
+- **Archive-Derived Job Sizing**: Every job is sized before dispatch from the archive it will read.
+  `resolve_archive_footprint()` reads the `.npz` zip directory and the file size, `resolve_job_workers()` narrows the
+  declared `EXTRACTION_JOB_CORES` width to the workers the archive repays at one worker per
+  `PARALLEL_PROCESSING_THRESHOLD` messages, and `estimate_job_memory_mb()` charges the archive directory once per
+  allocated core. The execution manager then admits jobs against both a core budget (`available_cores - 2`) and a
+  memory budget (a share of the host's physical memory), admitting an oversized job alone rather than starving it.
+  The declared width and every memory term carry the values the platform's own estimators were calibrated to against
+  measured peaks, so this stage's jobs and the stages queued beside them are sized on one scale. Changing a constant
+  here changes how this stage competes for admission against every other stage a scheduler plans with it.
+- **Library-Owned Output Contract**: This library owns both directions of the format it writes.
+  `resolve_module_feather_path()` and `resolve_kernel_feather_path()` name the files, `find_module_feathers()` and
+  `parse_module_feather_name()` recover them, and `partition_events()`, `get_event_timestamps()`, and
+  `get_event_data()` read the table through the ``ExtractedDataColumns`` enumeration rather than through string
+  literals. A downstream
+  consumer reads the extracted data through these rather than reimplementing the naming convention and the schema.
 - **Frozen Dataclasses**: Inner data classes (`ModuleSourceData`, `MicroControllerSourceData`,
   `ModuleExtractionConfig`, `KernelExtractionConfig`, `ControllerExtractionConfig`) use `frozen=True` for
   immutability and `slots=True` for performance. The top-level `MicroControllerManifest` and `ExtractionConfig`
@@ -281,16 +302,24 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
 - **MQTT communication** (`communication/mqtt.py`): `paho-mqtt` v2 client with callback reception into a `Queue`.
   `get_data()` returns `(topic, message)` tuples or `None`, and the `has_data` property checks queue state.
 - **Data classes and manifests** (`microcontroller/dataclasses.py`): inner classes are frozen, so create new instances
-  rather than mutating. `MicroControllerManifest` and `ExtractionConfig` are mutable `YamlConfig` subclasses.
+  rather than mutating. `MicroControllerManifest` and `ExtractionConfig` are mutable `YamlConfig` subclasses read and
+  written through the inherited `from_yaml()` and `to_yaml()`, which creates the parent directory itself.
   `create_extraction_config()` builds a precursor config with empty event codes.
-- **Log processing** (`microcontroller/log_processing.py`): `run_log_processing_pipeline()` supports local (all jobs)
-  and remote (single job by ID) modes. The `config` parameter is a `Path` loaded internally, the parallelization
-  threshold is 2000 messages, and `ProcessingTracker` manages job lifecycle via YAML state files. Extraction rejects
-  any data message whose payload size disagrees with the size its prototype code declares, because the extracted
-  feather stores that prototype's dtype alongside the raw payload bytes and a mismatched pair cannot be decoded.
+- **Log data extraction** (`microcontroller/log_processing.py`): `extract_logged_microcontroller_data()` returns
+  columnar data and writes nothing, so the caller owns the output layout. Extraction rejects any data message whose
+  payload size disagrees with the size its prototype code declares, because the extracted feather stores that
+  prototype's dtype alongside the raw payload bytes and a mismatched pair cannot be decoded.
+- **Extracted data access** (`microcontroller/extracted_data.py`): reading an extracted feather goes through
+  `partition_events()` and then `get_event_timestamps()` or `get_event_data()`. `get_event_data()` decodes a whole
+  event stream through one buffer read, which the firmware's one-data-type-per-event-code guarantee permits.
+- **Orchestration** (`orchestration/`): `run_log_processing_pipeline()` supports local (all jobs) and remote (single
+  job by ID) modes. The `config` parameter is a `Path` loaded internally, and the tracker universe comes from the
+  manifest rather than from the config, so a config requesting a subset never resets its sibling jobs.
+  `execute_job()` wraps the work in `ProcessingTracker.run_job()`, which records the start, the completion, and the
+  failure without a hand-written guard.
 - **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors. The `config`
   subgroup demonstrates nested Click command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via
   `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return
-  JSON-serializable `dict[str, Any]`. Execution uses `JobExecutionState` (`interfaces/mcp_execution.py`) with
-  budget-based worker allocation.
+  JSON-serializable `dict[str, Any]`. Execution uses `JobExecutionState` (`orchestration/execution.py`) with
+  archive-derived core and memory budgets.

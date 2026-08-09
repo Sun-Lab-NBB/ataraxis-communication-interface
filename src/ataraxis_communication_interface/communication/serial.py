@@ -67,7 +67,9 @@ class SerialCommunication:
         controller_id: The identifier code of the microcontroller to communicate with.
         microcontroller_serial_buffer_size: The size, in bytes, of the buffer used by the communicated microcontroller's
             serial communication interface. Usually, this information is available from the microcontroller's
-            manufacturer (UART / USB controller specification).
+            manufacturer (UART / USB controller specification). Must be at least 9 bytes. The value bounds the size of
+            the payloads the PC transmits, while reception is bounded by the 254-byte ceiling the COBS encoding
+            imposes.
         port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'.
         logger_queue: The multiprocessing Queue object exposed by the DataLogger instance used to pipe the data to be
             logged to the logger process.
@@ -111,6 +113,7 @@ class SerialCommunication:
             initial_crc_value=np.uint16(0xFFFF),
             final_crc_xor_value=np.uint16(0x0000),
             microcontroller_serial_buffer_size=microcontroller_serial_buffer_size,
+            reflected=False,  # CRC-16/CCITT-FALSE processes both the input bytes and the remainder unreflected
             test_mode=test_mode,
         )
 

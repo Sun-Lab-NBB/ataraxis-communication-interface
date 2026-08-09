@@ -11,13 +11,14 @@ from ataraxis_time import TimeUnits, convert_time
 from ataraxis_data_structures import delete_directory
 
 from .mcp_instance import mcp, read_tracker_status
-from ..microcontroller import (
+from ..orchestration import (
     FEATHER_SUFFIX,
     TRACKER_FILENAME,
     KERNEL_FEATHER_INFIX,
     MODULE_FEATHER_INFIX,
     MICROCONTROLLER_DATA_DIRECTORY,
 )
+from ..microcontroller import ExtractedDataColumns
 
 _MINIMUM_ROWS_FOR_INTERVALS: int = 2
 """The minimum number of rows required in a feather file to compute inter-event timing intervals."""
@@ -59,7 +60,7 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
             ),
         }
 
-    expected_columns = {"timestamp_us", "command", "event", "dtype", "data"}
+    expected_columns = set(ExtractedDataColumns)
     file_results: list[dict[str, Any]] = []
     all_valid = True
 
@@ -244,7 +245,7 @@ def _analyze_single_event_feather(
     except Exception as error:
         return {"file": feather_file, "error": f"Unable to read feather file: {error}"}
 
-    if "timestamp_us" not in dataframe.columns:
+    if ExtractedDataColumns.TIMESTAMP not in dataframe.columns:
         return {"file": feather_file, "error": f"Missing required 'timestamp_us' column. Found: {dataframe.columns}"}
 
     total_rows = dataframe.height
@@ -260,7 +261,7 @@ def _analyze_single_event_feather(
         }
 
     # Extracts the timestamp column and computes basic recording statistics.
-    timestamps = dataframe["timestamp_us"].to_numpy()
+    timestamps = dataframe[ExtractedDataColumns.TIMESTAMP].to_numpy()
     first_timestamp_us = int(timestamps[0])
     last_timestamp_us = int(timestamps[-1])
     duration_us = last_timestamp_us - first_timestamp_us
@@ -282,17 +283,18 @@ def _analyze_single_event_feather(
     }
 
     event_distribution: list[dict[str, Any]] = []
-    if "event" in dataframe.columns:
-        event_counts = dataframe.group_by("event").len().sort("event")
+    if ExtractedDataColumns.EVENT in dataframe.columns:
+        event_counts = dataframe.group_by(ExtractedDataColumns.EVENT).len().sort(ExtractedDataColumns.EVENT)
         event_distribution = [
-            {"event_code": int(row["event"]), "count": int(row["len"])} for row in event_counts.iter_rows(named=True)
+            {"event_code": int(row[ExtractedDataColumns.EVENT]), "count": int(row["len"])}
+            for row in event_counts.iter_rows(named=True)
         ]
 
     command_distribution: list[dict[str, Any]] = []
-    if "command" in dataframe.columns:
-        command_counts = dataframe.group_by("command").len().sort("command")
+    if ExtractedDataColumns.COMMAND in dataframe.columns:
+        command_counts = dataframe.group_by(ExtractedDataColumns.COMMAND).len().sort(ExtractedDataColumns.COMMAND)
         command_distribution = [
-            {"command_code": int(row["command"]), "count": int(row["len"])}
+            {"command_code": int(row[ExtractedDataColumns.COMMAND]), "count": int(row["len"])}
             for row in command_counts.iter_rows(named=True)
         ]
 
@@ -332,16 +334,16 @@ def _analyze_single_event_feather(
     sample_df = dataframe.head(sample_count)
 
     for row in sample_df.iter_rows(named=True):
-        sample_entry: dict[str, Any] = {"timestamp_us": int(row["timestamp_us"])}
+        sample_entry: dict[str, Any] = {ExtractedDataColumns.TIMESTAMP: int(row[ExtractedDataColumns.TIMESTAMP])}
 
-        if "command" in row:
-            sample_entry["command"] = int(row["command"])
-        if "event" in row:
-            sample_entry["event"] = int(row["event"])
-        if "dtype" in row:
-            sample_entry["dtype"] = row["dtype"]
-        if "data" in row:
-            sample_entry["has_data"] = row["data"] is not None
+        if ExtractedDataColumns.COMMAND in row:
+            sample_entry[ExtractedDataColumns.COMMAND] = int(row[ExtractedDataColumns.COMMAND])
+        if ExtractedDataColumns.EVENT in row:
+            sample_entry[ExtractedDataColumns.EVENT] = int(row[ExtractedDataColumns.EVENT])
+        if ExtractedDataColumns.DTYPE in row:
+            sample_entry[ExtractedDataColumns.DTYPE] = row[ExtractedDataColumns.DTYPE]
+        if ExtractedDataColumns.DATA in row:
+            sample_entry["has_data"] = row[ExtractedDataColumns.DATA] is not None
 
         sample_rows.append(sample_entry)
 

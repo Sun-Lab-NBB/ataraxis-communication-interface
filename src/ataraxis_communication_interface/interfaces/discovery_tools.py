@@ -8,18 +8,23 @@ from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from ataraxis_data_structures import assemble_log_archives
+from ataraxis_base_utilities import resolve_worker_count
+from ataraxis_data_structures import (
+    LOG_ARCHIVE_SUFFIX,
+    resolve_unique_roots,
+    assemble_log_archives,
+    discover_log_archives,
+    discover_marker_files,
+)
 from ataraxis_transport_layer_pc import list_available_ports
 
 from .mcp_instance import mcp
 from ..communication import MQTTCommunication
 from ..microcontroller import (
-    LOG_ARCHIVE_SUFFIX,
     MICROCONTROLLER_MANIFEST_FILENAME,
     ModuleSourceData,
     MicroControllerManifest,
     evaluate_port,
-    resolve_recording_roots,
     write_microcontroller_manifest,
 )
 
@@ -58,10 +63,11 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
     # Prepares the parallel evaluation tasks.
     port_names = [port.device for port in valid_ports]
 
-    # Uses ProcessPoolExecutor to evaluate all ports in parallel.
+    # Uses ProcessPoolExecutor to evaluate all ports in parallel. The pool is sized to the smaller of the port count
+    # and the host's own budget, so a host with many ports does not spawn a process per port.
     results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=min(len(valid_ports), resolve_worker_count())) as executor:
         # Submits all port evaluation tasks.
         future_to_port = {
             executor.submit(evaluate_port, port_name, baudrate): (port_name, port_info)
@@ -177,7 +183,7 @@ def assemble_log_archives_tool(
         return {"error": f"Archive assembly failed: {error}"}
 
     # Scans for created archives and extracts source IDs from filenames.
-    source_ids = _scan_archive_source_ids(directory=directory_path)
+    source_ids = sorted(discover_log_archives(log_directory=directory_path))
     archives = [f"{source_id}{LOG_ARCHIVE_SUFFIX}" for source_id in source_ids]
 
     return {
@@ -212,7 +218,7 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:
         return {"error": f"Path is not a file: {manifest_path}"}
 
     try:
-        manifest = MicroControllerManifest.load(file_path=path)
+        manifest = MicroControllerManifest.from_yaml(file_path=path)
     except Exception as error:
         return {"error": f"Unable to read manifest: {error}"}
 
@@ -331,34 +337,36 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
     log_dirs_with_archives: set[Path] = set()
 
     try:
-        for manifest_path in sorted(root_path.rglob(MICROCONTROLLER_MANIFEST_FILENAME)):
-            log_dir = manifest_path.parent
+        manifest_paths = discover_marker_files(directory=root_path, marker_name=MICROCONTROLLER_MANIFEST_FILENAME)
+    except OSError as error:
+        return {"error": f"Unable to search '{root_directory}': {error}"}
 
-            try:
-                manifest = MicroControllerManifest.load(file_path=manifest_path)
-            except Exception:  # noqa: S112
+    for manifest_path in manifest_paths:
+        log_dir = manifest_path.parent
+
+        try:
+            manifest = MicroControllerManifest.from_yaml(file_path=manifest_path)
+            # Resolves every archive the logger wrote beside the manifest in one flat scan, instead of probing the
+            # filesystem once per registered controller.
+            archives = discover_log_archives(log_directory=log_dir)
+        except Exception:  # noqa: S112
+            continue
+
+        for controller in manifest.controllers:
+            archive_path = archives.get(str(controller.id))
+            if archive_path is None:
                 continue
 
-            if not manifest.controllers:
-                continue
-
-            for controller in manifest.controllers:
-                archive_path = log_dir / f"{controller.id}{LOG_ARCHIVE_SUFFIX}"
-                if not archive_path.exists():
-                    continue
-
-                module_entries = [
-                    {
-                        "module_type": source_module.module_type,
-                        "module_id": source_module.module_id,
-                        "name": source_module.name,
-                    }
-                    for source_module in controller.modules
-                ]
-                confirmed_sources.append((log_dir, controller.id, controller.name, archive_path, module_entries))
-                log_dirs_with_archives.add(log_dir)
-    except PermissionError as error:
-        return {"error": f"Permission denied during search: {error}"}
+            module_entries = [
+                {
+                    "module_type": source_module.module_type,
+                    "module_id": source_module.module_id,
+                    "name": source_module.name,
+                }
+                for source_module in controller.modules
+            ]
+            confirmed_sources.append((log_dir, controller.id, controller.name, archive_path, module_entries))
+            log_dirs_with_archives.add(log_dir)
 
     if not confirmed_sources:
         return {
@@ -394,30 +402,11 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
     }
 
 
-def _scan_archive_source_ids(directory: Path) -> list[str]:
-    """Scans a directory for assembled log archives and extracts source IDs from their filenames.
-
-    Matches files ending with the log archive suffix and strips the suffix to recover the source ID string. Returns
-    results in sorted order.
-
-    Args:
-        directory: The directory to scan for log archives.
-
-    Returns:
-        A sorted list of source ID strings extracted from archive filenames.
-    """
-    return sorted(
-        source_id
-        for archive_path in directory.glob(f"*{LOG_ARCHIVE_SUFFIX}")
-        if (source_id := archive_path.name.removesuffix(LOG_ARCHIVE_SUFFIX))
-    )
-
-
 def _resolve_log_dir_roots(log_dir_paths: list[Path]) -> dict[Path, Path]:
     """Resolves each log directory to its recording root.
 
     Uses unique path component detection to identify recording session boundaries. Falls back to using each
-    log directory's parent when unique component detection fails (e.g., single log directory).
+    log directory's parent when unique component detection fails (e.g., several directories sharing every component).
 
     Args:
         log_dir_paths: The sorted list of log directory paths to resolve.
@@ -426,8 +415,8 @@ def _resolve_log_dir_roots(log_dir_paths: list[Path]) -> dict[Path, Path]:
         A mapping from each log directory to its recording root path.
     """
     try:
-        recording_roots = resolve_recording_roots(paths=log_dir_paths)
-    except RuntimeError:
+        recording_roots = resolve_unique_roots(paths=log_dir_paths)
+    except ValueError:
         recording_roots = tuple(dict.fromkeys(log_dir.parent for log_dir in log_dir_paths))
 
     log_dir_to_root: dict[Path, Path] = {}

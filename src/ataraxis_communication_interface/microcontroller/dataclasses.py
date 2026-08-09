@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import console
 from ataraxis_data_structures import YamlConfig
 
 if TYPE_CHECKING:
@@ -44,14 +44,14 @@ def write_microcontroller_manifest(
     # Reads the existing manifest if one has already been written by another MicroControllerInterface instance sharing
     # this DataLogger.
     manifest = (
-        MicroControllerManifest.load(file_path=manifest_path)
+        MicroControllerManifest.from_yaml(file_path=manifest_path)
         if manifest_path.exists()
         else MicroControllerManifest(controllers=[])
     )
 
     # Appends the new controller entry and writes the updated manifest back to disk.
     manifest.controllers.append(MicroControllerSourceData(id=controller_id, name=controller_name, modules=modules))
-    manifest.save(file_path=manifest_path)
+    manifest.to_yaml(file_path=manifest_path)
 
 
 def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
@@ -78,7 +78,7 @@ def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
         )
         console.error(message=message, error=FileNotFoundError)
 
-    manifest = MicroControllerManifest.load(file_path=manifest_path)
+    manifest = MicroControllerManifest.from_yaml(file_path=manifest_path)
 
     if not manifest.controllers:
         message = (
@@ -151,27 +151,6 @@ class MicroControllerManifest(YamlConfig):
     controllers: list[MicroControllerSourceData]
     """The list of microcontroller source entries registered in this manifest."""
 
-    def save(self, file_path: Path) -> None:
-        """Saves the manifest to a YAML file.
-
-        Args:
-            file_path: The path to the .yaml file where to save the manifest data.
-        """
-        ensure_directory_exists(path=file_path)
-        self.to_yaml(file_path=file_path)
-
-    @classmethod
-    def load(cls, file_path: Path) -> MicroControllerManifest:
-        """Loads a manifest from a YAML file.
-
-        Args:
-            file_path: The path to the .yaml manifest file.
-
-        Returns:
-            A MicroControllerManifest instance populated with the loaded data.
-        """
-        return cls.from_yaml(file_path=file_path)
-
 
 @dataclass(frozen=True, slots=True)
 class ModuleExtractionConfig:
@@ -228,24 +207,3 @@ class ExtractionConfig(YamlConfig):
 
     controllers: list[ControllerExtractionConfig]
     """The list of controller extraction configurations."""
-
-    def save(self, file_path: Path) -> None:
-        """Saves the extraction configuration to a YAML file.
-
-        Args:
-            file_path: The path to the .yaml file where to save the configuration data.
-        """
-        ensure_directory_exists(path=file_path)
-        self.to_yaml(file_path=file_path)
-
-    @classmethod
-    def load(cls, file_path: Path) -> ExtractionConfig:
-        """Loads an extraction configuration from a YAML file.
-
-        Args:
-            file_path: The path to the .yaml configuration file.
-
-        Returns:
-            An ExtractionConfig instance populated with the loaded data.
-        """
-        return cls.from_yaml(file_path=file_path)
