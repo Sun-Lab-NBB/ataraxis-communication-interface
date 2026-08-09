@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 import click
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
+from ataraxis_data_structures import limit_worker_threads, initialize_worker_threads
 from ataraxis_transport_layer_pc import list_available_ports
 
 from .mcp_server import run_server as run_mcp
@@ -22,6 +23,10 @@ console.enable()
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
+
+_WORKER_THREAD_CEILING: int = 1
+"""The number of threads each port evaluation worker pins its numeric backends to. A worker spends its runtime waiting
+on one serial port, so the backends it imports repay no pool wider than a single thread."""
 
 
 @click.group("axci", context_settings=CONTEXT_SETTINGS)
@@ -61,7 +66,17 @@ def identify(baudrate: int) -> None:
 
     results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
-    with ProcessPoolExecutor(max_workers=min(len(valid_ports), resolve_worker_count())) as executor:
+    # Pins every worker from both sides for the pool's whole lifetime. The environment limit reaches the backends that
+    # size their pool while importing, which a worker does after it is spawned, and the initializer reaches the ones
+    # that read their width the first time they are asked to do work.
+    with (
+        limit_worker_threads(thread_count=_WORKER_THREAD_CEILING),
+        ProcessPoolExecutor(
+            max_workers=min(len(valid_ports), resolve_worker_count()),
+            initializer=initialize_worker_threads,
+            initargs=(_WORKER_THREAD_CEILING,),
+        ) as executor,
+    ):
         future_to_port = {
             executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
