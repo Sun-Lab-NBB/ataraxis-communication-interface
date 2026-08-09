@@ -1418,7 +1418,7 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]: 
         # Otherwise, returns the microcontroller's ID.
         return int(response.controller_id), None
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # Catches any connection-related exceptions and returns an error message instead of propagating the exception.
         # This prevents individual port failures from aborting the entire evaluation process.
         error_type = type(e).__name__

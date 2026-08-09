@@ -173,7 +173,7 @@ def assemble_log_archives_tool(
             verify_integrity=verify_integrity,
             verbose=False,
         )
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Archive assembly failed: {error}"}
 
     # Scans for created archives and extracts source IDs from filenames.
@@ -213,7 +213,7 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:
 
     try:
         manifest = MicroControllerManifest.load(file_path=path)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Unable to read manifest: {error}"}
 
     # Serializes each controller and its modules into a dictionary representation.
@@ -289,7 +289,7 @@ def write_microcontroller_manifest_tool(
             controller_name=controller_name,
             modules=module_entries,
         )
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Unable to write manifest: {error}"}
 
     manifest_path = log_path / MICROCONTROLLER_MANIFEST_FILENAME
@@ -336,7 +336,7 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
 
             try:
                 manifest = MicroControllerManifest.load(file_path=manifest_path)
-            except Exception:  # noqa: BLE001, S112
+            except Exception:  # noqa: S112
                 continue
 
             if not manifest.controllers:

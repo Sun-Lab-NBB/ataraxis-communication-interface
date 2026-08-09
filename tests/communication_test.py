@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any
 import multiprocessing
 from multiprocessing import Queue
 
@@ -36,6 +36,8 @@ from ataraxis_communication_interface.communication import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from numpy.typing import NDArray
 
 
@@ -45,7 +47,7 @@ def transport_layer() -> TransportLayer:
     return TransportLayer(port="TEST", test_mode=True, microcontroller_serial_buffer_size=300, baudrate=115200)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def logger_queue(tmp_path_factory: pytest.TempPathFactory) -> Generator[Queue[Any], Any, None]:
     """Creates a DataLogger instance and returns its input queue."""
     temporary_directory = tmp_path_factory.mktemp("logger_data")
@@ -714,9 +716,10 @@ def broker_available() -> bool:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore
         result = client.connect(host=BROKER_IP, port=BROKER_PORT, keepalive=1)
         client.disconnect()
-        return result == mqtt.MQTT_ERR_SUCCESS
     except Exception:
         return False
+    else:
+        return result == mqtt.MQTT_ERR_SUCCESS
 
 
 @pytest.mark.xdist_group(name="group1")
@@ -812,7 +815,7 @@ def test_mqtt_communication_send_receive() -> None:
         assert len(received_messages) > 0
         topic, payload = received_messages[-1]
         assert topic == test_topic
-        if data_type == str:
+        if data_type is str:
             assert payload.decode() == data
         else:
             assert payload == data

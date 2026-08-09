@@ -1,16 +1,16 @@
 # Configuration file for the Sphinx documentation builder.
-import importlib_metadata
+import importlib.metadata
 
 # -- Project information -----------------------------------------------------
 project = 'ataraxis-communication-interface'
 copyright = '2026, Sun (NeuroAI) lab'
-authors = ['Ivan Kondratyev', 'Jacob Groner']
+author = 'Ivan Kondratyev, Jacob Groner'
 # Extracts the project version from the metadata .toml file.
-release = importlib_metadata.version("ataraxis-communication-interface")
+release = importlib.metadata.version("ataraxis-communication-interface")
 
 # -- General configuration ---------------------------------------------------
 extensions = [
-    'sphinx.ext.autodoc',        # To build documentation from Python source code docstrings.
+    'sphinx.ext.autodoc',        # To build documentation from python source code docstrings.
     'sphinx.ext.napoleon',       # To read google-style docstrings (works with autodoc module).
     'sphinx_click',              # Must load before sphinx_autodoc_typehints to avoid mock import shadowing.
     'sphinx_autodoc_typehints',  # To parse typehints into documentation
@@ -33,7 +33,6 @@ napoleon_use_param = True
 napoleon_use_rtype = True
 
 # Additional sphinx-typehints configuration
-sphinx_autodoc_typehints = True
 always_document_param_types = False
 typehints_document_rtype = True
 typehints_use_rtype = True

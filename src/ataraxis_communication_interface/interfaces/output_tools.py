@@ -79,7 +79,7 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
 
         try:
             dataframe = pl.read_ipc(source=feather_file)
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             entry["valid"] = False
             entry["error"] = f"Unable to read feather file: {error}"
             all_valid = False
@@ -110,7 +110,7 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
     if tracker_path.exists():
         try:
             tracker_info = read_tracker_status(tracker_path=tracker_path)
-        except Exception:  # noqa: BLE001
+        except Exception:
             tracker_info = {"error": "Unable to read tracker file."}
 
     return {
@@ -205,7 +205,7 @@ def _clean_single_output(output_directory: str) -> dict[str, Any]:
 
     try:
         delete_directory(directory_path=data_path)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {
             "output_directory": output_directory,
             "cleaned": False,
@@ -241,7 +241,7 @@ def _analyze_single_event_feather(
 
     try:
         dataframe = pl.read_ipc(source=file_path)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"file": feather_file, "error": f"Unable to read feather file: {error}"}
 
     if "timestamp_us" not in dataframe.columns:

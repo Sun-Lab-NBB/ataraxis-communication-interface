@@ -76,7 +76,7 @@ def prepare_log_processing_batch_tool(
 
     try:
         ExtractionConfig.load(file_path=config_file)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Invalid extraction config: {error}"}
 
     if len(output_directories) != len(log_directories):
@@ -126,7 +126,7 @@ def prepare_log_processing_batch_tool(
             # Idempotent path: returns existing tracker state.
             try:
                 tracker_status = read_tracker_status(tracker_path=tracker_path)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 tracker_status = {"jobs": [], "summary": {}}
 
             result_log_directories[log_directory_string] = {
@@ -311,7 +311,7 @@ def get_log_processing_status_tool() -> dict[str, Any]:
     for tracker_path, path_jobs in _group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
-        except Exception:  # noqa: BLE001
+        except Exception:
             job_details.extend(
                 {"job_id": job.job_id, "source_id": job.source_id, "status": "UNKNOWN"} for job in path_jobs
             )
@@ -384,7 +384,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     for tracker_path, path_jobs in _group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
-        except Exception:  # noqa: BLE001, S112
+        except Exception:  # noqa: S112
             continue
 
         for job in path_jobs:
@@ -500,7 +500,7 @@ def cancel_log_processing_tool() -> dict[str, Any]:
                     succeeded += 1
                 elif job_state.status == ProcessingStatus.FAILED:
                     failed += 1
-        except Exception:  # noqa: BLE001, S110
+        except Exception:  # noqa: S110
             pass
 
     return {
@@ -536,7 +536,7 @@ def reset_log_processing_jobs_tool(
     tracker = ProcessingTracker(file_path=path)
     try:
         registry = tracker.snapshot()
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Unable to read tracker: {error}"}
 
     # Identifies which job IDs to reset based on the source_ids filter.
@@ -555,7 +555,7 @@ def reset_log_processing_jobs_tool(
     # Reads back the updated state for the response.
     try:
         updated_status = read_tracker_status(tracker_path=path)
-    except Exception:  # noqa: BLE001
+    except Exception:
         updated_status = {"jobs": [], "summary": {}}
 
     return {"reset": True, "jobs_reset": len(target_ids), **updated_status}
@@ -610,7 +610,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
                     **status,
                 }
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log_dir_statuses.append(
                 {
                     "log_directory": log_directory,
@@ -694,5 +694,5 @@ def _probe_archive_message_count(job: PendingJob) -> int:
     try:
         with np.load(file=archive_path, allow_pickle=False) as archive:
             return max(0, len(archive.files) - 1)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0

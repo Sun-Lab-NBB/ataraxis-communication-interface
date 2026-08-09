@@ -250,7 +250,7 @@ def _group_worker(jobs: list[PendingJob], workers: int, state: JobExecutionState
                 config = ExtractionConfig.load(file_path=job.config_path)
                 controller_configs = {str(controller.controller_id): controller for controller in config.controllers}
                 controller_config = controller_configs.get(job.source_id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 tracker.fail_job(
                     job_id=job.job_id, error_message=f"Unable to load extraction config from '{job.config_path}'."
                 )
@@ -284,7 +284,7 @@ def _group_worker(jobs: list[PendingJob], workers: int, state: JobExecutionState
                         tracker.fail_job(
                             job_id=job.job_id, error_message="Job terminated without updating tracker status."
                         )
-            except Exception:  # noqa: BLE001, S110
+            except Exception:  # noqa: S110
                 pass
     finally:
         if shared_executor is not None:
