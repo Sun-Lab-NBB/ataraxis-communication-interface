@@ -1142,8 +1142,9 @@ class MicroControllerInterface:  # pragma: no cover
             )
             console.error(message=message, error=RuntimeError)
 
-        # kCommandNotRecognized
-        elif incoming_data.event == _ModuleStatusCodes.COMMAND_NOT_RECOGNIZED and isinstance(incoming_data, ModuleData):
+        # kCommandNotRecognized. The microcontroller sends this code as a ModuleState message, so, unlike the arm
+        # above, this arm must not narrow the type to ModuleData.
+        elif incoming_data.event == _ModuleStatusCodes.COMMAND_NOT_RECOGNIZED:
             message = (
                 f"The module with type {incoming_data.module_type} and id {incoming_data.module_id} managed by the "
                 f"{controller_id} encountered an error when executing command {incoming_data.command}. "

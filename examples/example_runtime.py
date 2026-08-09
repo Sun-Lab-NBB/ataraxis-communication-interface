@@ -59,7 +59,7 @@ if __name__ == "__main__":
     mc_interface = MicroControllerInterface(
         controller_id=np.uint8(222),
         buffer_size=8192,
-        port="/dev/ttyACM1",
+        port="/dev/ttyACM0",
         data_logger=data_logger,
         module_interfaces=interfaces,
         name="test_controller",
