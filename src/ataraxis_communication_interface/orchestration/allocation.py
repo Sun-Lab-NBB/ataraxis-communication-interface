@@ -15,10 +15,16 @@ from ataraxis_data_structures import PARALLEL_PROCESSING_THRESHOLD, read_archive
 if TYPE_CHECKING:
     from pathlib import Path
 
-RESERVED_CORES: int = 2
+_RESERVED_CORES: int = 2
 """The number of CPU cores held back for host-system operations when a core budget auto-resolves. The value reaches
 ``resolve_worker_count``, which applies it only to a non-positive budget and honors an explicit budget up to the
-logical core count."""
+logical core count.
+
+Notes:
+    The term is private to this module, because it describes how this library resolves its own batch budget rather
+    than how a scheduler resolves the budget it dispatches this stage from. A consumer that runs its own batch holds
+    the reservation it plans against, so exporting this one would offer it a second figure for the same decision.
+"""
 
 EXTRACTION_JOB_CORES: int = 8
 """The cores one microcontroller data extraction job occupies while it runs.
@@ -168,7 +174,7 @@ def resolve_core_budget(requested_budget: int) -> int:
     Returns:
         The cores the batch may commit, always at least one.
     """
-    return resolve_worker_count(requested_workers=requested_budget, reserved_cores=RESERVED_CORES)
+    return resolve_worker_count(requested_workers=requested_budget, reserved_cores=_RESERVED_CORES)
 
 
 def resolve_memory_budget_mb(requested_budget_mb: int) -> int:

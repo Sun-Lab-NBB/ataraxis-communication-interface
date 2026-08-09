@@ -28,7 +28,6 @@ from .execution import (
     job_execution_manager,
 )
 from .allocation import (
-    RESERVED_CORES,
     EXTRACTION_JOB_CORES,
     ArchiveFootprint,
     resolve_core_budget,
@@ -46,7 +45,6 @@ __all__ = [
     "KERNEL_FEATHER_INFIX",
     "MICROCONTROLLER_DATA_DIRECTORY",
     "MODULE_FEATHER_INFIX",
-    "RESERVED_CORES",
     "TRACKER_FILENAME",
     "ArchiveFootprint",
     "JobExecutionState",

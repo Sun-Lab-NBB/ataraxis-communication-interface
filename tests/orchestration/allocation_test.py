@@ -15,7 +15,7 @@ from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, PARALLEL_PROCESSING_THR
 
 from ataraxis_communication_interface.communication import SerialPrototypes
 from ataraxis_communication_interface.orchestration.allocation import (
-    RESERVED_CORES,
+    _RESERVED_CORES,
     _WORKER_MEMORY_MB,
     EXTRACTION_JOB_CORES,
     _SUBPROCESS_MEMORY_MB,
@@ -255,7 +255,7 @@ def test_resolve_core_budget_auto_resolves(requested_budget: int) -> None:
 
     assert budget >= 1
     assert budget <= available_cores
-    assert budget == max(1, available_cores - RESERVED_CORES)
+    assert budget == max(1, available_cores - _RESERVED_CORES)
 
 
 @pytest.mark.parametrize("requested_budget_mb", [1, 1024, 4096, 1_000_000])
