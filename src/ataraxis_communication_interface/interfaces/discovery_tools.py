@@ -11,10 +11,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from ataraxis_base_utilities import resolve_worker_count
 from ataraxis_data_structures import (
     LOG_ARCHIVE_SUFFIX,
+    limit_worker_threads,
     resolve_unique_roots,
     assemble_log_archives,
     discover_log_archives,
     discover_marker_files,
+    initialize_worker_threads,
 )
 from ataraxis_transport_layer_pc import list_available_ports
 
@@ -33,6 +35,10 @@ if TYPE_CHECKING:
 
 _UNIDENTIFIED_CONTROLLER_ID: int = -1
 """The sentinel value returned by evaluate_port when a serial port is not connected to a recognized microcontroller."""
+
+_WORKER_THREAD_CEILING: int = 1
+"""The number of threads each port evaluation worker pins its numeric backends to. A worker spends its runtime waiting
+on one serial port, so the backends it imports repay no pool wider than a single thread."""
 
 
 @mcp.tool()
@@ -67,7 +73,17 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
     # and the host's own budget, so a host with many ports does not spawn a process per port.
     results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
-    with ProcessPoolExecutor(max_workers=min(len(valid_ports), resolve_worker_count())) as executor:
+    # Pins every worker from both sides for the pool's whole lifetime. The environment limit reaches the backends that
+    # size their pool while importing, which a worker does after it is spawned, and the initializer reaches the ones
+    # that read their width the first time they are asked to do work.
+    with (
+        limit_worker_threads(thread_count=_WORKER_THREAD_CEILING),
+        ProcessPoolExecutor(
+            max_workers=min(len(valid_ports), resolve_worker_count()),
+            initializer=initialize_worker_threads,
+            initargs=(_WORKER_THREAD_CEILING,),
+        ) as executor,
+    ):
         # Submits all port evaluation tasks.
         future_to_port = {
             executor.submit(evaluate_port, port_name, baudrate): (port_name, port_info)
