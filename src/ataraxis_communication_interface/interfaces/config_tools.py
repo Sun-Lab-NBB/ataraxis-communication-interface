@@ -40,7 +40,7 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
 
     try:
         config = ExtractionConfig.load(file_path=path)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Unable to read extraction config: {error}"}
 
     # Serializes each controller's modules, event codes, and optional kernel settings into dictionaries.
@@ -133,7 +133,7 @@ def write_extraction_config_tool(config_path: str, controllers: list[dict[str, A
 
     try:
         config.save(file_path=output)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Unable to write extraction config: {error}"}
 
     return {
@@ -175,7 +175,7 @@ def validate_extraction_config_tool(
 
     try:
         config = ExtractionConfig.load(file_path=path)
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         return {"error": f"Unable to parse extraction config: {error}"}
 
     errors: list[str] = []
@@ -225,7 +225,7 @@ def validate_extraction_config_tool(
         else:
             try:
                 manifest = MicroControllerManifest.load(file_path=manifest_file)
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 errors.append(f"Unable to read manifest for cross-referencing: {error}")
                 manifest = None
 

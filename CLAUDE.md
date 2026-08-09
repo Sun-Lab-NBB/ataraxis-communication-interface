@@ -15,7 +15,7 @@ This ensures you:
 Before writing, modifying, or reviewing any code or documentation, you MUST invoke the appropriate skill to load
 Ataraxis framework conventions. This applies to ALL file types:
 
-| Task                                | Skill to Invoke    |
+| Task                                | Skill to invoke    |
 |-------------------------------------|--------------------|
 | Writing or modifying Python code    | `/python-style`    |
 | Writing or modifying README files   | `/readme-style`    |
@@ -33,8 +33,8 @@ All contributions must strictly follow these conventions. Key conventions includ
 
 ## Cross-referenced library verification
 
-Ataraxis framework projects often depend on other `ataraxis-*` or `sl-*` libraries. These libraries may be stored
-locally in the same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`).
+Ataraxis framework projects often depend on other `ataraxis-*` or `sollertia-*` libraries. These libraries may be
+stored locally in the same parent directory as this project, reachable as `../` from the repository root.
 
 **Before writing code that interacts with a cross-referenced library, you MUST:**
 
@@ -84,27 +84,30 @@ Skills are distributed through the ataraxis marketplace and are loaded into Clau
 
 ### Automation plugin skills (ataraxis/plugins/automation/)
 
-The automation plugin provides cross-cutting development skills; this table lists those relevant to this Python
-library. Language-specific style skills (C++, C#) are omitted because they do not apply here.
+The automation plugin provides cross-cutting development skills, and this table lists the ones relevant to this Python
+library. The C++, C#, and PlatformIO skills serve other project archetypes.
 
-| Skill                      | Description                                                                    |
-|----------------------------|--------------------------------------------------------------------------------|
-| `/explore-codebase`        | Perform in-depth codebase exploration at session start                         |
-| `/explore-dependencies`    | Explore installed ataraxis dependency APIs for reuse opportunities             |
-| `/python-style`            | Apply Ataraxis framework Python coding conventions (REQUIRED for code changes) |
-| `/readme-style`            | Apply Ataraxis framework README conventions                                    |
-| `/pyproject-style`         | Apply Ataraxis framework pyproject.toml conventions                            |
-| `/tox-config`              | Apply Ataraxis framework tox.ini conventions                                   |
-| `/api-docs`                | Apply Ataraxis framework Sphinx API documentation conventions                  |
-| `/project-layout`          | Apply Ataraxis framework project directory structure conventions               |
-| `/commit`                  | Draft Ataraxis framework style-compliant git commit messages                   |
-| `/pr`                      | Draft a style-compliant pull request summary for the active branch             |
-| `/release`                 | Draft style-compliant release notes from merged pull requests                  |
-| `/skill-design`            | Generate and verify Claude Code skill files                                    |
-| `/audit-facts`             | Audit documentation for factual accuracy against source code                   |
-| `/audit-style`             | Audit files for style and convention compliance against framework checklists   |
+| Skill                   | Description                                                                    |
+|-------------------------|--------------------------------------------------------------------------------|
+| `/explore-codebase`     | Perform in-depth codebase exploration at session start                         |
+| `/explore-dependencies` | Explore installed ataraxis dependency APIs for reuse opportunities             |
+| `/audit-correctness`    | Audit source code for bugs, edge cases, races, and leaks                       |
+| `/audit-facts`          | Audit documentation for factual accuracy against source code                   |
+| `/audit-performance`    | Audit source code for cost, speed, memory use, and dtype predictability        |
+| `/audit-project`        | Orchestrate the four audits and merge their findings into one report           |
+| `/audit-style`          | Audit files for style and convention compliance against framework checklists   |
+| `/python-style`         | Apply Ataraxis framework Python coding conventions (REQUIRED for code changes) |
+| `/readme-style`         | Apply Ataraxis framework README conventions                                    |
+| `/pyproject-style`      | Apply Ataraxis framework pyproject.toml conventions                            |
+| `/tox-config`           | Apply Ataraxis framework tox.ini conventions                                   |
+| `/api-docs`             | Apply Ataraxis framework Sphinx API documentation conventions                  |
+| `/skill-design`         | Generate and verify Claude Code skill files                                    |
+| `/project-layout`       | Apply Ataraxis framework project directory structure conventions               |
+| `/commit`               | Draft Ataraxis framework style-compliant git commit messages                   |
+| `/pr`                   | Draft a style-compliant pull request summary for the active branch             |
+| `/release`              | Draft style-compliant release notes from merged pull requests                  |
 
-## MCP server integration
+## MCP server
 
 This library provides an MCP server (`axci mcp`) that exposes microcontroller discovery, MQTT broker checking,
 manifest management, extraction configuration management, and log data processing tools. When working with this project
@@ -177,24 +180,23 @@ data from DataLogger archives.
 
 - **MicroControllerInterface**: Multiprocessing architecture for bidirectional microcontroller communication.
   Constructor requires `controller_id`, `data_logger`, `module_interfaces`, `buffer_size`, `port`, and `name` as
-  positional arguments; `__init__` writes a microcontroller manifest entry associating the controller_id with the
+  positional arguments. `__init__` writes a microcontroller manifest entry associating the controller_id with the
   human-readable name and its module list. A dedicated communication process handles serial I/O via
   `SerialCommunication` and dispatches received messages to the appropriate `ModuleInterface` based on
   `(module_type, module_id)` routing. A watchdog thread monitors process health. Commands and parameters flow from
   the main process through an `MPQueue` to the communication process.
 - **ModuleInterface**: Abstract base class that users subclass to define hardware module behavior. Requires
-  `module_type`, `module_id`, and `name` as positional arguments; optional `error_codes` and `data_codes` sets
-  control message routing. Three abstract methods: `initialize_remote_assets()`, `terminate_remote_assets()`, and
-  `process_received_data()`. Public methods `send_command()` and `send_parameters()` use LRU-cached message
+  `module_type`, `module_id`, and `name` as positional arguments, with optional `error_codes` and `data_codes` sets
+  controlling message routing. Three abstract methods: `initialize_remote_assets()`, `terminate_remote_assets()`,
+  and `process_received_data()`. Public methods `send_command()` and `send_parameters()` use LRU-cached message
   construction for performance. `reset_command_queue()` sends a dequeue command to the microcontroller. The
   `type_id` property combines `(type << 8) | id` for dispatch lookups.
 - **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
   CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 252 numpy data
   prototypes (`SerialPrototypes` enum) covering all numpy scalar and array types. `send_message()` accepts
-  command and parameter message objects; `receive_message()` returns typed message objects (`ModuleData`,
-  `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`, `ControllerIdentification`,
-  `ModuleIdentification`). All received data is timestamped via `PrecisionTimer` and logged to `DataLogger` through
-  an `MPQueue`.
+  command and parameter message objects, and `receive_message()` returns typed message objects (`ModuleData`,
+  `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`, `ControllerIdentification`, `ModuleIdentification`).
+  All received data is timestamped via `PrecisionTimer` and logged to `DataLogger` through an `MPQueue`.
 - **MQTT Communication**: `MQTTCommunication` provides publish/subscribe messaging over MQTT via `paho-mqtt`.
   Constructor takes `ip`, `port`, and optional `monitored_topics`. `get_data()` returns `(topic, message)`
   tuples from an internal `Queue` populated by the on_message callback.
@@ -232,7 +234,7 @@ data from DataLogger archives.
 
 - **Daemon Communication Process**: The communication process is a daemon process requiring an explicit `stop()`
   call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
-- **Message Protocol Stack**: Four levels — `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
+- **Message Protocol Stack**: Four levels: `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
   frame encoding), message protocols (12 types via `SerialProtocols` enum), and data prototypes (252 numpy types
   via `SerialPrototypes` enum).
 - **LRU Caching**: `ModuleInterface` caches command messages (`maxsize=32`) and parameter messages (`maxsize=16`)
@@ -266,27 +268,27 @@ data from DataLogger archives.
 Non-obvious facts for the most common modifications. Read the cited files for full context.
 
 - **MicroControllerInterface** (`microcontroller/interface.py`): the communication loop runs in `_runtime_cycle()`,
-  a static method executed in a spawned daemon process; a watchdog thread in the main process monitors liveness.
+  a static method executed in a spawned daemon process, and a watchdog thread in the main process monitors liveness.
   Commands flow from the main process through an `MPQueue` to the communication process, which requires an explicit
   `stop()` call. Test against microcontroller hardware or in test mode.
 - **ModuleInterface** (`microcontroller/interface.py`): subclasses must implement `initialize_remote_assets()`,
   `terminate_remote_assets()`, and `process_received_data()`. `send_command()` and `send_parameters()` use
-  LRU-cached message construction; `reset_command_queue()` sends a dequeue command. See
+  LRU-cached message construction, and `reset_command_queue()` sends a dequeue command. See
   `examples/example_interface.py` for a reference subclass.
 - **Serial communication** (`communication/protocols.py`, `messages.py`, `serial.py`): `SerialProtocols`
   (12 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer. Command classes pack bytes via
-  the `packed_data` property; reception classes parse header bytes via properties.
-- **MQTT communication** (`communication/mqtt.py`): `paho-mqtt` v2 client with callback reception into a `Queue`;
+  the `packed_data` property, and reception classes parse header bytes via properties.
+- **MQTT communication** (`communication/mqtt.py`): `paho-mqtt` v2 client with callback reception into a `Queue`.
   `get_data()` returns `(topic, message)` tuples or `None`, and the `has_data` property checks queue state.
-- **Data classes and manifests** (`microcontroller/dataclasses.py`): inner classes are frozen — create new instances
-  rather than mutating; `MicroControllerManifest` and `ExtractionConfig` are mutable `YamlConfig` subclasses.
+- **Data classes and manifests** (`microcontroller/dataclasses.py`): inner classes are frozen, so create new instances
+  rather than mutating. `MicroControllerManifest` and `ExtractionConfig` are mutable `YamlConfig` subclasses.
   `create_extraction_config()` builds a precursor config with empty event codes.
 - **Log processing** (`microcontroller/log_processing.py`): `run_log_processing_pipeline()` supports local (all jobs)
-  and remote (single job by ID) modes; the `config` parameter is a `Path` loaded internally; the parallelization
-  threshold is 2000 messages; `ProcessingTracker` manages job lifecycle via YAML state files. Extraction rejects any
-  data message whose payload size disagrees with the size its prototype code declares, because the extracted feather
-  stores that prototype's dtype alongside the raw payload bytes and a mismatched pair cannot be decoded.
-- **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors; the `config`
+  and remote (single job by ID) modes. The `config` parameter is a `Path` loaded internally, the parallelization
+  threshold is 2000 messages, and `ProcessingTracker` manages job lifecycle via YAML state files. Extraction rejects
+  any data message whose payload size disagrees with the size its prototype code declares, because the extracted
+  feather stores that prototype's dtype alongside the raw payload bytes and a mismatched pair cannot be decoded.
+- **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors. The `config`
   subgroup demonstrates nested Click command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via
   `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return

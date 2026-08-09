@@ -78,7 +78,7 @@ dev = [
     "tox-uv>=1,<2",
 
     # Development Automation
-    "ataraxis-automation>=8,<9",
+    "ataraxis-automation>=9,<10",
 
     # Types
     "types-paho-mqtt>=1,<2",
@@ -95,10 +95,10 @@ packages = ["src/ataraxis_communication_interface", "examples"]
 
 # Ruff Configuration.
 [tool.ruff]
-line-length = 120         # Deviates from the commonly used '80' standard.
-indent-width = 4          # Same as black, indents are 4 spaces
+line-length = 120
+indent-width = 4
 target-version = "py312"  # Targets the lowest supported version of python
-src = ["src"]             # The name of the root source code directory
+src = ["src"]
 
 # Excludes 'service' .py files, such as the sphinx configuration file, from linting.
 extend-exclude = ["conf.py"]
@@ -108,35 +108,32 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
+    # Universal lint.ignore corpus. Present in every Ataraxis framework and Sollertia platform project.
     "W291",    # Conflicts with docstring formatting
+    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "BLE001",  # Broad exception handling is necessary at library boundaries
     "C901",    # Sometimes complex functions are necessary
-    "PLR0913", # Sometimes complex functions are necessary
-    "PLR0912", # Sometimes complex functions are necessary
-    "PLR0915", # Sometimes complex type definitions are necessary
     "PLR0911", # Sometimes complex return graphs are necessary
-    "PLR0917", # Call sites pass keyword arguments, so the positional count is immaterial
-    "CPY001",  # The license is declared in the LICENSE file and the project metadata
+    "PLR0912", # Sometimes complex functions are necessary
+    "PLR0913", # Sometimes complex functions are necessary
+    "PLR0915", # Sometimes functions with many statements are necessary
+    "PLR0917", # PLR0913 already covers argument counts, and call sites pass keyword arguments
     "COM812",  # Conflicts with the formatter
     "ISC001",  # Conflicts with the formatter
-    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
+    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
     "PT023",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
     "D107",    # __init__ is documented inside the main class docstring where applicable
     "D205",    # Bugs out for file descriptions
     "PLW0603", # While global statement usage is not ideal, it streamlines certain development patterns
-
-    # Project-specific ignore directives
-    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
-    "FBT001",  # Sometimes positional boolean arguments are necessary
-    "FBT002",  # Sometimes positional boolean arguments are necessary
-    "SLF001",  # Sometimes accessing private members is necessary
-    "TID252",  # Parent-relative imports are used by the interfaces subpackage
+    "TID252",  # Conflicts with the library import management strategy, which requires parent-relative imports
+    "CPY001",  # The license is declared in the LICENSE file and the license and license-files metadata fields
 ]
 
 # Additional formatting configurations
 [tool.ruff.format]
-quote-style = "double"             # Uses double quotes for strings
-indent-style = "space"             # Uses space for indents
-skip-magic-trailing-comma = false  # Like black, ignores trailing commas
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false  # Like black, honors magic trailing commas
 line-ending = "auto"               # Automatically detects and standardizes line-ending character
 
 # Docstrings and comments' line length
@@ -153,9 +150,29 @@ convention = "google"
     "F401", # Imported but unused
     "F403", # Wildcard imports
 ]
+"tests/**/*.py" = [
+    # Shared test corpus. These entries are present in every Ataraxis framework and Sollertia platform project.
+    "S101",    # Tests assert by design
+    "PLR2004", # Expected values are clearer inline than as named constants
+    "INP001",  # The test directory is not an importable package
+    "SLF001",  # Tests exercise private module members directly
+    "PT006",   # Parametrize argument names are declared as a single comma-separated string
+    "ARG001",  # Pytest injects fixtures that individual tests may not reference
+    "T201",    # Diagnostic prints are how a test reports intermediate state
+    "D",       # Test names and inline comments carry the intent that docstrings carry in library code
+    "ANN",     # Test functions and mock helpers do not need annotations
+
+    # Project-specific
+    "E402",    # The spawn start method is set at import time, before the remaining imports resolve
+    "PGH003",  # The paho-mqtt suppressions are inert, as the test directory sits outside the mypy corpus
+    "FBT003",  # Numpy scalar constructors take the wrapped boolean positionally
+    "PT012",   # Constructing the client and connecting it both belong inside the raises block
+    "PT022",   # The yield keeps the DataLogger alive, as its finalizer destroys the queue the fixture returns
+    "PT011",   # The exception-handling test accepts any unexpected error, so it pins no dependency message
+]
 
 [tool.ruff.lint.isort]
-case-sensitive = true              # Takes case into account when sorting imports
+case-sensitive = true
 combine-as-imports = true          # Combines multiple "as" imports for the same package
 force-wrap-aliases = true          # Wraps "as" imports so that each uses a separate line
 force-sort-within-sections = true  # Forces "as" and "from" imports for the same package to be close
@@ -163,7 +180,7 @@ length-sort = true                 # Places shorter imports first
 
 # MyPy configuration section.
 [tool.mypy]
-# Strict mode settings (equivalent to --strict)
+# Strict mode settings (--strict), plus the unused-config warning that --strict does not enable
 warn_unused_configs = true
 disallow_any_generics = true
 disallow_subclassing_any = true
@@ -178,39 +195,57 @@ warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 
-# Extra checks (equivalent to --extra-checks)
 extra_checks = true
 
-# Pretty output (equivalent to --pretty)
 pretty = true
 
 exclude = [
-    "ataraxis-communication-interface-\\d+", # Ignores temporary folder created by setuptools when building the sdist
-    "venv.*/",                               # Ignores virtual environments
-    "build/",                                # Ignores the sdist directory
-    "dist/",                                 # Ignores the wheel directory
-    "docs/",                                 # Ignores the sphinx / doxygen directory
-    "stubs/",                                # Ignores stubs directory (stubgen output target)
-    "recipe/",                               # Ignores recipe directory (grayskull output target)
-    "tests/",                                # Ignores the test directory.
+    "ataraxis-communication-interface-\\d+",  # The temporary folder created when building the sdist
+    "venv.*/",
+    "build/",
+    "dist/",
+    "docs/",
+    "stubs/",                                 # stubgen output target
+    "recipe/",                                # grayskull output target
+    "tests/",
 ]
 
-# Excludes the CLI and MCP server interface modules from coverage measurement.
-[tool.coverage.run]
-omit = ["*/interfaces/*"]
+# Pytest configuration. The import mode is declared here so that a bare 'pytest' invocation resolves test modules the
+# same way the '{py}-test' tox task does.
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 
-# This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
+# Lists the source files excluded from coverage measurement in full. The interfaces subpackage holds the CLI and the
+# MCP server tools, which are covered by the tests written for the library functions they wrap. The 'parallel' and
+# 'concurrency' keys extend measurement to the spawned communication and log-processing worker processes and to the
+# threads they run, giving each worker its own data file for the 'coverage' task to combine.
+[tool.coverage.run]
+parallel = true
+concurrency = ["multiprocessing", "thread"]
+omit = ["*/ataraxis_communication_interface/interfaces/*"]
+
+# Used by the 'coverage' tox task to merge the coverage data files the '{py}-test' tasks produce.
 [tool.coverage.paths]
 
-# Maps coverage measured in site-packages to source files in src
-source = ["src/", ".tox/*/lib/python*/site-packages/"]
+# Maps coverage measured in site-packages to source files in src. The second pattern matches the POSIX virtual
+# environment layout and the third matches the Windows layout, which omits the 'python*' path component. Both are
+# required for the 'coverage' task to merge the data measured by each 'test' task into a single record per source file.
+# Without the merge, every statement is judged against a single python version, so any statement that only executes on
+# some of the tested versions is misreported as uncovered.
+source = [
+    "src/",
+    ".tox/*/lib/python*/site-packages/",
+    ".tox/*/Lib/site-packages/",
+]
 
 # Same as above, specifies the output directory for the coverage .html report
 [tool.coverage.html]
 directory = "reports/coverage_html"
 
-# Specifies additional ignore directives
+# Specifies the coverage gate and additional ignore directives
 [tool.coverage.report]
+fail_under = 100     # Requires the test suite to cover every measured statement
+show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
