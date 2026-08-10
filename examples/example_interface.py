@@ -43,13 +43,21 @@ class TestModuleInterface(ModuleInterface):
         # process via the shared memory array.
         data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}  # kHigh, kLow, and kEcho.
 
-        # Initializes the superclass using the module-specific parameters.
+        # Initializes the superclass using the module-specific parameters. The test module reports no error states, so
+        # 'error_codes' is left as None. A module that does report error states passes a dictionary that maps each of
+        # its error event codes to the explanation surfaced when that error arrives, for example
+        # {np.uint8(55): "The pin mode does not permit this command."}. Receiving one of those codes raises a
+        # RuntimeError carrying the matching explanation, so the operator reading the traceback learns what the code
+        # means rather than only its number. Every code in either argument must fall between
+        # MINIMUM_CUSTOM_STATUS_CODE and MAXIMUM_CUSTOM_STATUS_CODE, which is the event code range the microcontroller
+        # reserves for custom hardware modules. The codes below that range belong to the base Module class of the
+        # firmware, and this library resolves them into their own explanatory errors without any interface involvement.
         super().__init__(
             module_type=module_type,
             module_id=module_id,
             name="test_module",
             data_codes=data_codes,
-            error_codes=None,  # The test module does not have any expected error states.
+            error_codes=None,
         )
 
         # Initializes the shared memory array used to transfer data from the remote communication process to the main

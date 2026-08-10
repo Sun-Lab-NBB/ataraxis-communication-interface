@@ -169,6 +169,7 @@ data from DataLogger archives.
 | `src/ataraxis_communication_interface/`     | Main library source code                                                      |
 | `src/.../communication/`                    | Serial/MQTT communication package (`protocols`, `messages`, `serial`, `mqtt`) |
 | `src/.../microcontroller/interface.py`      | Core MicroControllerInterface and ModuleInterface ABC                         |
+| `src/.../microcontroller/status_codes.py`   | Firmware status code mirrors and the message-to-explanation translators       |
 | `src/.../microcontroller/dataclasses.py`    | Manifest and extraction configuration data structures                         |
 | `src/.../microcontroller/log_processing.py` | Log data extraction algorithm and the columnar structures it returns          |
 | `src/.../microcontroller/extracted_data.py` | Extracted message table schema, its writer, and the primitives that read it   |
@@ -188,11 +189,21 @@ data from DataLogger archives.
   `(module_type, module_id)` routing. A watchdog thread monitors process health. Commands and parameters flow from
   the main process through an `MPQueue` to the communication process.
 - **ModuleInterface**: Abstract base class that users subclass to define hardware module behavior. Requires
-  `module_type`, `module_id`, and `name` as positional arguments, with optional `error_codes` and `data_codes` sets
-  controlling message routing. Three abstract methods: `initialize_remote_assets()`, `terminate_remote_assets()`,
+  `module_type`, `module_id`, and `name` as positional arguments, with an optional `data_codes` set and an
+  optional `error_codes` dictionary mapping each monitored error code to the explanation surfaced when it
+  arrives, both bounded to the custom event code range, controlling message routing. Three abstract methods: `initialize_remote_assets()`, `terminate_remote_assets()`,
   and `process_received_data()`. Public methods `send_command()` and `send_parameters()` use LRU-cached message
   construction for performance. `reset_command_queue()` sends a dequeue command to the microcontroller. The
   `type_id` property combines `(type << 8) | id` for dispatch lookups.
+- **Status Code Resolution**: `microcontroller/status_codes.py` mirrors the four firmware status code families as
+  `KernelStatusCodes`, `ModuleStatusCodes`, `CommunicationStatusCodes`, and `TransportStatusCodes`, alongside
+  `KernelCommandCodes` and the `MINIMUM_CUSTOM_STATUS_CODE` / `MAXIMUM_CUSTOM_STATUS_CODE` range bounds.
+  `describe_kernel_event()` and `describe_module_event()` return the description of a fault or
+  `None` for an ordinary state, and `describe_custom_module_error()` formats the interface-supplied explanation.
+  Membership in the private description tables defines which codes interrupt the runtime, and a code matching no
+  enumeration member reports that it falls outside the resolved range rather than being ignored. The messages
+  state what the reported codes establish and prescribe no response, because a status code records where a fault
+  was detected rather than what caused it.
 - **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
   CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 252 numpy data
   prototypes (`SerialPrototypes` enum) covering all numpy scalar and array types. `send_message()` accepts
@@ -292,6 +303,12 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   a static method executed in a spawned daemon process, and a watchdog thread in the main process monitors liveness.
   Commands flow from the main process through an `MPQueue` to the communication process, which requires an explicit
   `stop()` call. Test against microcontroller hardware or in test mode.
+- **Status codes** (`microcontroller/status_codes.py`): the enumerations mirror `kKernelStatusCodes`,
+  `kCoreStatusCodes`, `kCommunicationStatusCodes`, and the microcontroller-side `kTransportStatusCodes`, so a
+  firmware release that changes a code requires the mirror to change with it. The Communication and TransportLayer
+  codes never arrive as event codes and are read out of the two-byte payload every reception and transmission
+  fault carries. `TransportStatusCodes` is distinct from `TransportLayerStatus` in ataraxis-transport-layer-pc,
+  which covers the PC side and uses different values.
 - **ModuleInterface** (`microcontroller/interface.py`): subclasses must implement `initialize_remote_assets()`,
   `terminate_remote_assets()`, and `process_received_data()`. `send_command()` and `send_parameters()` use
   LRU-cached message construction, and `reset_command_queue()` sends a dequeue command. See
