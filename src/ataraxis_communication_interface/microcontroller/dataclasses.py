@@ -69,7 +69,7 @@ def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
         that must be filled in by the user.
 
     Raises:
-        FileNotFoundError: If the manifest file does not exist.
+        FileNotFoundError: If the manifest file does not exist or does not point to a file.
         ValueError: If the manifest contains no controller entries.
     """
     if not manifest_path.exists() or not manifest_path.is_file():

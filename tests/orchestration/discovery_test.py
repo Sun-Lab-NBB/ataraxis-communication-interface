@@ -64,6 +64,9 @@ _EVENT_CODES: tuple[int, ...] = (10, 20)
 _HOST_CORE_BUDGET: int = resolve_core_budget(requested_budget=-1)
 """Stores the core ceiling the host resolves for a caller that requests none."""
 
+_RESOLVED_JOB_CEILING: int = min(_HOST_CORE_BUDGET, CONTROLLER_EXTRACTION_JOB_CORES)
+"""Stores the ceiling a prepared job receives, which is the host budget bounded by the declared job width."""
+
 _WIDE_ARCHIVE_MESSAGES: int = PARALLEL_PROCESSING_THRESHOLD * 3
 """Stores the message count of the archive used to exercise the multi-core branch of the sizing model."""
 
@@ -405,7 +408,7 @@ def test_prepare_jobs_accepts_unreadable_archive(tmp_path):
 
 
 def test_prepare_jobs_resolves_ceiling_from_host(tmp_path):
-    """Verifies that prepare_jobs resolves a non-positive core ceiling from the host rather than yielding one core."""
+    """Verifies that prepare_jobs resolves a non-positive core ceiling from the host, bounded by the job width."""
     log_directory = tmp_path / "logs"
     _build_recording(log_directory=log_directory, source_ids=(1,))
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
@@ -418,8 +421,8 @@ def test_prepare_jobs_resolves_ceiling_from_host(tmp_path):
             core_ceiling=core_ceiling,
         )
 
-        assert job_set.core_ceiling == _HOST_CORE_BUDGET
-        assert job_set.jobs[0].core_weight == _HOST_CORE_BUDGET
+        assert job_set.core_ceiling == _RESOLVED_JOB_CEILING
+        assert job_set.jobs[0].core_weight == _RESOLVED_JOB_CEILING
         assert job_set.core_ceiling >= 1
 
 
@@ -877,7 +880,8 @@ def test_size_job_narrows_cores_to_the_repaid_workers(tmp_path):
     # Three thresholds' worth of messages repay three workers, which is below both the ceiling and the declared width.
     assert sized_job.core_weight == _WIDE_ARCHIVE_MESSAGES // PARALLEL_PROCESSING_THRESHOLD
     assert sized_job.core_weight == 3
-    assert job_set.jobs[0].core_weight == 64
+    # The preparation caps a requested ceiling at the declared job width, so the descriptor carries that width.
+    assert job_set.jobs[0].core_weight == CONTROLLER_EXTRACTION_JOB_CORES
 
 
 def test_size_job_default_ceiling_resolves_from_the_host(tmp_path):

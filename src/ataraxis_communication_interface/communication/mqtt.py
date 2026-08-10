@@ -111,7 +111,7 @@ class MQTTCommunication:
             )
             console.error(message=message, error=ConnectionError)
 
-        # If the class is configured to connect to any topics, enables the connection callback and starts the monitoring
+        # If the class is configured to connect to any topics, enables the message callback and starts the monitoring
         # thread.
         if self._monitored_topics:
             self._client.on_message = self._on_message

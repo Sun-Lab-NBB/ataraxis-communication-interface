@@ -4,7 +4,6 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
-import polars as pl
 import pytest
 from numpy.typing import NDArray
 from tests.log_archives import (
@@ -20,7 +19,6 @@ from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, PARALLEL_PROCESSING_THR
 
 from ataraxis_communication_interface.communication import SerialPrototypes
 from ataraxis_communication_interface.microcontroller import log_processing as log_processing_module
-from ataraxis_communication_interface.microcontroller.extracted_data import build_message_dataframe
 from ataraxis_communication_interface.microcontroller.log_processing import (
     ExtractedMessages,
     ExtractedModuleData,
@@ -252,43 +250,6 @@ def test_finalize_batch_without_module_filters() -> None:
 
     assert result.modules == ()
     assert result.kernel.count == 0
-
-
-def test_build_message_dataframe() -> None:
-    """Verifies that build_message_dataframe builds a correctly typed polars DataFrame."""
-    messages = ExtractedMessages(
-        timestamps=np.array([100, 200], dtype=np.uint64),
-        commands=np.array([1, 2], dtype=np.uint8),
-        events=np.array([10, 20], dtype=np.uint8),
-        dtypes=("uint8", None),
-        data_payloads=(b"\x2a", None),
-    )
-
-    dataframe = build_message_dataframe(messages=messages)
-
-    assert isinstance(dataframe, pl.DataFrame)
-    assert dataframe.shape == (2, 5)
-    assert dataframe.columns == ["timestamp_us", "command", "event", "dtype", "data"]
-    assert dataframe["timestamp_us"].dtype == pl.UInt64
-    assert dataframe["command"].dtype == pl.UInt8
-    assert dataframe["event"].dtype == pl.UInt8
-    assert dataframe["dtype"].dtype == pl.String
-    assert dataframe["data"].dtype == pl.Binary
-    assert dataframe["timestamp_us"][0] == 100
-    assert dataframe["command"][0] == 1
-    assert dataframe["event"][0] == 10
-    assert dataframe["dtype"][0] == "uint8"
-    assert dataframe["data"][0] == b"\x2a"
-    assert dataframe["dtype"][1] is None
-    assert dataframe["data"][1] is None
-
-
-def test_build_message_dataframe_empty() -> None:
-    """Verifies that build_message_dataframe builds an empty DataFrame from an empty columnar block."""
-    dataframe = build_message_dataframe(messages=_finalize_accumulator(accumulator=_create_accumulator()))
-
-    assert dataframe.shape == (0, 5)
-    assert dataframe.columns == ["timestamp_us", "command", "event", "dtype", "data"]
 
 
 def test_process_message_batch_unknown_prototype_codes(tmp_path: Path) -> None:

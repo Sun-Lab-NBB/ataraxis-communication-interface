@@ -33,8 +33,10 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
 
     Returns:
         A dictionary containing a 'verified' flag, the 'output_directory' and 'data_path', per-file results in 'files'
-        (each with path, filename, type, schema validity, row count, and column names), tracker status in 'tracker',
-        and a 'total_files' count.
+        (each with path, filename, type, schema validity, row count, and column names, plus an 'error' for a file that
+        cannot be read and 'missing_columns' and 'extra_columns' for a file whose schema mismatches), tracker status
+        in 'tracker', and a 'total_files' count. Returns an error dictionary if the output directory is missing, is
+        not a directory, or holds no ``microcontroller_data/`` subdirectory.
     """
     output_path = Path(output_directory)
 
@@ -63,7 +65,7 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
     for feather_file in feather_files:
         entry: dict[str, Any] = {"file": str(feather_file), "filename": feather_file.name}
 
-        # Parses source ID and type (module vs kernel) from the filename.
+        # Classifies each output file as module or kernel from its filename infix.
         name = feather_file.stem
         if OutputLayout.KERNEL_INFIX in name:
             entry["type"] = "kernel"
@@ -161,17 +163,18 @@ def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str,
     Removes each ``microcontroller_data/`` subdirectory and all of its contents, including processed output files
     and the processing tracker. Uses ``delete_directory`` from ataraxis-data-structures for parallel file deletion
     with platform-safe retry logic. After cleanup, the output directories can be passed to
-    prepare_log_processing_batch_tool to reinitialize from scratch. Accepts the 'log_directories' list returned
-    by discover_microcontroller_data_tool.
+    prepare_log_processing_batch_tool to reinitialize from scratch. Accepts the same output directory paths that were
+    supplied to prepare_log_processing_batch_tool.
 
     Args:
         output_directories: The list of absolute paths to output directories containing ``microcontroller_data/``
             subdirectories to delete.
 
     Returns:
-        A dictionary containing a 'results' list with per-directory outcomes (each with 'output_directory', a
-        'cleaned' flag, and one of 'data_path', 'error', or 'message'), a 'total_cleaned' count, and a
-        'total_directories' count.
+        A dictionary containing a 'results' list with per-directory outcomes (each with 'output_directory' and a
+        'cleaned' flag, carrying 'data_path' on a successful deletion, both 'data_path' and 'error' on a failed
+        deletion, 'error' alone for a path that does not resolve to a directory, and 'message' when there is nothing
+        to clean), a 'total_cleaned' count, and a 'total_directories' count.
     """
     results = [_clean_single_output(output_directory=directory) for directory in output_directories]
     total_cleaned = sum(1 for result in results if result.get("cleaned", False))
@@ -186,8 +189,9 @@ def _clean_single_output(output_directory: str) -> dict[str, Any]:
         output_directory: The absolute path to the output directory.
 
     Returns:
-        A dictionary containing 'output_directory', a 'cleaned' flag, and one of 'data_path' (on successful deletion),
-        'error' (on failure), or 'message' (when there is nothing to clean).
+        A dictionary containing 'output_directory' and a 'cleaned' flag, carrying 'data_path' on a successful
+        deletion, both 'data_path' and 'error' on a failed deletion, 'error' alone for a path that does not resolve
+        to a directory, and 'message' when there is nothing to clean.
     """
     output_path = Path(output_directory)
 

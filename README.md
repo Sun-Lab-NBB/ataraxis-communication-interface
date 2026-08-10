@@ -174,15 +174,15 @@ if __name__ == "__main__":
     console.echo(message="Initializing the communication process...")
 
     # Starts the serial communication with the microcontroller by initializing a separate process that handles the
-    # communication. This method may take up to 15 seconds to execute, as it verifies that the microcontroller is
+    # communication. This method may take up to 30 seconds to execute, as it verifies that the microcontroller is
     # configured correctly, given the MicroControllerInterface configuration.
     mc_interface.start()
 
     console.echo(message="Communication process: Initialized.", level=LogLevel.SUCCESS)
     console.echo(message="Updating hardware module runtime parameters...")
 
-    # Due to the current SharedMemoryArray implementation, the shared memory instances require additional setup after
-    # the communication process is started.
+    # The shared memory instances are connected in both processes already. Calling the setup here pins the connection
+    # point to a moment the runtime chooses, after the communication process has started.
     interface_1.start_shared_memory_array()
     interface_2.start_shared_memory_array()
 
@@ -251,8 +251,9 @@ if __name__ == "__main__":
     interface_1.reset_command_queue()
     interface_2.reset_command_queue()
 
-    # This time, since the pin pulsing performed by module 1 interferes with the echo command performed by module 2,
-    # both pulse and echo counters are expected to be ~5.
+    # The pulse period is the same in both modes, so the pin is again expected to pulse ~2 times. This time the pin
+    # pulsing performed by module 1 interferes with the echo command performed by module 2, so the echo counter is
+    # expected to fall below the non-blocking figure above.
     console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
     console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
     console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
@@ -281,7 +282,7 @@ if __name__ == "__main__":
             ModuleExtractionConfig(module_type=1, module_id=1, event_codes=(52, 53, 54)),
             ModuleExtractionConfig(module_type=1, module_id=2, event_codes=(52, 53, 54)),
         ),
-        kernel=KernelExtractionConfig(event_codes=(2,)),  # Extracts kernel status code 2 (module setup) events.
+        kernel=KernelExtractionConfig(event_codes=(1,)),  # Extracts kernel status code 1 (setup complete) events.
     )
 
     # Saves the filled-in config to disk. The pipeline reads it from disk to support both CLI and API usage.
@@ -630,7 +631,7 @@ axci mcp
 | `get_log_processing_status_tool`      | Returns the current status of the active log processing session               |
 | `get_log_processing_timing_tool`      | Returns timing information for all jobs in the active session                 |
 | `cancel_log_processing_tool`          | Cancels the active log processing execution session                           |
-| `reset_log_processing_jobs_tool`      | Resets failed or all jobs in a processing tracker for re-execution            |
+| `reset_log_processing_jobs_tool`      | Resets the named source IDs' jobs, or all jobs, in a tracker for re-execution |
 | `get_batch_status_overview_tool`      | Summarizes processing status for all log directories under a root directory   |
 | `verify_processing_output_tool`       | Verifies completeness and schema correctness of processed output              |
 | `query_extracted_events_tool`         | Queries and samples extracted event data from feather output files            |

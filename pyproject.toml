@@ -172,7 +172,6 @@ convention = "google"
     "FBT003",  # Numpy scalar constructors take the wrapped boolean positionally
     "PT012",   # Constructing the client and connecting it both belong inside the raises block
     "PT022",   # The yield keeps the DataLogger alive, as its finalizer destroys the queue the fixture returns
-    "PT011",   # The exception-handling test accepts any unexpected error, so it pins no dependency message
 ]
 
 [tool.ruff.lint.isort]

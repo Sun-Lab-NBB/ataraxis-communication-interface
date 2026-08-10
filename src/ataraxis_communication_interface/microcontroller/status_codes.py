@@ -29,7 +29,9 @@ _UNRECOGNIZED_CODE_NAME: str = "UNRECOGNIZED"
 
 
 class KernelCommandCodes(IntEnum):
-    """Defines the command codes the microcontroller's Kernel class accepts from the PC."""
+    """Defines the command codes the microcontroller's Kernel class uses, covering both the codes the PC addresses it
+    with and the codes it holds or issues to itself.
+    """
 
     STANDBY = 0
     """The placeholder code the Kernel holds while it executes no command."""

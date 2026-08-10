@@ -23,7 +23,13 @@ from .jobs import (
     resolve_tracker_path,
     resolve_output_directory,
 )
-from .allocation import resolve_core_budget, resolve_job_workers, estimate_job_memory_mb, resolve_archive_footprint
+from .allocation import (
+    CONTROLLER_EXTRACTION_JOB_CORES,
+    resolve_core_budget,
+    resolve_job_workers,
+    estimate_job_memory_mb,
+    resolve_archive_footprint,
+)
 from ..microcontroller import (
     MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig,
@@ -280,7 +286,10 @@ def prepare_jobs(
 
     resolved_output = resolve_output_directory(output_directory=output_directory)
     tracker_path = resolve_tracker_path(output_directory=resolved_output)
-    ceiling = resolve_core_budget(requested_budget=core_ceiling)
+
+    # The host budget bounds what the whole recording may claim, and the declared job width bounds what any one job
+    # repays, so a job is dispatched at the smaller of the two.
+    ceiling = min(resolve_core_budget(requested_budget=core_ceiling), CONTROLLER_EXTRACTION_JOB_CORES)
 
     # A tree holding no manifest holds no job this library owns, whatever the configuration declares. Reporting the
     # empty set here keeps the answer the resolution already gave, since weighing the configuration against an

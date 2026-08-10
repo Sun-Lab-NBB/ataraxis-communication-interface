@@ -1,8 +1,9 @@
 """Provides a Model Context Protocol (MCP) server for agentic interaction with the library.
 
-Exposes microcontroller discovery, MQTT broker connectivity checking, extraction configuration management,
-microcontroller data log processing, output verification, and extracted event querying through the MCP protocol,
-enabling AI agents to programmatically interact with the library's core features.
+Exposes microcontroller discovery, MQTT broker connectivity checking, log archive assembly, microcontroller manifest
+management, extraction configuration management, microcontroller data log processing, output verification, output
+cleanup, and extracted event querying through the MCP protocol, enabling AI agents to programmatically interact with
+the library's core features.
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
 def run_mcp_server() -> None:
     """Starts the MCP server with stdio transport.
 
-    Serves as a CLI entry point, launching the MCP server using the stdio transport protocol recommended for Claude
-    Desktop integration.
+    Wraps run_server() with the stdio transport protocol recommended for Claude Desktop integration.
     """
     run_server(transport="stdio")

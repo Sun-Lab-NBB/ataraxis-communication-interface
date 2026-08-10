@@ -46,7 +46,7 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
     """Discovers all available serial ports and identifies which ones are connected to Arduino or Teensy
     microcontrollers running the ataraxis-micro-controller library.
 
-    Uses parallel processing to simultaneously query all ports for microcontroller identification.
+    Queries the ports in parallel across a pool sized to the smaller of the port count and the host's worker budget.
 
     Args:
         baudrate: The baudrate to use for communication during identification. Note, the same baudrate value is used
@@ -54,8 +54,9 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
             via the UART serial interface and is ignored by microcontrollers that use the USB interface.
 
     Returns:
-        A numbered list of evaluated serial ports with their device descriptions and identified microcontroller IDs,
-        or a message indicating no valid ports were detected.
+        A numbered list of evaluated serial ports with their device descriptions, each entry reporting the identified
+        microcontroller ID, that no microcontroller responded, or the connection error encountered on that port, or a
+        message indicating no valid ports were detected.
     """
     available_ports = list_available_ports()
 
@@ -175,9 +176,9 @@ def assemble_log_archives_tool(
             removing sources.
 
     Returns:
-        A dictionary containing the assembly status, directory path, list of created archive filenames, extracted
-        source IDs, and archive count. Returns an error dictionary if the directory does not exist or assembly
-        fails.
+        A dictionary containing the assembly status, directory path, the list of archive filenames present in the
+        directory after assembly, extracted source IDs, and archive count. Returns an error dictionary if the
+        directory does not exist or assembly fails.
     """
     directory_path = Path(log_directory)
 
@@ -198,7 +199,7 @@ def assemble_log_archives_tool(
     except Exception as error:
         return {"error": f"Archive assembly failed: {error}"}
 
-    # Scans for created archives and extracts source IDs from filenames.
+    # Scans for the archives present in the directory and extracts source IDs from filenames.
     source_ids = sorted(discover_log_archives(log_directory=directory_path))
     archives = [f"{source_id}{LOG_ARCHIVE_SUFFIX}" for source_id in source_ids]
 
@@ -223,7 +224,8 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:
 
     Returns:
         A dictionary containing the manifest path, a list of controller entries with their modules, and the
-        total controller count.
+        total controller count. Returns an error dictionary if the manifest file is missing, is not a file, or
+        cannot be parsed.
     """
     path = Path(manifest_path)
 
@@ -275,7 +277,9 @@ def write_microcontroller_manifest_tool(
             and 'name' (str) keys.
 
     Returns:
-        A dictionary containing a 'success' flag, the manifest path, and a summary of the registered entry.
+        A dictionary containing a 'success' flag, the manifest path, and a summary of the registered entry. Returns
+        an error dictionary if the log directory is missing, is not a directory, a module descriptor is malformed, or
+        the manifest cannot be written.
     """
     log_path = Path(log_directory)
 
@@ -338,7 +342,8 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
     Returns:
         A dictionary containing a 'sources' list where each entry has 'recording_root', 'source_id', 'name',
         'log_archive', 'log_directory', and 'modules' keys, a flat 'log_directories' list for batch processing,
-        and aggregate counts.
+        and aggregate counts. Returns an error dictionary if the root directory is missing, is not a directory, or
+        cannot be searched.
     """
     root_path = Path(root_directory)
 

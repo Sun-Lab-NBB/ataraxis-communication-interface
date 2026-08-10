@@ -374,7 +374,8 @@ class SerialProtocols(IntEnum):
     """
 
     UNDEFINED = 0
-    """Not a valid protocol code. Used to initialize the SerialCommunication class."""
+    """Not a valid protocol code. The microcontroller's Communication class initializes its protocol tracker to this
+    code."""
 
     REPEATED_MODULE_COMMAND = 1
     """Used by Module-addressed commands that should be repeated (executed recurrently)."""

@@ -657,7 +657,8 @@ def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) ->
     # Verifies receiving a message with invalid protocol code.
     message_data = np.array([255, 1, 2], dtype=np.uint8)  # Invalid protocol code
 
-    # Sends the message to the SerialMock class, which COBS-encodes and CRC-stamps the message.
+    # Sends the message through the TransportLayer, which COBS-encodes and CRC-stamps it before writing the finished
+    # packet into the mocked port's tx_buffer.
     communication._transport_layer.write_data(message_data)
     communication._transport_layer.send_data()
 
