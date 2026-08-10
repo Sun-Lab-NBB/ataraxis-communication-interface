@@ -1,16 +1,16 @@
-"""Provides the shared FastMCP server instance and a cross-tool helper function used by the MCP tool modules."""
+"""Provides the shared MCP server instance and a cross-tool helper function used by the MCP tool modules."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-mcp: FastMCP = FastMCP(name="ataraxis-communication-interface", json_response=True)
+mcp: MCPServer = MCPServer(name="ataraxis-communication-interface")
 """Stores the MCP server instance used to expose tools to AI agents."""
 
 
