@@ -54,6 +54,10 @@ _PROTOCOL_CONTROLLER_IDENTIFICATION: np.uint8 = SerialProtocols.CONTROLLER_IDENT
 _PROTOCOL_MODULE_IDENTIFICATION: np.uint8 = SerialProtocols.MODULE_IDENTIFICATION.as_uint8()
 """Cached uint8 value for the MODULE_IDENTIFICATION protocol code, used in receive_message dispatch."""
 
+_PROTOCOL_CODE_PROTOTYPE: np.uint8 = np.uint8(0)
+"""The uint8 prototype every reception reads its protocol code into. Sharing one instance is safe because the
+TransportLayer builds a new object to hold the value it reads."""
+
 
 class SerialCommunication:
     """Provides methods for bidirectionally communicating with a microcontroller running the ataraxis-micro-controller
@@ -197,14 +201,11 @@ class SerialCommunication:
             return None
 
         # Timestamps and logs the serialized message data to disk before further processing.
-        self._log_data(
-            timestamp=self._timestamp_timer.elapsed,
-            data=self._transport_layer.reception_buffer[: self._transport_layer.bytes_in_reception_buffer],
-        )
+        self._log_data(timestamp=self._timestamp_timer.elapsed, data=self._transport_layer.reception_payload)
 
         # Reads the message protocol code, expected to be found as the first value of every incoming payload. This
         # code determines how to parse the message's payload.
-        protocol = self._transport_layer.read_data(data_object=np.uint8(0))
+        protocol = self._transport_layer.read_data(data_object=_PROTOCOL_CODE_PROTOTYPE)
 
         # Uses the extracted protocol code to determine the type of the received message and process the received data.
         if protocol == _PROTOCOL_MODULE_DATA:

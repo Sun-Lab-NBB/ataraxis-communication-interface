@@ -99,7 +99,7 @@ def prepare_log_processing_batch_tool(
         # directory. Discovery already confirmed both, but the check guards against stale data. The resolution runs
         # through the same recursive search the jobs themselves use, so a nested archive is prepared as it is run.
         try:
-            _, possible = discover_microcontroller_jobs(log_directory=log_directory_path)
+            _, possible, _ = discover_microcontroller_jobs(log_directory=log_directory_path)
         except Exception:
             invalid_paths.append(log_directory_string)
             continue

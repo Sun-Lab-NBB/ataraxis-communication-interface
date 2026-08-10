@@ -257,27 +257,41 @@ class ModuleData:
     @property
     def module_type(self) -> np.uint8:
         """Returns the type (family) code of the module that sent the message."""
-        return np.uint8(self.message[0])
+        value: np.uint8 = self.message[0]
+        return value
 
     @property
     def module_id(self) -> np.uint8:
         """Returns the unique identifier code of the module instance that sent the message."""
-        return np.uint8(self.message[1])
+        value: np.uint8 = self.message[1]
+        return value
+
+    @property
+    def type_id(self) -> np.uint16:
+        """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
+        the id-code of the module instance that sent the message.
+        """
+        header = self.message
+        value: np.uint16 = np.uint16((int(header[0]) << 8) | int(header[1]))
+        return value
 
     @property
     def command(self) -> np.uint8:
         """Returns the code of the command executed by the module that sent the message."""
-        return np.uint8(self.message[2])
+        value: np.uint8 = self.message[2]
+        return value
 
     @property
     def event(self) -> np.uint8:
         """Returns the code of the event that prompted sending the message."""
-        return np.uint8(self.message[3])
+        value: np.uint8 = self.message[3]
+        return value
 
     @property
     def prototype_code(self) -> np.uint8:
         """Returns the code that specifies the type of the data object transmitted with the message."""
-        return np.uint8(self.message[4])
+        value: np.uint8 = self.message[4]
+        return value
 
 
 @dataclass(slots=True)
@@ -301,17 +315,20 @@ class KernelData:
     @property
     def command(self) -> np.uint8:
         """Returns the code of the command executed by the Kernel when it sent the message."""
-        return np.uint8(self.message[0])
+        value: np.uint8 = self.message[0]
+        return value
 
     @property
     def event(self) -> np.uint8:
         """Returns the code of the event that prompted sending the message."""
-        return np.uint8(self.message[1])
+        value: np.uint8 = self.message[1]
+        return value
 
     @property
     def prototype_code(self) -> np.uint8:
         """Returns the code that specifies the type of the data object transmitted with the message."""
-        return np.uint8(self.message[2])
+        value: np.uint8 = self.message[2]
+        return value
 
 
 @dataclass(slots=True)
@@ -336,22 +353,35 @@ class ModuleState:
     @property
     def module_type(self) -> np.uint8:
         """Returns the type (family) code of the module that sent the message."""
-        return np.uint8(self.message[0])
+        value: np.uint8 = self.message[0]
+        return value
 
     @property
     def module_id(self) -> np.uint8:
         """Returns the ID of the specific module instance within the broader module family."""
-        return np.uint8(self.message[1])
+        value: np.uint8 = self.message[1]
+        return value
+
+    @property
+    def type_id(self) -> np.uint16:
+        """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
+        the id-code of the module instance that sent the message.
+        """
+        header = self.message
+        value: np.uint16 = np.uint16((int(header[0]) << 8) | int(header[1]))
+        return value
 
     @property
     def command(self) -> np.uint8:
         """Returns the code of the command executed by the module that sent the message."""
-        return np.uint8(self.message[2])
+        value: np.uint8 = self.message[2]
+        return value
 
     @property
     def event(self) -> np.uint8:
         """Returns the code of the event that prompted sending the message."""
-        return np.uint8(self.message[3])
+        value: np.uint8 = self.message[3]
+        return value
 
 
 @dataclass(slots=True)
@@ -373,12 +403,14 @@ class KernelState:
     @property
     def command(self) -> np.uint8:
         """Returns the code of the command executed by the Kernel when it sent the message."""
-        return np.uint8(self.message[0])
+        value: np.uint8 = self.message[0]
+        return value
 
     @property
     def event(self) -> np.uint8:
         """Returns the code of the event that prompted sending the message."""
-        return np.uint8(self.message[1])
+        value: np.uint8 = self.message[1]
+        return value
 
 
 @dataclass(slots=True)
@@ -397,7 +429,8 @@ class ReceptionCode:
     @property
     def reception_code(self) -> np.uint8:
         """Returns the reception code originally sent as part of the outgoing Command or Parameters message."""
-        return np.uint8(self.message[0])
+        value: np.uint8 = self.message[0]
+        return value
 
 
 @dataclass(slots=True)
@@ -414,7 +447,8 @@ class ControllerIdentification:
     @property
     def controller_id(self) -> np.uint8:
         """Returns the unique identifier of the microcontroller."""
-        return np.uint8(self.message[0])
+        value: np.uint8 = self.message[0]
+        return value
 
 
 @dataclass(slots=True)

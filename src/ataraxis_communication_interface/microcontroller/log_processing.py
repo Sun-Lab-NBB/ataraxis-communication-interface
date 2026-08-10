@@ -216,11 +216,16 @@ def extract_logged_microcontroller_data(
         executor=executor,
     )
 
-    # Combines the columnar accumulators of every batch, maintaining chronological ordering.
+    # Combines the columnar accumulators of every batch, maintaining chronological ordering. Each batch is released as
+    # soon as its messages are copied out, so the batch columns and the combined columns are never both fully resident.
+    # The list is reversed once and drained from the end, which keeps the chronological order while making each removal
+    # a constant-time operation.
     combined_modules = _create_accumulators(module_filters=module_filters)
     combined_kernel = _create_accumulator()
 
-    for batch_modules, batch_kernel in results:
+    results.reverse()
+    while results:
+        batch_modules, batch_kernel = results.pop()
         for module_key, accumulator in batch_modules.items():
             _extend_accumulator(target=combined_modules[module_key], source=accumulator)
         _extend_accumulator(target=combined_kernel, source=batch_kernel)
@@ -342,6 +347,12 @@ def _process_message_batch(
     module_data = _create_accumulators(module_filters=module_filters)
     kernel_accumulator = _create_accumulator()
 
+    # Pairs each module's event codes with its accumulator, so a message resolves both through one lookup instead of
+    # probing the filter mapping and the accumulator mapping with the same key.
+    module_targets: dict[tuple[int, int], tuple[frozenset[int], _ColumnAccumulator]] = {
+        module: (event_codes, module_data[module]) for module, event_codes in (module_filters or {}).items()
+    }
+
     # Pre-creates protocol sets outside the per-message loop to avoid re-creating them on every iteration.
     module_protocols = frozenset({SerialProtocols.MODULE_DATA, SerialProtocols.MODULE_STATE})
     kernel_protocols = frozenset({SerialProtocols.KERNEL_DATA, SerialProtocols.KERNEL_STATE})
@@ -355,66 +366,77 @@ def _process_message_batch(
 
         # Routes module messages (MODULE_DATA / MODULE_STATE) through the extraction pipeline.
         if extract_modules and protocol in module_protocols:
-            # Looks up the per-module event codes in a single dict access. Returns None if the module is not
-            # requested, combining module membership and event filter retrieval into one O(1) operation.
-            current_module = (int(payload[1]), int(payload[2]))
-            module_events = module_filters.get(current_module)  # type: ignore[union-attr]
-            if module_events is None:
+            # Reads the header in one pass, since indexing the resulting bytes object yields Python integers while
+            # indexing the payload array allocates a NumPy scalar per field. A MODULE_STATE payload carries only the
+            # first five of these bytes, and the sixth is read solely under MODULE_DATA.
+            header = payload[:6].tobytes()
+
+            # Looks up the per-module event codes and accumulator in a single dict access. Returns None if the module
+            # is not requested, combining module membership and event filter retrieval into one O(1) operation.
+            current_module = (header[1], header[2])
+            target = module_targets.get(current_module)
+            if target is None:
                 continue
+            module_events, accumulator = target
 
             # Filters against this specific module's event codes, preventing off-target extraction.
-            if int(payload[4]) not in module_events:
+            event_code = header[4]
+            if event_code not in module_events:
                 continue
 
             # Resolves the numpy dtype string and extracts the raw data bytes for MODULE_DATA messages. Uses the
             # pre-built dtype lookup to avoid per-message prototype object allocation.
             dtype_str: str | None = None
             data_payload: bytes | None = None
-            if protocol == SerialProtocols.MODULE_DATA:
-                prototype_code = int(payload[5])
+            if header[0] == SerialProtocols.MODULE_DATA:
+                prototype_code = header[5]
                 dtype_str = SerialPrototypes.get_dtype_for_code(code=prototype_code)
                 if dtype_str is not None:
                     data_payload = payload[6:].tobytes()
                     _validate_payload_size(
                         prototype_code=prototype_code,
                         data_payload=data_payload,
-                        source_label=f"the module {current_module[0]} {current_module[1]}",
+                        module=current_module,
                         log_path=log_path,
                     )
 
             # Appends directly to the module's columnar accumulator.
-            accumulator = module_data[current_module]
             accumulator.timestamps.append(int(log_msg.timestamp_us))
-            accumulator.commands.append(int(payload[3]))
-            accumulator.events.append(int(payload[4]))
+            accumulator.commands.append(header[3])
+            accumulator.events.append(event_code)
             accumulator.dtypes.append(dtype_str)
             accumulator.data_payloads.append(data_payload)
 
         # Routes kernel messages (KERNEL_DATA / KERNEL_STATE) through the extraction pipeline.
         elif extract_kernel and protocol in kernel_protocols:
+            # Reads the header in one pass on the same terms as the module header above. A KERNEL_STATE payload
+            # carries only the first three of these bytes, and the fourth is read solely under KERNEL_DATA.
+            header = payload[:4].tobytes()
+
             # Extracts only messages with requested event codes.
-            if int(payload[2]) not in kernel_event_codes:  # type: ignore[operator]
+            event_code = header[2]
+            if event_code not in kernel_event_codes:  # type: ignore[operator]
                 continue
 
             # Resolves the numpy dtype string and extracts the raw data bytes for KERNEL_DATA messages.
             dtype_str = None
             data_payload = None
-            if protocol == SerialProtocols.KERNEL_DATA:
-                prototype_code = int(payload[3])
+            if header[0] == SerialProtocols.KERNEL_DATA:
+                prototype_code = header[3]
                 dtype_str = SerialPrototypes.get_dtype_for_code(code=prototype_code)
                 if dtype_str is not None:
                     data_payload = payload[4:].tobytes()
                     _validate_payload_size(
                         prototype_code=prototype_code,
                         data_payload=data_payload,
-                        source_label="the kernel",
+                        module=None,
                         log_path=log_path,
                     )
 
             # Appends directly to the kernel's columnar accumulator.
             kernel_accumulator.timestamps.append(int(log_msg.timestamp_us))
-            kernel_accumulator.commands.append(int(payload[1]))
-            kernel_accumulator.events.append(int(payload[2]))
+            kernel_accumulator.commands.append(header[1])
+            kernel_accumulator.events.append(event_code)
             kernel_accumulator.dtypes.append(dtype_str)
             kernel_accumulator.data_payloads.append(data_payload)
 
@@ -424,7 +446,7 @@ def _process_message_batch(
 def _validate_payload_size(
     prototype_code: int,
     data_payload: bytes,
-    source_label: str,
+    module: tuple[int, int] | None,
     log_path: Path,
 ) -> None:
     """Verifies that a data message carries the payload width its prototype code declares.
@@ -436,7 +458,8 @@ def _validate_payload_size(
     Args:
         prototype_code: The prototype code the message declares.
         data_payload: The raw payload bytes the message carries.
-        source_label: The description of the message sender, used to attribute the failure.
+        module: The type and identifier codes of the hardware module that sent the message, or None when the kernel
+            sent it. Used to attribute the failure.
         log_path: The path to the archive holding the message, used to attribute the failure.
 
     Raises:
@@ -444,6 +467,8 @@ def _validate_payload_size(
     """
     declared_size = SerialPrototypes.get_byte_size_for_code(code=prototype_code)
     if declared_size is not None and len(data_payload) != declared_size:
+        # The label is built here rather than at the call site, so the ordinary path formats no string per message.
+        source_label = "the kernel" if module is None else f"the module {module[0]} {module[1]}"
         message = (
             f"Unable to extract the data message logged by {source_label} to '{log_path}'. The message declares the "
             f"prototype code {prototype_code}, whose data object occupies {declared_size} bytes, but it carries a "
@@ -521,21 +546,25 @@ def _finalize_batch(
 
     Args:
         module_accumulators: The column accumulator of each requested module, keyed by the module type and
-            identifier pair.
+            identifier pair. The mapping is emptied as the accumulators are converted.
         kernel_accumulator: The column accumulator holding the extracted kernel messages.
         module_filters: The event codes requested for each module, whose key order the reported modules follow.
 
     Returns:
         The finalized controller data.
     """
-    modules = tuple(
-        ExtractedModuleData(
-            module_type=module[0],
-            module_id=module[1],
-            messages=_finalize_accumulator(accumulator=module_accumulators[module]),
-        )
-        for module in (module_filters or {})
-        if module_accumulators[module].timestamps
-    )
+    # Removes each accumulator as it is converted, so its columns are released while the remaining modules are still
+    # being converted rather than all at once when the caller releases the mapping.
+    modules: list[ExtractedModuleData] = []
+    for module in module_filters or {}:
+        accumulator = module_accumulators.pop(module)
+        if accumulator.timestamps:
+            modules.append(
+                ExtractedModuleData(
+                    module_type=module[0],
+                    module_id=module[1],
+                    messages=_finalize_accumulator(accumulator=accumulator),
+                )
+            )
 
-    return ExtractedControllerData(modules=modules, kernel=_finalize_accumulator(accumulator=kernel_accumulator))
+    return ExtractedControllerData(modules=tuple(modules), kernel=_finalize_accumulator(accumulator=kernel_accumulator))

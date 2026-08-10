@@ -56,8 +56,8 @@ def build_message_dataframe(messages: ExtractedMessages) -> pl.DataFrame:
             ExtractedDataColumns.TIMESTAMP: pl.Series(values=messages.timestamps, dtype=pl.UInt64),
             ExtractedDataColumns.COMMAND: pl.Series(values=messages.commands, dtype=pl.UInt8),
             ExtractedDataColumns.EVENT: pl.Series(values=messages.events, dtype=pl.UInt8),
-            ExtractedDataColumns.DTYPE: pl.Series(values=list(messages.dtypes), dtype=pl.String),
-            ExtractedDataColumns.DATA: pl.Series(values=list(messages.data_payloads), dtype=pl.Binary),
+            ExtractedDataColumns.DTYPE: pl.Series(values=messages.dtypes, dtype=pl.String),
+            ExtractedDataColumns.DATA: pl.Series(values=messages.data_payloads, dtype=pl.Binary),
         }
     )
 

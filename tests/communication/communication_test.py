@@ -56,6 +56,16 @@ def logger_queue(tmp_path_factory: pytest.TempPathFactory) -> Generator[Queue[An
     yield logger.input_queue
 
 
+def _loop_back_mocked_port(communication: SerialCommunication) -> None:
+    """Feeds the bytes the instance last transmitted back to it as bytes to receive.
+
+    The mocked serial port the TransportLayer builds under test mode is reachable only through private attributes, so
+    every reception test routes through this helper and the coupling to that layout is named in one place.
+    """
+    port = communication._transport_layer._port
+    port.rx_buffer = port.tx_buffer
+
+
 def test_serial_protocols_members() -> None:
     """Verifies that SerialProtocols enum has correct values."""
     assert SerialProtocols.UNDEFINED.value == 0
@@ -414,6 +424,16 @@ def test_module_data_init(transport_layer: TransportLayer) -> None:
     assert isinstance(data.data_object, np.uint8)
 
 
+def test_module_data_type_id() -> None:
+    """Verifies that ModuleData combines its type and id codes into the module dispatch key."""
+    data = ModuleData()
+    data.message[0] = 3
+    data.message[1] = 7
+
+    assert data.type_id == 775
+    assert data.type_id.dtype == np.uint16
+
+
 def test_kernel_data_init(transport_layer: TransportLayer) -> None:
     """Verifies KernelData initialization."""
     data = KernelData()
@@ -433,6 +453,16 @@ def test_module_state_init(transport_layer: TransportLayer) -> None:
     assert state.module_id == 0
     assert state.command == 0
     assert state.event == 0
+
+
+def test_module_state_type_id() -> None:
+    """Verifies that ModuleState combines its type and id codes into the module dispatch key."""
+    state = ModuleState()
+    state.message[0] = 3
+    state.message[1] = 7
+
+    assert state.type_id == 775
+    assert state.type_id.dtype == np.uint16
 
 
 def test_kernel_state_init(transport_layer: TransportLayer) -> None:
@@ -508,7 +538,7 @@ def test_serial_communication_send_message(logger_queue: Queue[Any]) -> None:
     communication.send_message(message=message)
 
     # Verifies the data was written to the transport layer.
-    assert communication._transport_layer._transmission_buffer[:3].tobytes() == message.packed_data.tobytes()
+    assert communication._transport_layer.transmission_buffer[:3].tobytes() == message.packed_data.tobytes()
 
 
 @pytest.mark.parametrize(
@@ -601,7 +631,7 @@ def test_serial_communication_receive_message(
     # done by first 'sending' it and then using the 'sent' (well-formatted) data for the reception test.
     communication._transport_layer.write_data(message_data)
     communication._transport_layer.send_data()
-    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
+    _loop_back_mocked_port(communication=communication)
 
     received = communication.receive_message()
     assert isinstance(received, expected_type)
@@ -633,7 +663,7 @@ def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) ->
 
     # Transfers the message from the tx_buffer to the rx_buffer. The message then can be 'received' and it now
     # has the correct format to pass TransportLayer verification steps that ensure message integrity.
-    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
+    _loop_back_mocked_port(communication=communication)
 
     # Ensures that a message with an invalid protocol raises a ValueError.
     message = (
@@ -660,7 +690,7 @@ def test_serial_communication_module_data_invalid_prototype(logger_queue: Queue[
 
     communication._transport_layer.write_data(message_data)
     communication._transport_layer.send_data()
-    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
+    _loop_back_mocked_port(communication=communication)
 
     expected_error = (
         "Invalid prototype code 255 encountered when extracting the data object from "
@@ -687,7 +717,7 @@ def test_serial_communication_kernel_data_invalid_prototype(logger_queue: Queue[
 
     communication._transport_layer.write_data(message_data)
     communication._transport_layer.send_data()
-    communication._transport_layer._port.rx_buffer = communication._transport_layer._port.tx_buffer
+    _loop_back_mocked_port(communication=communication)
 
     expected_error = (
         "Invalid prototype code 255 encountered when extracting the data object from "
