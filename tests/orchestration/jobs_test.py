@@ -1,144 +1,200 @@
-"""Contains tests for the classes and functions provided by the orchestration/jobs.py module."""
+"""Contains tests for the classes and functions provided by the jobs.py module."""
 
-from pathlib import Path
+import pickle
+from dataclasses import fields, replace
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 
 import pytest
-from tests.log_archives import create_test_archive, make_module_state_payload
+from tests.log_archives import create_test_archive, write_extraction_config, make_module_state_payload
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, ProcessingTracker
 
 from ataraxis_communication_interface.orchestration.jobs import (
-    FEATHER_SUFFIX,
-    TRACKER_FILENAME,
-    EXTRACTION_JOB_NAME,
-    KERNEL_FEATHER_INFIX,
-    MODULE_FEATHER_INFIX,
-    CONTROLLER_FEATHER_PREFIX,
-    MICROCONTROLLER_DATA_DIRECTORY,
-    PendingJob,
+    CONTROLLER_EXTRACTION_JOB_NAME,
+    JobSizing,
+    OutputLayout,
+    JobDescriptor,
     generate_job_ids,
-    find_module_feathers,
-    parse_module_feather_name,
-    resolve_kernel_feather_path,
-    resolve_module_feather_path,
-    discover_microcontroller_jobs,
-)
-from ataraxis_communication_interface.microcontroller.dataclasses import (
-    MICROCONTROLLER_MANIFEST_FILENAME,
-    ModuleSourceData,
-    MicroControllerManifest,
-    write_microcontroller_manifest,
+    find_module_paths,
+    parse_module_path,
+    resolve_kernel_path,
+    resolve_module_path,
+    resolve_tracker_path,
+    resolve_output_directory,
 )
 
+_ONSET_US = 1700000000000000
+"""The UTC epoch onset, in microseconds, shared by every synthetic log archive built in this module."""
 
-def _write_archive(directory, source_id):
-    """Writes a synthetic log archive for the target source into the specified directory."""
+_SPAWN_TIMEOUT_SECONDS = 180
+"""The time the spawned worker round-trip test waits for its single submitted call before failing."""
+
+
+def _create_archive(directory, source_id):
+    """Writes a synthetic microcontroller log archive for the target source into the requested directory."""
     directory.mkdir(parents=True, exist_ok=True)
+    archive_path = directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
     create_test_archive(
-        archive_path=directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}",
-        source_id=source_id,
-        messages=[(1000, make_module_state_payload(module_type=1, module_id=2, command=1, event=10))],
-    )
-
-
-def _write_manifest_entry(directory, source_id):
-    """Appends a single-module controller entry for the target source to the manifest in the specified directory."""
-    write_microcontroller_manifest(
-        log_directory=directory,
-        controller_id=source_id,
-        controller_name=f"controller_{source_id}",
-        modules=(ModuleSourceData(module_type=1, module_id=2, name="test_module"),),
-    )
-
-
-def test_constants():
-    """Verifies that the module-level job identity constants have the expected values."""
-    assert EXTRACTION_JOB_NAME == "microcontroller_data_extraction"
-    assert TRACKER_FILENAME == "microcontroller_processing_tracker.yaml"
-    assert MICROCONTROLLER_DATA_DIRECTORY == "microcontroller_data"
-    assert CONTROLLER_FEATHER_PREFIX == "controller_"
-    assert MODULE_FEATHER_INFIX == "_module_"
-    assert KERNEL_FEATHER_INFIX == "_kernel"
-    assert FEATHER_SUFFIX == ".feather"
-
-
-def test_pending_job_creation():
-    """Verifies that PendingJob stores every supplied field and applies the documented weight defaults."""
-    job = PendingJob(
-        log_directory="/logs",
-        output_directory="/output",
-        tracker_path="/output/microcontroller_processing_tracker.yaml",
-        job_id="abc123",
-        source_id="1",
-        config_path="/config.yaml",
-    )
-
-    assert job.log_directory == "/logs"
-    assert job.output_directory == "/output"
-    assert job.tracker_path == "/output/microcontroller_processing_tracker.yaml"
-    assert job.job_id == "abc123"
-    assert job.source_id == "1"
-    assert job.config_path == "/config.yaml"
-    assert job.core_weight == 1
-    assert job.memory_mb == 0
-    assert job.archive_path is None
-
-
-def test_pending_job_weight_overrides(tmp_path):
-    """Verifies that PendingJob honors explicitly supplied core, memory, and archive overrides."""
-    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
-    job = PendingJob(
-        log_directory=tmp_path,
-        output_directory=tmp_path / "output",
-        tracker_path=tmp_path / "output" / TRACKER_FILENAME,
-        job_id="abc123",
-        source_id="1",
-        config_path=tmp_path / "config.yaml",
-        core_weight=5,
-        memory_mb=2048,
         archive_path=archive_path,
+        source_id=source_id,
+        messages=[
+            (1000, make_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
+            (2000, make_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
+        ],
+        onset_us=_ONSET_US,
+    )
+    return archive_path
+
+
+def _build_descriptor(tmp_path, source_id=1, core_weight=1):
+    """Builds a descriptor addressing a real synthetic archive written under the requested temporary directory."""
+    log_directory = tmp_path / "logs"
+    archive_path = _create_archive(directory=log_directory, source_id=source_id)
+    output_directory = resolve_output_directory(output_directory=tmp_path / "output")
+    config_path = write_extraction_config(config_path=tmp_path / "config.yaml", source_id=source_id)
+
+    return JobDescriptor.for_archive(
+        archive_path=archive_path,
+        output_directory=output_directory,
+        config_path=config_path,
+        tracker_path=resolve_tracker_path(output_directory=output_directory),
+        source_id=str(source_id),
+        log_directory=log_directory,
+        core_weight=core_weight,
     )
 
-    assert job.core_weight == 5
-    assert job.memory_mb == 2048
-    assert job.archive_path == archive_path
+
+def _normalize(text):
+    """Collapses the line wrapping the console applies, so a message fragment matches the raised error's text."""
+    return " ".join(str(text).split())
 
 
-def test_pending_job_dispatch_key(tmp_path):
-    """Verifies that dispatch_key pairs the stringified tracker path with the job identifier."""
-    tracker_path = tmp_path / MICROCONTROLLER_DATA_DIRECTORY / TRACKER_FILENAME
-    job = PendingJob(
-        log_directory=tmp_path,
-        output_directory=tmp_path / "output",
-        tracker_path=tracker_path,
-        job_id="deadbeef",
-        source_id="7",
-        config_path=tmp_path / "config.yaml",
-    )
-
-    assert job.dispatch_key == (str(tracker_path), "deadbeef")
+def test_controller_extraction_job_name():
+    """Verifies that the extraction job name keeps the value every persisted job identifier is derived from."""
+    assert CONTROLLER_EXTRACTION_JOB_NAME == "microcontroller_data_extraction"
 
 
-def test_pending_job_dispatch_key_separates_trackers(tmp_path):
-    """Verifies that dispatch_key distinguishes identical job identifiers stored under different trackers."""
-    first = PendingJob(
-        log_directory=tmp_path,
-        output_directory=tmp_path / "first",
-        tracker_path=tmp_path / "first" / TRACKER_FILENAME,
-        job_id="shared",
-        source_id="1",
-        config_path=tmp_path / "config.yaml",
-    )
-    second = PendingJob(
-        log_directory=tmp_path,
-        output_directory=tmp_path / "second",
-        tracker_path=tmp_path / "second" / TRACKER_FILENAME,
-        job_id="shared",
-        source_id="1",
-        config_path=tmp_path / "config.yaml",
-    )
+def test_output_layout_values():
+    """Verifies that OutputLayout declares the filesystem names the extraction output layout is built from."""
+    assert OutputLayout.DIRECTORY_NAME == "microcontroller_data"
+    assert OutputLayout.TRACKER_FILENAME == "microcontroller_processing_tracker.yaml"
+    assert OutputLayout.FILE_PREFIX == "controller_"
+    assert OutputLayout.MODULE_INFIX == "_module_"
+    assert OutputLayout.KERNEL_INFIX == "_kernel"
+    assert OutputLayout.FILE_SUFFIX == ".feather"
 
-    assert first.dispatch_key != second.dispatch_key
+
+def test_output_layout_members_interpolate_as_raw_strings():
+    """Verifies that every OutputLayout member is a string that interpolates as its bare value."""
+    for member in OutputLayout:
+        assert isinstance(member, str)
+        assert f"{member}" == member.value
+        assert str(member) == member.value
+
+
+def test_resolve_output_directory(tmp_path):
+    """Verifies that resolve_output_directory nests the library's own subdirectory under the nominated root."""
+    resolved = resolve_output_directory(output_directory=tmp_path)
+
+    assert resolved == tmp_path / "microcontroller_data"
+    assert resolved.parent == tmp_path
+    assert resolved.name == OutputLayout.DIRECTORY_NAME
+
+
+def test_resolve_output_directory_creates_nothing(tmp_path):
+    """Verifies that resolve_output_directory only composes a path and leaves the filesystem untouched."""
+    resolved = resolve_output_directory(output_directory=tmp_path / "missing")
+
+    assert not resolved.exists()
+    assert not resolved.parent.exists()
+
+
+def test_resolve_tracker_path(tmp_path):
+    """Verifies that resolve_tracker_path names the tracker file inside the requested output directory."""
+    tracker_path = resolve_tracker_path(output_directory=tmp_path)
+
+    assert tracker_path == tmp_path / "microcontroller_processing_tracker.yaml"
+    assert tracker_path.parent == tmp_path
+    assert tracker_path.name == OutputLayout.TRACKER_FILENAME
+
+
+def test_resolve_module_path(tmp_path):
+    """Verifies that resolve_module_path builds the module output path inside the requested directory."""
+    path = resolve_module_path(output_directory=tmp_path, source_id="1", module_type=2, module_id=3)
+
+    assert path == tmp_path / "controller_1_module_2_3.feather"
+    assert path.parent == tmp_path
+    assert path.name == "controller_1_module_2_3.feather"
+
+
+def test_resolve_module_path_composition(tmp_path):
+    """Verifies that resolve_module_path composes the filename from the layout prefix, infix, and suffix."""
+    path = resolve_module_path(output_directory=tmp_path, source_id="42", module_type=7, module_id=9)
+
+    assert path.name == f"{OutputLayout.FILE_PREFIX}42{OutputLayout.MODULE_INFIX}7_9{OutputLayout.FILE_SUFFIX}"
+    assert path.name.startswith(OutputLayout.FILE_PREFIX)
+    assert path.name.endswith(OutputLayout.FILE_SUFFIX)
+
+
+def test_resolve_module_path_separates_modules(tmp_path):
+    """Verifies that resolve_module_path gives every module of every source its own file in one directory."""
+    first = resolve_module_path(output_directory=tmp_path, source_id="1", module_type=2, module_id=3)
+    second = resolve_module_path(output_directory=tmp_path, source_id="1", module_type=2, module_id=4)
+    third = resolve_module_path(output_directory=tmp_path, source_id="2", module_type=2, module_id=3)
+
+    assert len({first, second, third}) == 3
+    assert first.parent == second.parent == third.parent
+
+
+def test_resolve_kernel_path(tmp_path):
+    """Verifies that resolve_kernel_path builds the kernel output path inside the requested directory."""
+    path = resolve_kernel_path(output_directory=tmp_path, source_id="1")
+
+    assert path == tmp_path / "controller_1_kernel.feather"
+    assert path.parent == tmp_path
+    assert path.name == "controller_1_kernel.feather"
+
+
+def test_resolve_kernel_path_composition(tmp_path):
+    """Verifies that resolve_kernel_path composes the filename from the layout prefix, infix, and suffix."""
+    path = resolve_kernel_path(output_directory=tmp_path, source_id="42")
+
+    assert path.name == f"{OutputLayout.FILE_PREFIX}42{OutputLayout.KERNEL_INFIX}{OutputLayout.FILE_SUFFIX}"
+    assert path.name.startswith(OutputLayout.FILE_PREFIX)
+    assert path.name.endswith(OutputLayout.FILE_SUFFIX)
+
+
+def test_resolve_kernel_path_separates_sources(tmp_path):
+    """Verifies that resolve_kernel_path gives every source its own kernel file in one directory."""
+    first = resolve_kernel_path(output_directory=tmp_path, source_id="1")
+    second = resolve_kernel_path(output_directory=tmp_path, source_id="2")
+
+    assert first != second
+    assert first.parent == second.parent
+
+
+def test_kernel_and_module_paths_never_collide(tmp_path):
+    """Verifies that the kernel file of a source never shares a name with any of that source's module files."""
+    kernel_path = resolve_kernel_path(output_directory=tmp_path, source_id="1")
+    module_path = resolve_module_path(output_directory=tmp_path, source_id="1", module_type=1, module_id=1)
+
+    assert kernel_path != module_path
+    assert OutputLayout.MODULE_INFIX not in kernel_path.name
+    assert OutputLayout.KERNEL_INFIX not in module_path.name
+
+
+def test_output_layout_resolvers_compose(tmp_path):
+    """Verifies that the tracker and the output files of one batch sit inside the resolved output subdirectory."""
+    resolved = resolve_output_directory(output_directory=tmp_path)
+    tracker_path = resolve_tracker_path(output_directory=resolved)
+    module_path = resolve_module_path(output_directory=resolved, source_id="1", module_type=2, module_id=3)
+    kernel_path = resolve_kernel_path(output_directory=resolved, source_id="1")
+
+    assert tracker_path.parent == resolved
+    assert module_path.parent == resolved
+    assert kernel_path.parent == resolved
+    assert len({tracker_path, module_path, kernel_path}) == 3
 
 
 def test_generate_job_ids():
@@ -147,7 +203,7 @@ def test_generate_job_ids():
 
     assert set(job_ids) == {"1", "2", "10"}
     for source_id in ("1", "2", "10"):
-        expected_id = ProcessingTracker.generate_job_id(job_name=EXTRACTION_JOB_NAME, specifier=source_id)
+        expected_id = ProcessingTracker.generate_job_id(job_name=CONTROLLER_EXTRACTION_JOB_NAME, specifier=source_id)
         assert job_ids[source_id] == expected_id
 
 
@@ -168,205 +224,406 @@ def test_generate_job_ids_empty_input():
     assert generate_job_ids(source_ids=[]) == {}
 
 
-def test_resolve_module_feather_path(tmp_path):
-    """Verifies that resolve_module_feather_path builds the feather path inside the requested directory."""
-    path = resolve_module_feather_path(output_directory=tmp_path, source_id="1", module_type=2, module_id=3)
-
-    assert path == tmp_path / "controller_1_module_2_3.feather"
-    assert path.parent == tmp_path
-    assert path.name == "controller_1_module_2_3.feather"
-
-
-def test_resolve_module_feather_path_composition(tmp_path):
-    """Verifies that resolve_module_feather_path composes the filename from the prefix, infix, and suffix constants."""
-    path = resolve_module_feather_path(output_directory=tmp_path, source_id="42", module_type=7, module_id=9)
-
-    assert path.name == f"{CONTROLLER_FEATHER_PREFIX}42{MODULE_FEATHER_INFIX}7_9{FEATHER_SUFFIX}"
-    assert path.name.startswith(CONTROLLER_FEATHER_PREFIX)
-    assert path.name.endswith(FEATHER_SUFFIX)
-
-
-def test_resolve_kernel_feather_path(tmp_path):
-    """Verifies that resolve_kernel_feather_path builds the kernel feather path inside the requested directory."""
-    path = resolve_kernel_feather_path(output_directory=tmp_path, source_id="1")
-
-    assert path == tmp_path / "controller_1_kernel.feather"
-    assert path.parent == tmp_path
-    assert path.name == "controller_1_kernel.feather"
-
-
-def test_resolve_kernel_feather_path_composition(tmp_path):
-    """Verifies that resolve_kernel_feather_path composes the filename from the prefix, infix, and suffix constants."""
-    path = resolve_kernel_feather_path(output_directory=tmp_path, source_id="42")
-
-    assert path.name == f"{CONTROLLER_FEATHER_PREFIX}42{KERNEL_FEATHER_INFIX}{FEATHER_SUFFIX}"
-    assert path.name.startswith(CONTROLLER_FEATHER_PREFIX)
-    assert path.name.endswith(FEATHER_SUFFIX)
-
-
-def test_discover_microcontroller_jobs_missing_directory(tmp_path):
-    """Verifies that discover_microcontroller_jobs raises FileNotFoundError when the log directory does not exist."""
-    missing_directory = tmp_path / "nonexistent"
-    message = (
-        f"Unable to discover microcontroller data extraction jobs in '{missing_directory}'. The path does not exist "
-        f"or is not a directory."
+def test_job_descriptor_stores_every_field(tmp_path):
+    """Verifies that JobDescriptor stores every supplied field verbatim."""
+    job = JobDescriptor(
+        log_directory=tmp_path / "logs",
+        archive_path=tmp_path / "logs" / f"1{LOG_ARCHIVE_SUFFIX}",
+        output_directory=tmp_path / "output",
+        config_path=tmp_path / "config.yaml",
+        tracker_path=tmp_path / "output" / "microcontroller_processing_tracker.yaml",
+        job_name=CONTROLLER_EXTRACTION_JOB_NAME,
+        job_id="abc123",
+        source_id="1",
+        core_weight=4,
     )
 
-    with pytest.raises(FileNotFoundError, match=error_format(message)):
-        discover_microcontroller_jobs(log_directory=missing_directory)
+    assert job.log_directory == tmp_path / "logs"
+    assert job.archive_path == tmp_path / "logs" / f"1{LOG_ARCHIVE_SUFFIX}"
+    assert job.output_directory == tmp_path / "output"
+    assert job.config_path == tmp_path / "config.yaml"
+    assert job.tracker_path == tmp_path / "output" / "microcontroller_processing_tracker.yaml"
+    assert job.job_name == CONTROLLER_EXTRACTION_JOB_NAME
+    assert job.job_id == "abc123"
+    assert job.source_id == "1"
+    assert job.core_weight == 4
 
 
-def test_discover_microcontroller_jobs_not_a_directory(tmp_path):
-    """Verifies that discover_microcontroller_jobs raises FileNotFoundError when the log path points to a file."""
-    file_path = tmp_path / "logs.txt"
-    file_path.write_text("not a directory")
-    message = (
-        f"Unable to discover microcontroller data extraction jobs in '{file_path}'. The path does not exist "
-        f"or is not a directory."
+def test_job_descriptor_is_frozen(tmp_path):
+    """Verifies that a dispatched descriptor cannot drift after a scheduler receives it."""
+    job = _build_descriptor(tmp_path=tmp_path)
+
+    with pytest.raises(AttributeError):
+        job.core_weight = 8
+
+
+def test_for_archive_builds_descriptor(tmp_path):
+    """Verifies that for_archive fills every descriptor field from the archive a scheduler already resolved."""
+    log_directory = tmp_path / "logs"
+    archive_path = _create_archive(directory=log_directory, source_id=1)
+    output_directory = resolve_output_directory(output_directory=tmp_path / "output")
+    config_path = write_extraction_config(config_path=tmp_path / "config.yaml", source_id=1)
+    tracker_path = resolve_tracker_path(output_directory=output_directory)
+
+    job = JobDescriptor.for_archive(
+        archive_path=archive_path,
+        output_directory=output_directory,
+        config_path=config_path,
+        tracker_path=tracker_path,
+        source_id="1",
+        log_directory=log_directory,
+        core_weight=8,
     )
 
-    with pytest.raises(FileNotFoundError, match=error_format(message)):
-        discover_microcontroller_jobs(log_directory=file_path)
+    assert job.log_directory == log_directory
+    assert job.archive_path == archive_path
+    assert job.output_directory == output_directory
+    assert job.config_path == config_path
+    assert job.tracker_path == tracker_path
+    assert job.job_name == CONTROLLER_EXTRACTION_JOB_NAME
+    assert job.job_id == generate_job_ids(source_ids=["1"])["1"]
+    assert job.source_id == "1"
+    assert job.core_weight == 8
 
 
-def test_discover_microcontroller_jobs_missing_manifest(tmp_path):
-    """Verifies that discover_microcontroller_jobs raises FileNotFoundError when the tree holds no manifest."""
-    _write_archive(directory=tmp_path, source_id=1)
-    message = (
-        f"Unable to discover microcontroller data extraction jobs in '{tmp_path}'. No "
-        f"{MICROCONTROLLER_MANIFEST_FILENAME} was found. A microcontroller manifest is required to identify which "
-        f"log archives were produced by ataraxis-communication-interface."
+def test_for_archive_applies_defaults(tmp_path):
+    """Verifies that for_archive defaults the log directory to the archive's parent and the width to one core."""
+    archive_path = _create_archive(directory=tmp_path / "logs", source_id=1)
+    output_directory = resolve_output_directory(output_directory=tmp_path / "output")
+
+    job = JobDescriptor.for_archive(
+        archive_path=archive_path,
+        output_directory=output_directory,
+        config_path=write_extraction_config(config_path=tmp_path / "config.yaml", source_id=1),
+        tracker_path=resolve_tracker_path(output_directory=output_directory),
+        source_id="1",
     )
 
-    with pytest.raises(FileNotFoundError, match=error_format(message)):
-        discover_microcontroller_jobs(log_directory=tmp_path)
+    assert job.log_directory == archive_path.parent
+    assert job.core_weight == 1
 
 
-def test_discover_microcontroller_jobs_empty_manifest(tmp_path):
-    """Verifies that discover_microcontroller_jobs raises ValueError when the manifest registers no controllers."""
-    manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
-    MicroControllerManifest(controllers=[]).to_yaml(file_path=manifest_path)
+def test_for_archive_matches_generated_job_ids(tmp_path):
+    """Verifies that a descriptor built for an archive addresses the same tracker entry a prepared job would."""
+    output_directory = resolve_output_directory(output_directory=tmp_path / "output")
+    tracker_path = resolve_tracker_path(output_directory=output_directory)
+    config_path = write_extraction_config(config_path=tmp_path / "config.yaml", source_id=1)
+    identifiers = generate_job_ids(source_ids=["1", "2", "10"])
+
+    for source_id in ("1", "2", "10"):
+        job = JobDescriptor.for_archive(
+            archive_path=_create_archive(directory=tmp_path / "logs", source_id=int(source_id)),
+            output_directory=output_directory,
+            config_path=config_path,
+            tracker_path=tracker_path,
+            source_id=source_id,
+        )
+        assert job.job_id == identifiers[source_id]
+
+    assert len({identifiers[source_id] for source_id in identifiers}) == 3
+
+
+def test_dispatch_key(tmp_path):
+    """Verifies that dispatch_key pairs the stringified tracker path with the job identifier."""
+    job = _build_descriptor(tmp_path=tmp_path)
+
+    assert job.dispatch_key == (str(job.tracker_path), job.job_id)
+
+
+def test_dispatch_key_separates_trackers(tmp_path):
+    """Verifies that dispatch_key distinguishes identical jobs recorded under different trackers."""
+    first = _build_descriptor(tmp_path=tmp_path / "first")
+    second = _build_descriptor(tmp_path=tmp_path / "second")
+
+    assert first.job_id == second.job_id
+    assert first.dispatch_key != second.dispatch_key
+
+
+def test_dispatch_key_separates_sources(tmp_path):
+    """Verifies that dispatch_key distinguishes different sources recorded under one tracker."""
+    first = _build_descriptor(tmp_path=tmp_path, source_id=1)
+    second = _build_descriptor(tmp_path=tmp_path, source_id=2)
+
+    assert first.tracker_path == second.tracker_path
+    assert first.dispatch_key != second.dispatch_key
+
+
+def test_dispatch_key_survives_resizing(tmp_path):
+    """Verifies that re-sizing a job's width leaves the key the batch addresses it by unchanged."""
+    job = _build_descriptor(tmp_path=tmp_path, core_weight=1)
+    resized = replace(job, core_weight=8)
+
+    assert resized.core_weight == 8
+    assert resized.dispatch_key == job.dispatch_key
+    assert resized.archive_path == job.archive_path
+    assert resized.config_path == job.config_path
+    assert resized.source_id == job.source_id
+
+
+def test_to_mapping(tmp_path):
+    """Verifies that to_mapping renders every descriptor field as a flat string or integer value."""
+    job = _build_descriptor(tmp_path=tmp_path, core_weight=4)
+    mapping = job.to_mapping()
+
+    assert set(mapping) == {field.name for field in fields(JobDescriptor)}
+    assert mapping["log_directory"] == str(job.log_directory)
+    assert mapping["archive_path"] == str(job.archive_path)
+    assert mapping["output_directory"] == str(job.output_directory)
+    assert mapping["config_path"] == str(job.config_path)
+    assert mapping["tracker_path"] == str(job.tracker_path)
+    assert mapping["job_name"] == CONTROLLER_EXTRACTION_JOB_NAME
+    assert mapping["job_id"] == job.job_id
+    assert mapping["source_id"] == "1"
+    assert mapping["core_weight"] == 4
+    assert all(isinstance(value, (str, int)) for value in mapping.values())
+
+
+def test_from_mapping_round_trip(tmp_path):
+    """Verifies that a descriptor rendered as a mapping reconstructs without loss."""
+    job = _build_descriptor(tmp_path=tmp_path, core_weight=4)
+
+    assert JobDescriptor.from_mapping(mapping=job.to_mapping()) == job
+
+
+def test_from_mapping_reads_stringified_values(tmp_path):
+    """Verifies that from_mapping restores the declared field types from an all-string payload."""
+    job = _build_descriptor(tmp_path=tmp_path, core_weight=4)
+    payload = {key: str(value) for key, value in job.to_mapping().items()}
+
+    restored = JobDescriptor.from_mapping(mapping=payload)
+
+    assert restored == job
+    assert restored.core_weight == 4
+    assert isinstance(restored.core_weight, int)
+
+
+def test_from_mapping_ignores_extra_keys(tmp_path):
+    """Verifies that from_mapping reads the fields it declares and tolerates unrelated payload keys."""
+    job = _build_descriptor(tmp_path=tmp_path)
+    payload = {**job.to_mapping(), "unrelated_key": "ignored"}
+
+    assert JobDescriptor.from_mapping(mapping=payload) == job
+
+
+def test_from_mapping_missing_key(tmp_path):
+    """Verifies that from_mapping raises the malformed descriptor error when a required key is absent."""
+    job = _build_descriptor(tmp_path=tmp_path)
+    payload = job.to_mapping()
+    del payload["config_path"]
+
+    field_names = ", ".join(field.name for field in fields(JobDescriptor))
     message = (
-        f"Unable to discover microcontroller data extraction jobs in '{tmp_path}'. The "
-        f"{MICROCONTROLLER_MANIFEST_FILENAME} at '{manifest_path}' contains no controller entries."
+        f"Unable to read a microcontroller data extraction job descriptor from the supplied mapping. The following "
+        f"required keys are absent: config_path. A descriptor mapping carries every key the descriptor writes: "
+        f"{field_names}."
     )
 
     with pytest.raises(ValueError, match=error_format(message)):
-        discover_microcontroller_jobs(log_directory=tmp_path)
+        JobDescriptor.from_mapping(mapping=payload)
 
 
-def test_discover_microcontroller_jobs_resolves_manifest_controllers(tmp_path):
-    """Verifies that discover_microcontroller_jobs returns one sorted string-specified entry per controller."""
-    for source_id in (1, 10, 2):
-        _write_manifest_entry(directory=tmp_path, source_id=source_id)
-        _write_archive(directory=tmp_path, source_id=source_id)
+def test_from_mapping_missing_key_reports_every_absent_key(tmp_path):
+    """Verifies that from_mapping names every absent key in sorted order rather than only the first one."""
+    job = _build_descriptor(tmp_path=tmp_path)
+    payload = job.to_mapping()
+    del payload["source_id"]
+    del payload["job_name"]
 
-    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
+    message = (
+        "Unable to read a microcontroller data extraction job descriptor from the supplied mapping. The following "
+        "required keys are absent: job_name, source_id."
+    )
 
-    assert universe == [(EXTRACTION_JOB_NAME, "1"), (EXTRACTION_JOB_NAME, "10"), (EXTRACTION_JOB_NAME, "2")]
-    assert possible == universe
-    assert all(isinstance(specifier, str) for _, specifier in universe)
-    assert sorted(archives) == ["1", "10", "2"]
-    assert archives["10"] == tmp_path / f"10{LOG_ARCHIVE_SUFFIX}"
-
-
-def test_discover_microcontroller_jobs_deduplicates_repeated_controllers(tmp_path):
-    """Verifies that discover_microcontroller_jobs collapses repeated entries for the same controller into one job."""
-    _write_manifest_entry(directory=tmp_path, source_id=1)
-    _write_manifest_entry(directory=tmp_path, source_id=1)
-    _write_archive(directory=tmp_path, source_id=1)
-
-    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
-
-    assert universe == [(EXTRACTION_JOB_NAME, "1")]
-    assert possible == [(EXTRACTION_JOB_NAME, "1")]
-    assert sorted(archives) == ["1"]
+    with pytest.raises(ValueError, match=error_format(message)):
+        JobDescriptor.from_mapping(mapping=payload)
 
 
-def test_discover_microcontroller_jobs_finds_manifest_and_archives_in_subdirectories(tmp_path):
-    """Verifies that discover_microcontroller_jobs searches the whole tree for the manifest and the log archives."""
-    logger_directory = tmp_path / "logger"
-    logger_directory.mkdir()
-    _write_manifest_entry(directory=logger_directory, source_id=3)
-    _write_archive(directory=logger_directory / "archives", source_id=3)
+def test_from_mapping_empty_mapping():
+    """Verifies that from_mapping rejects an empty payload instead of building a descriptor from defaults."""
+    message = (
+        "Unable to read a microcontroller data extraction job descriptor from the supplied mapping. The following "
+        "required keys are absent:"
+    )
 
-    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
-
-    assert universe == [(EXTRACTION_JOB_NAME, "3")]
-    assert possible == [(EXTRACTION_JOB_NAME, "3")]
-    assert archives["3"] == logger_directory / "archives" / f"3{LOG_ARCHIVE_SUFFIX}"
-
-
-def test_discover_microcontroller_jobs_excludes_controller_without_archive(tmp_path):
-    """Verifies that a controller registered without an archive stays in the universe but not in the possible set."""
-    _write_manifest_entry(directory=tmp_path, source_id=1)
-    _write_manifest_entry(directory=tmp_path, source_id=2)
-    _write_archive(directory=tmp_path, source_id=1)
-
-    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
-
-    assert universe == [(EXTRACTION_JOB_NAME, "1"), (EXTRACTION_JOB_NAME, "2")]
-    assert possible == [(EXTRACTION_JOB_NAME, "1")]
-    assert sorted(archives) == ["1"]
+    with pytest.raises(ValueError, match=error_format(message)) as error:
+        JobDescriptor.from_mapping(mapping={})
+    for field in fields(JobDescriptor):
+        assert field.name in _normalize(text=error.value)
 
 
-def test_discover_microcontroller_jobs_excludes_ambiguous_controller(tmp_path):
-    """Verifies that a controller whose archive name resolves to several files is excluded from the possible set."""
-    _write_manifest_entry(directory=tmp_path, source_id=1)
-    _write_manifest_entry(directory=tmp_path, source_id=2)
-    _write_archive(directory=tmp_path / "logger_one", source_id=1)
-    _write_archive(directory=tmp_path / "logger_one", source_id=2)
-    _write_archive(directory=tmp_path / "logger_two", source_id=2)
+def test_from_mapping_unreadable_value(tmp_path):
+    """Verifies that from_mapping raises the malformed descriptor error when a value has the wrong type."""
+    job = _build_descriptor(tmp_path=tmp_path)
+    payload = {**job.to_mapping(), "core_weight": "eight"}
 
-    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
+    message = (
+        "Unable to read a microcontroller data extraction job descriptor from the supplied mapping. One of its values "
+        "cannot be read as the type its field declares:"
+    )
 
-    assert universe == [(EXTRACTION_JOB_NAME, "1"), (EXTRACTION_JOB_NAME, "2")]
-    assert possible == [(EXTRACTION_JOB_NAME, "1")]
-    assert archives["1"] == tmp_path / "logger_one" / f"1{LOG_ARCHIVE_SUFFIX}"
+    with pytest.raises(ValueError, match=error_format(message)):
+        JobDescriptor.from_mapping(mapping=payload)
 
 
-def test_find_module_feathers(tmp_path: Path) -> None:
-    """Verifies that find_module_feathers discovers every module feather the directory holds, sorted by path."""
-    second = resolve_module_feather_path(output_directory=tmp_path, source_id="2", module_type=3, module_id=4)
-    first = resolve_module_feather_path(output_directory=tmp_path, source_id="1", module_type=1, module_id=2)
+def test_from_mapping_unreadable_path(tmp_path):
+    """Verifies that from_mapping rejects a payload whose path value is not a path-like object."""
+    job = _build_descriptor(tmp_path=tmp_path)
+    payload = {**job.to_mapping(), "config_path": None}
+
+    message = (
+        "Unable to read a microcontroller data extraction job descriptor from the supplied mapping. One of its values "
+        "cannot be read as the type its field declares:"
+    )
+
+    with pytest.raises(ValueError, match=error_format(message)):
+        JobDescriptor.from_mapping(mapping=payload)
+
+
+def test_job_descriptor_pickle_round_trip(tmp_path):
+    """Verifies that a descriptor pickles and unpickles unchanged, as a pool submission requires."""
+    job = _build_descriptor(tmp_path=tmp_path, core_weight=4)
+    restored = pickle.loads(pickle.dumps(job))  # noqa: S301  # The payload is the descriptor built one line above.
+
+    assert restored == job
+    assert restored.dispatch_key == job.dispatch_key
+    assert restored.archive_path == job.archive_path
+    assert restored.config_path == job.config_path
+
+
+def test_job_descriptor_crosses_spawned_worker(tmp_path):
+    """Verifies that a descriptor reaches a spawned worker intact and reconstructs from the mapping it returns."""
+    job = _build_descriptor(tmp_path=tmp_path, core_weight=2)
+
+    # Submits the descriptor's own rendering method, so the mapping under test is built inside the spawned child from
+    # the copy that crossed the process boundary. The pool is kept to one worker, since a single call proves the round
+    # trip.
+    with ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn")) as executor:
+        mapping = executor.submit(JobDescriptor.to_mapping, job).result(timeout=_SPAWN_TIMEOUT_SECONDS)
+
+    assert mapping == job.to_mapping()
+    assert JobDescriptor.from_mapping(mapping=mapping) == job
+
+
+def test_job_sizing_stores_every_field():
+    """Verifies that JobSizing stores the figures one archive sizing pass resolved."""
+    sizing = JobSizing(memory_mb=2048, message_count=1500, archive_bytes=4096, modeled=True)
+
+    assert sizing.memory_mb == 2048
+    assert sizing.message_count == 1500
+    assert sizing.archive_bytes == 4096
+    assert sizing.modeled
+
+
+def test_job_sizing_baseline_figures():
+    """Verifies that JobSizing carries the unmodeled flag when the figures fall back to the job baseline."""
+    sizing = JobSizing(memory_mb=230, message_count=0, archive_bytes=0, modeled=False)
+
+    assert not sizing.modeled
+    assert sizing.message_count == 0
+    assert sizing.archive_bytes == 0
+
+
+def test_job_sizing_is_frozen():
+    """Verifies that the resolved sizing figures cannot drift after a scheduler receives them."""
+    sizing = JobSizing(memory_mb=2048, message_count=1500, archive_bytes=4096, modeled=True)
+
+    with pytest.raises(AttributeError):
+        sizing.memory_mb = 10
+
+
+def test_job_sizing_pickle_round_trip():
+    """Verifies that a sizing record pickles unchanged, as a cross-process scheduler payload requires."""
+    sizing = JobSizing(memory_mb=2048, message_count=1500, archive_bytes=4096, modeled=True)
+
+    # The payload is the record built one line above, so the round trip deserializes nothing untrusted.
+    assert pickle.loads(pickle.dumps(sizing)) == sizing  # noqa: S301
+
+
+def test_find_module_paths(tmp_path):
+    """Verifies that find_module_paths discovers every module output file the directory holds, sorted by path."""
+    second = resolve_module_path(output_directory=tmp_path, source_id="2", module_type=3, module_id=4)
+    first = resolve_module_path(output_directory=tmp_path, source_id="1", module_type=1, module_id=2)
     for path in (second, first):
         path.touch()
 
-    # The kernel feather and an unrelated file share the directory, so neither may appear in the module result.
-    resolve_kernel_feather_path(output_directory=tmp_path, source_id="1").touch()
+    # The kernel file and an unrelated file share the directory, so neither may appear in the module result.
+    resolve_kernel_path(output_directory=tmp_path, source_id="1").touch()
     tmp_path.joinpath("notes.txt").touch()
 
-    assert find_module_feathers(data_directory=tmp_path) == [first, second]
+    assert find_module_paths(data_directory=tmp_path) == [first, second]
 
 
-def test_find_module_feathers_missing_directory(tmp_path: Path) -> None:
-    """Verifies that find_module_feathers reports no feathers for a directory that does not exist."""
-    assert find_module_feathers(data_directory=tmp_path / "absent") == []
+def test_find_module_paths_empty_directory(tmp_path):
+    """Verifies that find_module_paths reports no files for a directory an extraction job has not written to."""
+    assert find_module_paths(data_directory=tmp_path) == []
 
 
-def test_parse_module_feather_name_inverts_resolution(tmp_path: Path) -> None:
-    """Verifies that parse_module_feather_name recovers the identity resolve_module_feather_path encoded."""
-    feather_path = resolve_module_feather_path(output_directory=tmp_path, source_id="222", module_type=5, module_id=7)
+def test_find_module_paths_missing_directory(tmp_path):
+    """Verifies that find_module_paths reports no files for a directory that does not exist."""
+    assert find_module_paths(data_directory=tmp_path / "absent") == []
 
-    assert parse_module_feather_name(feather_path=feather_path) == (222, 5, 7)
+
+def test_find_module_paths_file_path(tmp_path):
+    """Verifies that find_module_paths reports no files when the nominated path is a file rather than a directory."""
+    file_path = tmp_path / "data.feather"
+    file_path.touch()
+
+    assert find_module_paths(data_directory=file_path) == []
+
+
+def test_parse_module_path_inverts_resolution(tmp_path):
+    """Verifies that parse_module_path recovers the identity resolve_module_path encoded."""
+    module_path = resolve_module_path(output_directory=tmp_path, source_id="222", module_type=5, module_id=7)
+
+    assert parse_module_path(file_path=module_path) == (222, 5, 7)
+
+
+def test_parse_module_path_reads_multi_digit_codes(tmp_path):
+    """Verifies that parse_module_path reads every identity field whose code spans more than one digit."""
+    module_path = resolve_module_path(output_directory=tmp_path, source_id="10", module_type=200, module_id=30)
+
+    assert parse_module_path(file_path=module_path) == (10, 200, 30)
+
+
+def test_find_module_paths_round_trips_through_parse_module_path(tmp_path):
+    """Verifies that every file find_module_paths discovers parses back into the identity that named it."""
+    identities = ((1, 2, 3), (1, 4, 5), (10, 2, 3))
+    for source_id, module_type, module_id in identities:
+        resolve_module_path(
+            output_directory=tmp_path,
+            source_id=str(source_id),
+            module_type=module_type,
+            module_id=module_id,
+        ).touch()
+
+    # The kernel file of one of the sources shares the directory, so the discovery pass must not offer it for parsing.
+    resolve_kernel_path(output_directory=tmp_path, source_id="1").touch()
+
+    discovered = find_module_paths(data_directory=tmp_path)
+
+    assert len(discovered) == len(identities)
+    assert {parse_module_path(file_path=path) for path in discovered} == set(identities)
 
 
 @pytest.mark.parametrize(
     "filename",
     [
         "controller_1_module_2.feather",
+        "controller_1_module_2_3_4.feather",
         "controller_1_kernel.feather",
         "session_1_module_2_3.feather",
         "controller_1_widget_2_3.feather",
         "controller_one_module_2_3.feather",
         "controller_1_module_two_3.feather",
+        "controller_1_module_2_three.feather",
     ],
 )
-def test_parse_module_feather_name_rejects_foreign_names(tmp_path: Path, filename: str) -> None:
-    """Verifies that parse_module_feather_name rejects a filename outside the module feather convention."""
+def test_parse_module_path_rejects_foreign_names(tmp_path, filename):
+    """Verifies that parse_module_path rejects a filename outside the module output naming convention."""
     message = (
-        f"Unable to parse the module feather filename '{filename}'. The filename does not follow the "
+        f"Unable to parse the module output filename '{filename}'. The filename does not follow the "
         f"'controller_{{source_id}}_module_{{module_type}}_{{module_id}}.feather' naming convention."
     )
+
     with pytest.raises(ValueError, match=error_format(message)):
-        parse_module_feather_name(feather_path=tmp_path / filename)
+        parse_module_path(file_path=tmp_path / filename)

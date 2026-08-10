@@ -405,16 +405,22 @@ ataraxis-communication-interface. A `microcontroller_manifest.yaml` file must be
 processing to succeed. Controller IDs to process are resolved directly from the extraction configuration and validated
 against the manifest.
 
-The processing pipeline supports two execution modes. In **local mode**, all requested log archives are processed
-sequentially with automatic job tracking. In **remote mode**, a single job is executed by its unique identifier,
-enabling distributed processing across multiple compute nodes. Both modes use a YAML-based processing tracker to
-manage job lifecycle (scheduled, running, succeeded, or failed). All output files (tracker and Feather) are written
-into a `microcontroller_data/` subdirectory under the specified output directory.
+One recording writes one MicroControllerInterface set to one DataLogger, so exactly one manifest is supported per
+invocation. A log directory tree holding several manifests, or archives written by several DataLogger instances,
+spans several recordings and is rejected with a diagnostic naming the topology it detected.
 
-Every job is sized from the archive it reads before it runs. The pipeline reads the archive's message count and its
-size on disk, gives the job the cores that archive repays, and estimates the memory it will hold, so a run mixing a
-long recording with a short one gives each the width its own archive earns rather than one width chosen for the whole
-run.
+Processing is split across two entry points that share their job resolution but not their execution. The `axci
+process` CLI command and the `run_log_processing_pipeline()` function target a single recording and run its archives
+one at a time in the calling process, or run the single job a caller names by its canonical identifier. The
+[MCP server](#mcp-server) log processing tools orchestrate batches spanning many recordings, admitting jobs against a
+core budget and a memory budget and running them in one shared process pool. Both write a YAML-based processing
+tracker that manages job lifecycle (scheduled, running, succeeded, or failed), and both write every output file into
+a `microcontroller_data/` subdirectory under the specified output directory.
+
+Each job targets exactly one log archive. A caller that weighs jobs against a budget sizes each one from its own
+archive, so a batch mixing a long recording with a short one gives each the width its own archive earns rather than
+one width chosen for the whole run. The job resolution and the sizing model are exported as callable functions, so an
+external scheduler derives the same figures this library dispatches with instead of re-deriving them.
 
 For single-directory processing, use the `axci process` CLI command or the `run_log_processing_pipeline()` function
 directly. For multi-directory batch workflows, use the [MCP server](#mcp-server) log processing tools, which handle

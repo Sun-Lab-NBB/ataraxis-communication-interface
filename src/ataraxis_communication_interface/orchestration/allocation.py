@@ -1,5 +1,8 @@
-"""Provides the declared core allocation of the data extraction stage and the archive-derived footprint model that
-sizes each job's cores and memory from the input it will read.
+"""Provides the declared core allocation of the microcontroller data extraction stage, the archive-derived footprint
+model that sizes each job's cores and memory from the input it will read, and the batch-wide budget resolvers.
+
+Notes:
+    This module imports nothing from its own package, so a scheduler consuming the sizing model takes it alone.
 """
 
 from __future__ import annotations
@@ -26,17 +29,12 @@ Notes:
     the reservation it plans against, so exporting this one would offer it a second figure for the same decision.
 """
 
-EXTRACTION_JOB_CORES: int = 8
-"""The cores one microcontroller data extraction job occupies while it runs.
+CONTROLLER_EXTRACTION_JOB_CORES: int = 8
+"""The widest core allocation one microcontroller data extraction job receives.
 
 Notes:
-    The stage splits its archive across a worker pool, and every worker opens the archive itself for each batch it
-    receives, so the fixed cost per worker does not shrink as workers are added and the speedup flattens well before
-    the core count. The value is an upper bound rather than a fixed width, since a job reading a small archive
-    resolves below it.
-
-    A scheduler that dispatches this stage reads the width from here, which keeps the figure with the library that
-    owns the stage rather than with each consumer that runs it.
+    Every worker opens the archive itself, so the fixed cost per worker holds as workers are added and the speedup
+    flattens well before the core count. A job reading a small archive resolves below this bound.
 """
 
 _MEMORY_ESTIMATE_TOLERANCE: float = 1.15
@@ -51,13 +49,13 @@ Notes:
     admit against a different standard than everything queued beside them.
 """
 
-_WORKER_MEMORY_MB: int = 384
-"""The resident memory a job occupies before it reads any data, covering the interpreter and the package's import
-graph. The term is charged once per job, while the per-core allowance is charged for every core the job holds."""
+SPAWNED_CHILD_MEMORY_MB: int = 200
+"""The resident memory one spawned child holds before it touches any data, covering the interpreter and the package's
+import graph. The term is charged once for a job's body and once for each core the job holds."""
 
-_SUBPROCESS_MEMORY_MB: int = 200
-"""The resident memory each child of a job's worker pool occupies before it touches data. Processes are spawned
-rather than forked, so every child re-imports the module its target function lives in."""
+_POOL_MEMORY_RESERVATION_DIVISOR: int = 2
+"""The share of the memory budget the shared pool's warmed job bodies may claim, expressed as a divisor. The
+remainder covers the work those bodies perform."""
 
 _ARCHIVE_DIRECTORY_RATIO: float = 4.0
 """The resident memory a log archive reader holds per byte of archive on disk. Reading an archive builds one
@@ -88,7 +86,7 @@ class ArchiveFootprint:
     """Determines whether the figures were read from the archive rather than falling back to the job baseline."""
 
 
-def resolve_archive_footprint(archive_path: Path) -> ArchiveFootprint:
+def resolve_archive_footprint(archive_path: Path, *, read_message_count: bool = True) -> ArchiveFootprint:
     """Reads the properties of the target log archive that size the job reading it.
 
     Notes:
@@ -98,12 +96,15 @@ def resolve_archive_footprint(archive_path: Path) -> ArchiveFootprint:
 
     Args:
         archive_path: The path to the .npz log archive to read.
+        read_message_count: Determines whether to open the archive and count the messages it holds. Leaving this
+            unset yields a footprint whose message count is zero, which sizes memory correctly and resolves cores to
+            a single worker.
 
     Returns:
         The footprint describing the archive.
     """
     try:
-        message_count = read_archive_message_count(archive_path=archive_path)
+        message_count = read_archive_message_count(archive_path=archive_path) if read_message_count else 0
         archive_bytes = archive_path.stat().st_size
     except Exception:
         return ArchiveFootprint(message_count=0, archive_bytes=0, modeled=False)
@@ -136,32 +137,57 @@ def resolve_job_workers(footprint: ArchiveFootprint, ceiling: int) -> int:
         return 1
 
     repaid_workers = footprint.message_count // PARALLEL_PROCESSING_THRESHOLD
-    return max(1, min(EXTRACTION_JOB_CORES, ceiling, repaid_workers))
+    return max(1, min(CONTROLLER_EXTRACTION_JOB_CORES, ceiling, repaid_workers))
 
 
 def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
     """Estimates the memory one extraction job holds at its allocated core count.
 
     Notes:
-        The job splits its archive across a worker pool and every worker opens the archive itself, so the archive's
-        message directory is held once per allocated core. An unmodeled footprint falls back to the job baseline,
-        which is a floor to plan around rather than a measurement.
+        A job holding more than one core splits its archive across an extraction pool, and every child of that pool
+        opens the archive itself while the job body holds a reader of its own for the whole job. The archive's
+        message directory is therefore held once per core and once more for the body. A job holding a single core
+        takes the sequential path, which opens no pool and holds the body's reader alone.
 
-        This is the same model the platform applies to every stage that splits one log archive across a worker pool,
-        so an extraction job and the runtime and camera-timestamp jobs beside it are sized on one scale.
+        An unmodeled footprint falls back to the spawned child baseline, which is a floor to plan around rather than
+        a measurement.
 
     Args:
         footprint: The footprint of the archive this job reads.
-        cores: The cores this job holds, which is how many readers it opens.
+        cores: The cores this job holds, which is how many extraction pool children it opens.
 
     Returns:
         The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to a whole gigabyte.
     """
     if not footprint.modeled:
-        return _apply_tolerance(memory_mb=_WORKER_MEMORY_MB)
+        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
 
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
-    return _apply_tolerance(memory_mb=_WORKER_MEMORY_MB + cores * (per_reader + _SUBPROCESS_MEMORY_MB))
+
+    if cores == 1:
+        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
+
+    readers = cores + 1
+    return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
+
+
+def estimate_archive_job_memory_mb(archive_path: Path, cores: int) -> tuple[int, bool]:
+    """Estimates the memory one extraction job holds, from the archive path alone.
+
+    Notes:
+        Reads the archive's size without opening it, costing one stat call. The caller supplies the core count, so a
+        scheduler holding a fixed per-stage width sizes a job at the width it dispatches.
+
+    Args:
+        archive_path: The path to the .npz log archive the job reads.
+        cores: The cores the job holds.
+
+    Returns:
+        The memory the job holds in megabytes, and whether the estimate follows from the archive's own size rather
+        than from the spawned child baseline.
+    """
+    footprint = resolve_archive_footprint(archive_path=archive_path, read_message_count=False)
+    return estimate_job_memory_mb(footprint=footprint, cores=cores), footprint.modeled
 
 
 def resolve_core_budget(requested_budget: int) -> int:
@@ -191,10 +217,30 @@ def resolve_memory_budget_mb(requested_budget_mb: int) -> int:
     if requested_budget_mb > 0:
         return requested_budget_mb
 
-    return max(_MINIMUM_MEMORY_BUDGET_MB, int(_resolve_host_memory_mb() * _MEMORY_BUDGET_FRACTION))
+    return max(_MINIMUM_MEMORY_BUDGET_MB, int(resolve_host_memory_mb() * _MEMORY_BUDGET_FRACTION))
 
 
-def _resolve_host_memory_mb() -> int:
+def resolve_pool_size(job_count: int, core_budget: int, memory_budget_mb: int) -> int:
+    """Resolves the job slots one batch's shared pool opens.
+
+    Notes:
+        A slot holds a job rather than a core, so the count covers the widest running set admission can produce.
+        Every slot is warmed at creation and holds a spawned child's baseline memory for the whole session, so the
+        count is held to the bodies half the memory budget can hold.
+
+    Args:
+        job_count: The jobs the batch holds.
+        core_budget: The cores the batch may commit across all concurrently running jobs.
+        memory_budget_mb: The memory the batch may commit across all concurrently running jobs.
+
+    Returns:
+        The job slots the shared pool opens, always at least one.
+    """
+    affordable_bodies = (memory_budget_mb // _POOL_MEMORY_RESERVATION_DIVISOR) // SPAWNED_CHILD_MEMORY_MB
+    return max(1, min(job_count, core_budget, affordable_bodies))
+
+
+def resolve_host_memory_mb() -> int:
     """Reads the host's total physical memory.
 
     Returns:

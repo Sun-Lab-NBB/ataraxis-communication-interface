@@ -173,7 +173,7 @@ data from DataLogger archives.
 | `src/.../microcontroller/dataclasses.py`    | Manifest and extraction configuration data structures                         |
 | `src/.../microcontroller/log_processing.py` | Log data extraction algorithm and the columnar structures it returns          |
 | `src/.../microcontroller/extracted_data.py` | Extracted message table schema, its writer, and the primitives that read it   |
-| `src/.../orchestration/`                    | Job discovery, resource allocation, batch execution, and the pipeline entry   |
+| `src/.../orchestration/`                    | Job identity, sizing, discovery, the single-job runner, and both execution paths |
 | `src/.../interfaces/`                       | CLI (`axci`), MCP server entry point, shared instance, and MCP tool groups    |
 | `tests/`                                    | Test suite, grouped into per-package directories mirroring the source layout  |
 | `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
@@ -228,13 +228,13 @@ data from DataLogger archives.
   ataraxis-data-structures to choose between the sequential and the `ProcessPoolExecutor` path. A self-owned pool
   pins its workers through `limit_worker_threads()` and `initialize_worker_threads()`.
 - **Orchestration**: The `orchestration/` package owns everything above the extraction algorithm. `jobs.py` holds the
-  job identity constants, `PendingJob`, and `discover_microcontroller_jobs()`, which derives the job universe from
-  the `microcontroller_manifest.yaml` and indexes the archives backing it in one pass. `allocation.py` sizes each job
-  from `ArchiveFootprint`, resolving cores through `resolve_job_workers()` and memory through
-  `estimate_job_memory_mb()`. `execution.py` runs the batch engine that admits jobs against a core and a memory
-  budget. `pipeline.py` exposes `execute_job()` and `run_log_processing_pipeline()`, which supports local (all jobs)
-  and remote (single job by ID) execution modes. Outputs Polars DataFrames as Feather (Arrow IPC) files written
-  through `atomic_write()` into a `microcontroller_data/` subdirectory.
+  job identity, the `OutputLayout` enumeration, and the `JobDescriptor` a worker runs from. `discovery.py` resolves
+  the job universe from the `microcontroller_manifest.yaml`, prepares dispatchable jobs without reading an archive,
+  and sizes one through `size_job()`. `allocation.py` holds the declared core allocation and the
+  archive-derived memory model, `worker.py` exposes `execute_job()` and the picklable `run_extraction_job()`,
+  `execution.py` runs the shared-pool batch engine admitting jobs against a core and a memory budget, and
+  `pipeline.py` runs one recording sequentially or the single job a caller names. Outputs Polars DataFrames as
+  Feather (Arrow IPC) files written through `atomic_write()` into a `microcontroller_data/` subdirectory.
 - **MCP Server**: `MCPServer` instance (`name="ataraxis-communication-interface"`) defined in
   `interfaces/mcp_instance.py`, with 19 tools split across `interfaces/discovery_tools.py`, `config_tools.py`,
   `processing_tools.py`, and `output_tools.py`. The tool modules register on the shared instance via `@mcp.tool()`
@@ -268,9 +268,10 @@ data from DataLogger archives.
   to numpy arrays, then builds Polars DataFrames for efficient Feather output.
 - **Archive-Derived Job Sizing**: Every job is sized before dispatch from the archive it will read.
   `resolve_archive_footprint()` reads the `.npz` zip directory and the file size, `resolve_job_workers()` narrows the
-  declared `EXTRACTION_JOB_CORES` width to the workers the archive repays at one worker per
-  `PARALLEL_PROCESSING_THRESHOLD` messages, and `estimate_job_memory_mb()` charges the archive directory once per
-  allocated core. The execution manager then admits jobs against both a core budget (`available_cores - 2`) and a
+  declared `CONTROLLER_EXTRACTION_JOB_CORES` width to the workers the archive repays at one worker per
+  `PARALLEL_PROCESSING_THRESHOLD` messages, and `estimate_job_memory_mb()` charges one spawned
+  child baseline and one archive reader per core, plus one more of each for the job body, and takes a sequential
+  branch for a single-core job. The execution manager then admits jobs against both a core budget (`available_cores - 2`) and a
   memory budget (a share of the host's physical memory), admitting an oversized job alone rather than starving it.
   The declared width and every memory term carry the values the platform's own estimators were calibrated to against
   measured peaks, so this stage's jobs and the stages queued beside them are sized on one scale. Changing a constant
@@ -329,11 +330,12 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
 - **Extracted data access** (`microcontroller/extracted_data.py`): reading an extracted feather goes through
   `partition_events()` and then `get_event_timestamps()` or `get_event_data()`. `get_event_data()` decodes a whole
   event stream through one buffer read, which the firmware's one-data-type-per-event-code guarantee permits.
-- **Orchestration** (`orchestration/`): `run_log_processing_pipeline()` supports local (all jobs) and remote (single
-  job by ID) modes. The `config` parameter is a `Path` loaded internally, and the tracker universe comes from the
-  manifest rather than from the config, so a config requesting a subset never resets its sibling jobs.
-  `execute_job()` wraps the work in `ProcessingTracker.run_job()`, which records the start, the completion, and the
-  failure without a hand-written guard.
+- **Orchestration** (`orchestration/`): `run_log_processing_pipeline()` runs one recording sequentially, or the
+  single job a caller names by its canonical identifier, and imports no batch engine. The `config` parameter is a
+  `Path` loaded inside the job, and the tracker universe comes from the manifest rather than from the config, so a
+  config requesting a subset never resets its sibling jobs. `execute_job()` wraps the work in
+  `ProcessingTracker.run_job()`, which records the start, the completion, and the failure without a hand-written
+  guard.
 - **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors. The `config`
   subgroup demonstrates nested Click command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via

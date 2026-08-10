@@ -11,13 +11,7 @@ from ataraxis_time import TimeUnits, convert_time
 from ataraxis_data_structures import delete_directory
 
 from .mcp_instance import mcp, read_tracker_status
-from ..orchestration import (
-    FEATHER_SUFFIX,
-    TRACKER_FILENAME,
-    KERNEL_FEATHER_INFIX,
-    MODULE_FEATHER_INFIX,
-    MICROCONTROLLER_DATA_DIRECTORY,
-)
+from ..orchestration import OutputLayout
 from ..microcontroller import ExtractedDataColumns
 
 _MINIMUM_ROWS_FOR_INTERVALS: int = 2
@@ -50,12 +44,12 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
     if not output_path.is_dir():
         return {"error": f"Path is not a directory: {output_directory}"}
 
-    data_path = output_path / MICROCONTROLLER_DATA_DIRECTORY
+    data_path = output_path / OutputLayout.DIRECTORY_NAME
 
     if not data_path.exists():
         return {
             "error": (
-                f"No '{MICROCONTROLLER_DATA_DIRECTORY}' subdirectory found under '{output_directory}'. "
+                f"No '{OutputLayout.DIRECTORY_NAME}' subdirectory found under '{output_directory}'. "
                 f"Processing may not have been run yet."
             ),
         }
@@ -64,16 +58,16 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
     file_results: list[dict[str, Any]] = []
     all_valid = True
 
-    feather_files = sorted(data_path.glob(f"*{FEATHER_SUFFIX}"))
+    feather_files = sorted(data_path.glob(f"*{OutputLayout.FILE_SUFFIX}"))
 
     for feather_file in feather_files:
         entry: dict[str, Any] = {"file": str(feather_file), "filename": feather_file.name}
 
         # Parses source ID and type (module vs kernel) from the filename.
         name = feather_file.stem
-        if KERNEL_FEATHER_INFIX in name:
+        if OutputLayout.KERNEL_INFIX in name:
             entry["type"] = "kernel"
-        elif MODULE_FEATHER_INFIX in name:
+        elif OutputLayout.MODULE_INFIX in name:
             entry["type"] = "module"
         else:
             entry["type"] = "unknown"
@@ -110,7 +104,7 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
         file_results.append(entry)
 
     # Reads tracker status if available.
-    tracker_path = data_path / TRACKER_FILENAME
+    tracker_path = data_path / OutputLayout.TRACKER_FILENAME
     tracker_info: dict[str, Any] = {}
     if tracker_path.exists():
         try:
@@ -203,7 +197,7 @@ def _clean_single_output(output_directory: str) -> dict[str, Any]:
     if not output_path.is_dir():
         return {"output_directory": output_directory, "cleaned": False, "error": "Path is not a directory."}
 
-    data_path = output_path / MICROCONTROLLER_DATA_DIRECTORY
+    data_path = output_path / OutputLayout.DIRECTORY_NAME
 
     if not data_path.exists():
         return {"output_directory": output_directory, "cleaned": True, "message": "Nothing to clean."}

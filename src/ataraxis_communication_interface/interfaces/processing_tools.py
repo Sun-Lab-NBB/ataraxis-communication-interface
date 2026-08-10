@@ -5,26 +5,29 @@ from __future__ import annotations
 from typing import Any
 from pathlib import Path
 from threading import Thread
+from dataclasses import replace
 
 from ataraxis_time import TimeUnits, TimestampFormats, TimestampPrecisions, convert_time, get_timestamp
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker, discover_marker_files
 
 from .mcp_instance import mcp, read_tracker_status
 from ..orchestration import (
-    TRACKER_FILENAME,
-    EXTRACTION_JOB_NAME,
-    MICROCONTROLLER_DATA_DIRECTORY,
-    PendingJob,
+    JobSizing,
+    OutputLayout,
+    JobDescriptor,
+    ArchiveFootprint,
     JobExecutionState,
-    generate_job_ids,
-    size_pending_job,
+    size_job,
+    prepare_jobs,
+    resolve_pool_size,
     get_execution_state,
     resolve_core_budget,
+    resolve_job_workers,
     set_execution_state,
     group_jobs_by_tracker,
     job_execution_manager,
+    estimate_job_memory_mb,
     resolve_memory_budget_mb,
-    discover_microcontroller_jobs,
 )
 from ..microcontroller import ExtractionConfig
 
@@ -83,7 +86,6 @@ def prepare_log_processing_batch_tool(
             ),
         }
 
-    source_id_set = set(source_ids)
     result_log_directories: dict[str, Any] = {}
     invalid_paths: list[str] = []
     total_jobs = 0
@@ -95,81 +97,56 @@ def prepare_log_processing_batch_tool(
             invalid_paths.append(log_directory_string)
             continue
 
-        # Filters the requested source IDs to those the manifest registers and whose archive resolves under this log
-        # directory. Discovery already confirmed both, but the check guards against stale data. The resolution runs
-        # through the same recursive search the jobs themselves use, so a nested archive is prepared as it is run.
+        # Prepares every requested controller the configuration declares and whose archive resolves under this log
+        # directory. Lenient sourcing records the controllers it cannot prepare rather than failing the whole batch,
+        # since one caller applies one controller list across several recordings.
         try:
-            _, possible, _ = discover_microcontroller_jobs(log_directory=log_directory_path)
+            job_set = prepare_jobs(
+                log_directory=log_directory_path,
+                output_directory=Path(output_directories[entry_index]),
+                config_path=config_file,
+                source_ids=source_ids or None,
+                strict_sources=False,
+            )
+            sized_jobs = [size_job(job=job, core_ceiling=job_set.core_ceiling) for job in job_set.jobs]
+            sized_jobs.sort(key=lambda entry: entry[1].memory_mb, reverse=True)
         except Exception:
             invalid_paths.append(log_directory_string)
             continue
 
-        filtered_ids = sorted(specifier for _, specifier in possible if specifier in source_id_set)
+        # Merges the tracker's live state over the prepared set, so a directory prepared twice reports what its jobs
+        # have already done rather than presenting every job as freshly scheduled.
+        try:
+            tracker_status = read_tracker_status(tracker_path=job_set.tracker_path)
+        except Exception:
+            tracker_status = {"jobs": [], "summary": {}}
 
-        if not filtered_ids:
-            result_log_directories[log_directory_string] = {
-                "source_ids": [],
-                "jobs": [],
-                "tracker_path": None,
-                "summary": {},
-            }
-            continue
+        recorded = {entry["job_id"]: entry for entry in tracker_status.get("jobs", [])}
 
-        output_path = Path(output_directories[entry_index])
+        jobs: list[dict[str, Any]] = []
+        for descriptor, sizing in sized_jobs:
+            entry: dict[str, Any] = dict(descriptor.to_mapping())
+            entry["memory_mb"] = sizing.memory_mb
+            entry["message_count"] = sizing.message_count
+            entry["archive_bytes"] = sizing.archive_bytes
+            entry["modeled"] = sizing.modeled
+            entry["status"] = recorded.get(descriptor.job_id, {}).get("status", "SCHEDULED")
+            error_message = recorded.get(descriptor.job_id, {}).get("error_message")
+            if error_message is not None:
+                entry["error_message"] = error_message
+            jobs.append(entry)
 
-        data_path = output_path / MICROCONTROLLER_DATA_DIRECTORY
-        data_path.mkdir(parents=True, exist_ok=True)
-        tracker_path = data_path / TRACKER_FILENAME
-
-        if tracker_path.exists():
-            # Idempotent path: returns existing tracker state.
-            try:
-                tracker_status = read_tracker_status(tracker_path=tracker_path)
-            except Exception:
-                tracker_status = {"jobs": [], "summary": {}}
-
-            result_log_directories[log_directory_string] = {
-                "tracker_path": str(tracker_path),
-                "output_directory": str(data_path),
-                "source_ids": filtered_ids,
-                **tracker_status,
-            }
-            total_jobs += len(tracker_status.get("jobs", []))
-        else:
-            # Initializes a new tracker with jobs for the filtered source IDs. Uses align_jobs so the MCP
-            # batch-preparation path inherits the same regeneration logic as run_log_processing_pipeline.
-            tracker = ProcessingTracker(file_path=tracker_path)
-            tracker_jobs: list[tuple[str, str]] = [(EXTRACTION_JOB_NAME, source_id) for source_id in filtered_ids]
-            tracker.align_jobs(jobs=tracker_jobs, universe=tracker_jobs)
-            job_ids = generate_job_ids(source_ids=filtered_ids)
-
-            jobs: list[dict[str, str]] = [
-                {
-                    "job_id": job_ids[source_id],
-                    "source_id": source_id,
-                    "status": "SCHEDULED",
-                    "log_directory": log_directory_string,
-                    "output_directory": str(data_path),
-                    "tracker_path": str(tracker_path),
-                    "config_path": config_path,
-                }
-                for source_id in filtered_ids
-            ]
-
-            result_log_directories[log_directory_string] = {
-                "tracker_path": str(tracker_path),
-                "output_directory": str(data_path),
-                "source_ids": filtered_ids,
-                "jobs": jobs,
-                "summary": {
-                    "total": len(jobs),
-                    "succeeded": 0,
-                    "failed": 0,
-                    "running": 0,
-                    "scheduled": len(jobs),
-                },
-            }
-            total_jobs += len(jobs)
+        result_log_directories[log_directory_string] = {
+            "tracker_path": str(job_set.tracker_path),
+            "output_directory": str(job_set.output_directory),
+            "source_ids": [descriptor.source_id for descriptor, _ in sized_jobs],
+            "jobs": jobs,
+            "summary": tracker_status.get("summary", {}),
+            "skipped_sources": [
+                {"source_id": source_id, "reason": reason} for source_id, reason in job_set.skipped_sources
+            ],
+        }
+        total_jobs += len(jobs)
 
     result: dict[str, Any] = {
         "success": True,
@@ -186,9 +163,9 @@ def prepare_log_processing_batch_tool(
 
 @mcp.tool()
 def execute_log_processing_jobs_tool(
-    jobs: list[dict[str, str]],
+    jobs: list[dict[str, Any]],
     *,
-    worker_budget: int = -1,
+    core_budget: int = -1,
     memory_budget_mb: int = -1,
 ) -> dict[str, Any]:
     """Dispatches log processing jobs for background execution against a core and a memory budget.
@@ -208,13 +185,14 @@ def execute_log_processing_jobs_tool(
     Args:
         jobs: The list of job descriptors from prepare_log_processing_batch_tool. Each dictionary must have
             'log_directory', 'output_directory', 'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
-        worker_budget: The total number of CPU cores available for the execution session. Set to -1 to auto-resolve
+        core_budget: The total number of CPU cores available for the execution session. Set to -1 to auto-resolve
             to every available core minus the reserved host cores.
         memory_budget_mb: The total memory in megabytes available for the execution session. Set to -1 to
             auto-resolve to a share of the host's physical memory.
 
     Returns:
-        A dictionary containing a 'started' flag, 'total_jobs', the resolved 'worker_budget' and 'memory_budget_mb',
+        A dictionary containing a 'started' flag, 'total_jobs', the resolved 'core_budget', 'memory_budget_mb',
+        and 'pool_size',
         a 'job_allocations' entry per job naming its resolved cores, memory, and archive message count, and any
         invalid jobs.
     """
@@ -227,62 +205,72 @@ def execute_log_processing_jobs_tool(
     ):
         return {"error": "An execution session is already active. Cancel it first or wait for completion."}
 
-    # Validates and builds pending jobs.
-    required_keys = {"log_directory", "output_directory", "tracker_path", "job_id", "source_id", "config_path"}
-    pending: list[PendingJob] = []
-    all_jobs: dict[tuple[str, str], PendingJob] = {}
-    invalid_jobs: list[dict[str, str]] = []
+    # Resolves both budgets before sizing, since the core budget bounds the width any single job receives.
+    resolved_cores = resolve_core_budget(requested_budget=core_budget)
+    resolved_memory = resolve_memory_budget_mb(requested_budget_mb=memory_budget_mb)
+
+    # Rebuilds every descriptor and its footprint from the mapping the preparation emitted, then resolves this
+    # session's own width and memory from those figures. The preparation already read each archive, so re-deriving
+    # the width against a different budget costs no filesystem access.
+    pending: list[tuple[JobDescriptor, JobSizing]] = []
+    all_jobs: dict[tuple[str, str], JobDescriptor] = {}
+    invalid_jobs: list[dict[str, Any]] = []
+    job_allocations: list[dict[str, Any]] = []
 
     for job_dict in jobs:
-        if not required_keys.issubset(job_dict.keys()):
-            invalid_jobs.append({**job_dict, "error": f"Missing required keys: {required_keys - job_dict.keys()}"})
+        try:
+            descriptor = JobDescriptor.from_mapping(mapping=job_dict)
+        except Exception as error:
+            invalid_jobs.append({**job_dict, "error": str(error)})
             continue
 
-        tracker_path = Path(job_dict["tracker_path"])
-        if not tracker_path.exists():
-            invalid_jobs.append({**job_dict, "error": f"Tracker file not found: {job_dict['tracker_path']}"})
+        if not descriptor.tracker_path.exists():
+            invalid_jobs.append({**job_dict, "error": f"Tracker file not found: {descriptor.tracker_path}"})
             continue
 
-        pending_job = PendingJob(
-            log_directory=Path(job_dict["log_directory"]),
-            output_directory=Path(job_dict["output_directory"]),
-            tracker_path=tracker_path,
-            job_id=job_dict["job_id"],
-            source_id=job_dict["source_id"],
-            config_path=Path(job_dict["config_path"]),
+        try:
+            footprint = ArchiveFootprint(
+                message_count=int(job_dict["message_count"]),
+                archive_bytes=int(job_dict["archive_bytes"]),
+                modeled=bool(job_dict["modeled"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            invalid_jobs.append({**job_dict, "error": "Missing or unreadable sizing keys from the prepared manifest."})
+            continue
+
+        core_weight = resolve_job_workers(footprint=footprint, ceiling=resolved_cores)
+        descriptor = replace(descriptor, core_weight=core_weight)
+        sizing = JobSizing(
+            memory_mb=estimate_job_memory_mb(footprint=footprint, cores=core_weight),
+            message_count=footprint.message_count,
+            archive_bytes=footprint.archive_bytes,
+            modeled=footprint.modeled,
         )
-        pending.append(pending_job)
-        all_jobs[pending_job.dispatch_key] = pending_job
+
+        pending.append((descriptor, sizing))
+        all_jobs[descriptor.dispatch_key] = descriptor
+        job_allocations.append(
+            {
+                "job_id": descriptor.job_id,
+                "source_id": descriptor.source_id,
+                "cores": core_weight,
+                "memory_mb": sizing.memory_mb,
+                "message_count": sizing.message_count,
+                "modeled": sizing.modeled,
+            }
+        )
 
     if not pending:
         return {"error": "No valid jobs to execute.", "invalid_jobs": invalid_jobs}
 
-    # Resolves both budgets before sizing, since the core budget bounds the width any single job receives.
-    resolved_cores = resolve_core_budget(requested_budget=worker_budget)
-    resolved_memory = resolve_memory_budget_mb(requested_budget_mb=memory_budget_mb)
-
-    # Sizes every pending job from the archive it reads. This reads the zip directory and the file metadata of each
-    # .npz archive, which is fast and loads no message data into memory.
-    job_allocations: list[dict[str, Any]] = []
-    for job in pending:
-        footprint = size_pending_job(job=job, core_budget=resolved_cores)
-        job_allocations.append(
-            {
-                "job_id": job.job_id,
-                "source_id": job.source_id,
-                "cores": job.core_weight,
-                "memory_mb": job.memory_mb,
-                "message_count": footprint.message_count,
-                "modeled": footprint.modeled,
-            }
-        )
-
     # Creates execution state and starts the manager thread.
+    pool_size = resolve_pool_size(job_count=len(pending), core_budget=resolved_cores, memory_budget_mb=resolved_memory)
     state = JobExecutionState(
         all_jobs=all_jobs,
         pending_jobs=pending,
         core_budget=resolved_cores,
         memory_budget_mb=resolved_memory,
+        pool_size=pool_size,
     )
     set_execution_state(state)
 
@@ -293,8 +281,9 @@ def execute_log_processing_jobs_tool(
     result: dict[str, Any] = {
         "started": True,
         "total_jobs": len(pending),
-        "worker_budget": resolved_cores,
+        "core_budget": resolved_cores,
         "memory_budget_mb": resolved_memory,
+        "pool_size": pool_size,
         "job_allocations": job_allocations,
     }
 
@@ -612,7 +601,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
     aggregate_scheduled = 0
 
     try:
-        tracker_paths = discover_marker_files(directory=root_path, marker_name=TRACKER_FILENAME)
+        tracker_paths = discover_marker_files(directory=root_path, marker_name=OutputLayout.TRACKER_FILENAME)
     except OSError as error:
         return {"error": f"Unable to search '{root_directory}': {error}"}
 

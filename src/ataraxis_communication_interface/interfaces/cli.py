@@ -242,8 +242,16 @@ def config_show(config_path: Path) -> None:
     "--job-id",
     type=str,
     default=None,
-    help="The unique hexadecimal identifier for this processing job. If provided, runs only the matching "
-    "job (remote mode).",
+    help="The canonical hexadecimal identifier of the single job to run. If provided, runs only the matching job, "
+    "which is the target an external scheduler names when it dispatches one unit of work.",
+)
+@click.option(
+    "-s",
+    "--specifier",
+    type=str,
+    multiple=True,
+    help="Controller ID to process. Repeat to specify multiple IDs. If not provided, processes every controller the "
+    "extraction config declares. Ignored when a job ID selects the work.",
 )
 @click.option(
     "-w",
@@ -265,6 +273,7 @@ def process(
     output_directory: Path,
     config: Path,
     job_id: str | None,
+    specifier: tuple[str, ...],
     *,
     workers: int,
     progress: bool,
@@ -272,14 +281,17 @@ def process(
     """Processes MicroControllerInterface log archives to extract hardware module and kernel message data.
 
     Extracts data as specified by the extraction configuration and writes the results to feather (IPC) files.
-    Controller IDs in the extraction config determine which archives are processed. Requires an
-    extraction_config.yaml file -- use 'axci config create' to generate one from a manifest.
+    Targets a single recording and runs its archives one at a time. Controller IDs in the extraction config
+    determine which archives are processed. Passing a job ID runs that single job alone, which is how an external
+    scheduler dispatches one unit of work. Requires an extraction_config.yaml file -- use 'axci config create' to
+    generate one from a manifest. Use the MCP server to orchestrate batches spanning many recordings.
     """
     run_log_processing_pipeline(
         log_directory=log_directory,
         output_directory=output_directory,
         config=config,
         job_id=job_id,
+        source_ids=list(specifier) if specifier else None,
         workers=workers,
         display_progress=progress,
     )
