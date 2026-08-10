@@ -34,6 +34,9 @@ ___
 - Abstracts communication and microcontroller runtime management via the centralized microcontroller interface class.
 - Leverages MQTT protocol to support exchanging data between multiple local and remote clients.
 - Uses LRU caching to optimize the runtime efficiency of command and parameter message construction.
+- Resolves every microcontroller status code into its firmware name and the condition it reports, covering the Kernel,
+  base Module, Communication, and TransportLayer code families.
+- Allows each custom module interface to register its own explanation for every error code it monitors.
 - Contains many sanity checks performed at initialization time to minimize the potential for unexpected
   behavior and data corruption.
 - Provides a log data processing pipeline for extracting hardware module and kernel event data from runtime log
@@ -58,6 +61,7 @@ ___
   - [Log Processing](#log-processing)
   - [Custom Module Interfaces](#custom-module-interfaces)
   - [Implementing Custom Module Interfaces](#implementing-custom-module-interfaces)
+  - [Error Handling](#error-handling)
   - [CLI](#cli)
   - [MCP Server](#mcp-server)
 - [API Documentation](#api-documentation)
@@ -513,6 +517,66 @@ module. These utility methods abstract the necessary steps for packaging and tra
 the message for transmission and it being sent to the microcontroller. Therefore, most command and parameter update
 functions / methods should be simple wrappers around these inherited methods. See the API documentation for the
 ModuleInterface class for the details about these methods inherited by each child interface class.
+
+### Error Handling
+The microcontroller reports every runtime fault as a byte-code, and the codes come from four families defined across
+the companion microcontroller libraries. The Kernel and the base Module class each define their own status codes, and
+a fault that originates in the serial link carries a second pair of codes from the Communication and TransportLayer
+classes inside its message payload. This library resolves each received code into the firmware name of the code and
+the condition that code reports, then raises the result as a RuntimeError from the communication process.
+
+The messages state what the reported codes establish and stop there, because a status code records where a fault was
+detected rather than what caused it. A packet corrupted between the microcontroller and the PC surfaces as the
+following, rather than as the raw codes 3, 53, and 19:
+```text
+Microcontroller 3 ('actor_controller') Kernel status RECEPTION_ERROR (code 3) during Kernel command RECEIVE_DATA
+(code 1). Reception failed. Communication PARSING_ERROR (code 53): message payload did not match the layout its
+protocol code declares. TransportLayer CRC_CHECK_FAILED (code 19): CRC mismatch, packet bytes likely corrupted in
+transit.
+```
+
+A code matching no member of its firmware enumeration reports that it falls outside the range this library resolves,
+rather than passing unnoticed. The KernelStatusCodes, ModuleStatusCodes, CommunicationStatusCodes, and
+TransportStatusCodes enumerations exported by this library mirror the four firmware families, so post-runtime tooling
+reads a logged event code through the same vocabulary.
+
+#### Custom Module Error Codes
+The status codes above are the ones the firmware defines for every module, and they occupy the reserved event code
+range below MINIMUM_CUSTOM_STATUS_CODE. Each custom hardware module assigns its own event codes from the range that
+MINIMUM_CUSTOM_STATUS_CODE and MAXIMUM_CUSTOM_STATUS_CODE bound, and only the module's author knows what those codes
+mean.
+
+To surface that knowledge to the operator, pass the `error_codes` argument of the ModuleInterface constructor a
+dictionary that maps each monitored error code to its explanation. Receiving a message with one of those codes raises
+a RuntimeError carrying the matching explanation alongside the reporting module, the command it was executing, and any
+data object the message contained:
+```python
+import numpy as np
+
+from ataraxis_communication_interface import ModuleInterface
+
+
+class WaterValveInterface(ModuleInterface):
+    def __init__(self) -> None:
+        super().__init__(
+            module_type=np.uint8(5),
+            module_id=np.uint8(1),
+            name="water_valve",
+            data_codes={np.uint8(51), np.uint8(52)},  # kOpen and kClosed.
+            error_codes={
+                np.uint8(56): (  # kInvalidToneConfiguration.
+                    "The valve was commanded to emit a tone while the instance is not configured for audible "
+                    "tones. Set the tone duration parameter above 0 before issuing tone commands."
+                ),
+            },
+        )
+
+    # The three abstract methods covered above are omitted here for brevity.
+```
+
+***Note,*** the constructor rejects any error or data code outside the custom range. The runtime resolves every code
+below that range through the service code handling described above, so a code declared from there never reaches the
+interface that declared it.
 
 ### CLI
 

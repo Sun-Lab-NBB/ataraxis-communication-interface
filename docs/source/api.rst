@@ -24,6 +24,8 @@ MicroController
    source and falls back to the docstring of the value's own type when it is pointed at the re-exporting package.
 .. autodata:: ataraxis_communication_interface.microcontroller.dataclasses.MICROCONTROLLER_MANIFEST_FILENAME
 .. autodata:: ataraxis_communication_interface.microcontroller.dataclasses.EXTRACTION_CONFIGURATION_FILENAME
+.. autodata:: ataraxis_communication_interface.microcontroller.status_codes.MINIMUM_CUSTOM_STATUS_CODE
+.. autodata:: ataraxis_communication_interface.microcontroller.status_codes.MAXIMUM_CUSTOM_STATUS_CODE
 
 Orchestration
 =============
