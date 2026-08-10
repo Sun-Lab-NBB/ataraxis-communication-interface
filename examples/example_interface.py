@@ -90,7 +90,11 @@ class TestModuleInterface(ModuleInterface):
             # If the pin state has changed from HIGH (52) to LOW (53), increments the pulse count stored in the shared
             # memory array.
             if message.event == 53 and self._previous_pin_state:
-                self._shared_memory[0] += 1
+                # A compound update reads the counter and then writes the incremented value back. Subscript access
+                # locks each of those halves on its own, so another process writing the same index between them
+                # erases the increment. The array() context manager holds one lock across both halves instead.
+                with self._shared_memory.array() as shared_data:
+                    shared_data[0] += 1
 
             # Sets the previous pin state value to match the recorded pin state.
             self._previous_pin_state = bool(message.event == 52)
@@ -101,7 +105,11 @@ class TestModuleInterface(ModuleInterface):
             # data_object. Upon reception, the data object is automatically deserialized into the appropriate
             # Python object, so it can be accessed directly.
             self._shared_memory[2] = message.data_object  # Records the received data value to the shared memory.
-            self._shared_memory[1] += 1  # Increments the received echo value count.
+
+            # Increments the received echo value count. This is a compound update, so it takes one lock across the
+            # read and the write, as the pulse counter above does.
+            with self._shared_memory.array() as shared_data:
+                shared_data[1] += 1
 
     def start_shared_memory_array(self) -> None:
         """Connects to the shared memory array from the main process after the communication process starts."""

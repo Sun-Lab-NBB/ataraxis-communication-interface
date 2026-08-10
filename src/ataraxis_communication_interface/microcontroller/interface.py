@@ -9,7 +9,7 @@ import sys
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from functools import partial, lru_cache
-from threading import Thread
+from threading import Lock, Thread
 from multiprocessing import (
     Queue as MPQueue,
     Manager,
@@ -535,6 +535,8 @@ class MicroControllerInterface:  # pragma: no cover
 
     Attributes:
         _started: Tracks whether the communication process has been started.
+        _shutdown_lock: Stores the lock that serializes the shutdown sequence between stop() and the watchdog thread,
+            so exactly one of the two retires the instance.
         _controller_id: Stores the id of the managed microcontroller.
         _name: Stores the human-readable name of this microcontroller instance.
         _port: Stores the serial port used for microcontroller communication.
@@ -577,6 +579,13 @@ class MicroControllerInterface:  # pragma: no cover
         # Initializes the started tracker first to avoid issues during __del__ runtime if the class is not able to
         # initialize.
         self._started: bool = False
+
+        # Serializes the shutdown sequence. stop() and the watchdog thread both clear the started flag and then
+        # release the terminator array, and the flag alone cannot separate them, since each side reads it several
+        # statements before it touches the array. The array's own lock does not cover this, as it guards element
+        # access while disconnect() and destroy() take no lock at all.
+        self._shutdown_lock: Lock = Lock()
+
         self._mp_manager: SyncManager = Manager()  # The manager is terminated by the __del__ method.
 
         # Ensures that input arguments have valid types. Only checks the arguments that are not verified by downstream
@@ -747,22 +756,29 @@ class MicroControllerInterface:  # pragma: no cover
                 continue
 
             if self._communication_process is not None and not self._communication_process.is_alive():
-                # Prevents the __del__ method from running stop(), as the code below terminates all assets.
-                self._started = False
+                # Claims the shutdown under the lock stop() takes as well, so exactly one of the two retires the
+                # instance. A concurrent stop() can claim it between the liveness check above and this acquisition,
+                # and the claimant owns every step below. Re-reading the flag here keeps this thread from tearing the
+                # instance down a second time and reporting a shutdown that already happened.
+                with self._shutdown_lock:
+                    if not self._started or self._terminator_array is None:
+                        return
 
-                # Activates the shutdown flag.
-                if self._terminator_array is not None:
+                    # Prevents the __del__ method from running stop(), as the code below terminates all assets.
+                    self._started = False
+
+                    # Activates the shutdown flag.
                     self._terminator_array[0] = 1
 
-                # The process should already be terminated, but there are no downsides to making sure it is dead.
-                self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
+                    # The process should already be terminated, but there are no downsides to making sure it is dead.
+                    self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
-                # Disconnects from the shared memory array and destroys its shared buffer.
-                if self._terminator_array is not None:
+                    # Disconnects from the shared memory array and destroys its shared buffer.
                     self._terminator_array.disconnect()
                     self._terminator_array.destroy()
 
-                # Raises the error.
+                # Raises outside the lock, since a traceback unwinding with the lock held would leave a concurrent
+                # stop() waiting on a lock this thread never releases.
                 message = (
                     f"The communication process of the MicroControllerInterface with id {self._controller_id} has been "
                     f"prematurely shut down. This likely indicates that the process has encountered a runtime error "
@@ -856,19 +872,28 @@ class MicroControllerInterface:  # pragma: no cover
         self._started = True
 
     def stop(self) -> None:
-        """Stops the instance's communication process and releases all reserved resources."""
-        # Prevents stopping an already stopped MicroControllerInterface instance.
-        if not self._started or self._terminator_array is None:
-            return
+        """Stops the instance's communication process and releases all reserved resources.
 
-        # Resets the microcontroller to ensure all hardware is set to default states that are assumed to be safe.
-        self.reset_controller()
+        Notes:
+            The shutdown is claimed under a lock the watchdog thread takes as well, so exactly one of the two performs
+            the teardown. The lock is released before this method joins that thread, since the watchdog acquires the
+            same lock and holding it across the join would leave each side waiting on the other.
+        """
+        # Claims the shutdown. A watchdog that reached its own teardown first leaves the flag clear, which takes the
+        # early return below and keeps this method away from the terminator array that thread has already released.
+        with self._shutdown_lock:
+            if not self._started or self._terminator_array is None:
+                return
 
-        # This inactivates the watchdog thread monitoring, ensuring it does not err when the processes are terminated.
-        self._started = False
+            # Resets the microcontroller to ensure all hardware is set to default states that are assumed to be safe.
+            self.reset_controller()
 
-        # Emits the process shutdown signal.
-        self._terminator_array[0] = 1
+            # This inactivates the watchdog thread monitoring, ensuring it does not err when the processes are
+            # terminated.
+            self._started = False
+
+            # Emits the process shutdown signal.
+            self._terminator_array[0] = 1
 
         # Waits until the communication process terminates
         if self._communication_process is not None:
@@ -1118,42 +1143,51 @@ class MicroControllerInterface:  # pragma: no cover
         # map is consulted and are emitted by modules that declare no data or error codes.
         module_names: dict[np.uint16, str] = {module.type_id: module.name for module in module_interfaces}
 
-        for module in module_interfaces:
-            # For each module, initializes the assets that need to be configured / created inside the remote Process.
-            module.initialize_remote_assets()
+        # Records the interfaces whose remote assets are live, so the shutdown below terminates the assets that exist
+        # and leaves an interface that raised during its own initialization alone.
+        initialized_modules: list[ModuleInterface] = []
 
-            # If the interface is configured to process incoming data or raise runtime errors, maps its type+id combined
-            # code to the interface instance. This is used to quickly find the module interface instance addressed by
-            # incoming data, so that it can handle the data or error message.
-            if module.data_codes or module.error_codes:
-                processing_map[module.type_id] = module
-
-        # Initializes the serial communication class and connects to the target microcontroller.
-        serial_communication = SerialCommunication(
-            port=port,
-            controller_id=controller_id,
-            logger_queue=logger_queue,
-            baudrate=baudrate,
-            microcontroller_serial_buffer_size=buffer_size,
-        )
-
-        # Verifies that the microcontroller and the interface instance are configured correctly to support the runtime.
-        MicroControllerInterface._verify_microcontroller_communication(
-            serial_communication=serial_communication,
-            module_interfaces=module_interfaces,
-            controller_id=controller_id,
-            timeout_timer=timeout_timer,
-            terminator_array=terminator_array,
-        )
-
-        # Tracks whether the microcontroller has responded to the last keepalive command sent from the PC.
-        keepalive_response_received = True  # Must be initialized to True.
-
-        # Initializes the main communication loop. This loop runs until the exit conditions are encountered.
-        # The exit conditions for the loop require the first variable in the terminator_array to be set to True
-        # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
-        # the central process are fully carried out before the communication is terminated.
+        # The initialization steps below run under the same guard as the communication loop, as each of them can raise
+        # after some interfaces have already claimed their remote assets.
         try:
+            for module in module_interfaces:
+                # For each module, initializes the assets that need to be configured / created inside the remote
+                # Process.
+                module.initialize_remote_assets()
+                initialized_modules.append(module)
+
+                # If the interface is configured to process incoming data or raise runtime errors, maps its type+id
+                # combined code to the interface instance. This is used to quickly find the module interface instance
+                # addressed by incoming data, so that it can handle the data or error message.
+                if module.data_codes or module.error_codes:
+                    processing_map[module.type_id] = module
+
+            # Initializes the serial communication class and connects to the target microcontroller.
+            serial_communication = SerialCommunication(
+                port=port,
+                controller_id=controller_id,
+                logger_queue=logger_queue,
+                baudrate=baudrate,
+                microcontroller_serial_buffer_size=buffer_size,
+            )
+
+            # Verifies that the microcontroller and the interface instance are configured correctly to support the
+            # runtime.
+            MicroControllerInterface._verify_microcontroller_communication(
+                serial_communication=serial_communication,
+                module_interfaces=module_interfaces,
+                controller_id=controller_id,
+                timeout_timer=timeout_timer,
+                terminator_array=terminator_array,
+            )
+
+            # Tracks whether the microcontroller has responded to the last keepalive command sent from the PC.
+            keepalive_response_received = True  # Must be initialized to True.
+
+            # Initializes the main communication loop. This loop runs until the exit conditions are encountered.
+            # The exit conditions for the loop require the first variable in the terminator_array to be set to True
+            # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
+            # the central process are fully carried out before the communication is terminated.
             timeout_timer.reset()
             while not terminator_array[0] or not input_queue.empty():
                 # Main data sending loop. The method sequentially retrieves the queued messages and sends them to the
@@ -1265,9 +1299,18 @@ class MicroControllerInterface:  # pragma: no cover
         finally:
             terminator_array.disconnect()
 
-            # Terminates all custom assets
-            for module in module_interfaces:
-                module.terminate_remote_assets()
+            # Terminates the custom assets of every interface that completed its own initialization. Each termination
+            # is guarded, as an interface that raises here would otherwise strand the assets of every interface behind
+            # it and replace the exception that started the shutdown.
+            for module in initialized_modules:
+                try:
+                    module.terminate_remote_assets()
+                except Exception as termination_error:
+                    sys.stderr.write(
+                        f"Unable to terminate the remote assets of the {module.name} module interface managed by the "
+                        f"microcontroller {controller_id}. Encountered the following error: {termination_error}\n"
+                    )
+                    sys.stderr.flush()
 
 
 def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:  # pragma: no cover

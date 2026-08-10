@@ -8,11 +8,20 @@ from typing import TYPE_CHECKING, Any
 from dataclasses import field, dataclass
 
 import numpy as np
+from ataraxis_base_utilities import console
 
 from .protocols import SerialProtocols
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+_MAXIMUM_PARAMETERS_SIZE: int = 250
+"""The maximum combined size, in bytes, of the parameter values transmitted by a single ModuleParameters message.
+
+COBS encodes at most 254 payload bytes behind a single overhead byte, which caps every payload the TransportLayer
+transmits at 254 bytes. The four-byte ModuleParameters header travels inside that payload, leaving 250 bytes for the
+serialized parameter values.
+"""
 
 _ZERO_BYTE: np.uint8 = np.uint8(0)
 """Default zero value for uint8 fields used across message dataclasses."""
@@ -194,15 +203,28 @@ class ModuleParameters:
     """The code to use for acknowledging the reception of the message, if set to a non-zero value."""
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
     """Stores the serialized message data."""
-    parameters_size: np.uint8 | None = field(init=False, default=None)
+    parameters_size: int | None = field(init=False, default=None)
     """Stores the total size of the serialized parameters in bytes."""
     protocol_code: np.uint8 = field(init=False, default=SerialProtocols.MODULE_PARAMETERS.as_uint8())
     """Stores the message protocol code."""
 
     def __post_init__(self) -> None:
-        """Serializes the instance's data."""
-        # Calculates the total size of serialized parameters in bytes directly from item sizes.
-        parameters_size = np.uint8(sum(parameter.itemsize for parameter in self.parameter_data))
+        """Serializes the instance's data.
+
+        Raises:
+            ValueError: If the combined size of the serialized parameter values exceeds the maximum size the
+                microcontroller is able to receive.
+        """
+        # Calculates the total size of serialized parameters in bytes directly from item sizes. The sum accumulates in
+        # Python integer arithmetic, as a uint8 accumulator silently wraps at the very sizes the guard below rejects.
+        parameters_size = sum(parameter.itemsize for parameter in self.parameter_data)
+        if parameters_size > _MAXIMUM_PARAMETERS_SIZE:
+            message = (
+                f"Unable to serialize the parameters message addressed to the module with ID {self.module_id} and "
+                f"type {self.module_type}. The combined size of the serialized parameter values must be at most "
+                f"{_MAXIMUM_PARAMETERS_SIZE} bytes, but got {parameters_size} bytes."
+            )
+            console.error(message=message, error=ValueError)
         object.__setattr__(self, "parameters_size", parameters_size)
 
         # Pre-allocates the full array with the exact size (header and parameters object).

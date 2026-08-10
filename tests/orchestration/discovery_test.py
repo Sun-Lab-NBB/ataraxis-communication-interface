@@ -668,6 +668,27 @@ def test_prepare_jobs_records_skipped_sources_without_strict_sourcing(tmp_path):
     assert (CONTROLLER_EXTRACTION_JOB_NAME, "2") in job_set.universe
 
 
+def test_prepare_jobs_unregistered_controller_without_strict_sourcing(tmp_path: Path) -> None:
+    """Verifies that lenient sourcing records a configured controller the manifest omits instead of raising."""
+    log_directory = tmp_path / "logs"
+    _build_recording(log_directory=log_directory, source_ids=(1,))
+    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 7))
+
+    # A project-wide configuration declares every controller the project uses, so a recording whose manifest registers
+    # a subset of them prepares the sources it holds and reports the rest as skipped.
+    job_set = prepare_jobs(
+        log_directory=log_directory,
+        output_directory=tmp_path / "output",
+        config_path=config_path,
+        strict_sources=False,
+    )
+
+    assert [job.source_id for job in job_set.jobs] == ["1"]
+    assert job_set.skipped_sources == (("7", "The controller is absent from the microcontroller manifest."),)
+    # The unregistered controller contributes no entry to the universe the tracker is aligned against.
+    assert job_set.universe == ((CONTROLLER_EXTRACTION_JOB_NAME, "1"),)
+
+
 def test_prepare_jobs_split_logger_output(tmp_path):
     """Verifies that prepare_jobs reports the split logger output kind when the archives span several directories."""
     log_directory = tmp_path / "logs"

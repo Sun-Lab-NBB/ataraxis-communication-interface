@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
+from ataraxis_base_utilities import console
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -108,6 +109,9 @@ def get_event_data[ScalarT: np.generic](
         shares a payload dtype. That lets the payloads of a whole event stream be concatenated and decoded through
         one buffer read rather than one read per message.
 
+        An event code declaring a scalar prototype has its trailing value axis squeezed, so it keeps returning a 1-D
+        array holding one value per timestamp.
+
     Args:
         partition: The event-code-keyed partition produced by partition_events().
         event_code: The event code to look up.
@@ -115,7 +119,14 @@ def get_event_data[ScalarT: np.generic](
 
     Returns:
         The timestamps of the requested event code and the values decoded from its payloads, both empty when the
-        partition holds no such code.
+        partition holds no such code. An event code declaring an array prototype yields one row of values per
+        message, so the value array holds one row per timestamp.
+
+    Raises:
+        ValueError: If the requested event code is a state-only event, whose messages carry no data payload. If a
+            message carrying the event code stores a null payload inside an otherwise decodable stream, which marks
+            its prototype code as unrecognized. If the decoded value count is not a whole multiple of the message
+            count.
     """
     event_dataframe = partition.get(event_code)
     if event_dataframe is None:
@@ -124,7 +135,44 @@ def get_event_data[ScalarT: np.generic](
     timestamps: NDArray[np.uint64] = event_dataframe[ExtractedDataColumns.TIMESTAMP].to_numpy().astype(np.uint64)
 
     payloads = event_dataframe[ExtractedDataColumns.DATA].to_list()
-    payload_dtype = event_dataframe[ExtractedDataColumns.DTYPE].to_list()[0]
-    values: NDArray[ScalarT] = np.frombuffer(b"".join(payloads), dtype=payload_dtype).astype(values_dtype)
+    payload_dtypes = event_dataframe[ExtractedDataColumns.DTYPE].to_list()
+    payload_dtype = payload_dtypes[0]
+    if payload_dtype is None:
+        message = (
+            f"Unable to read the data values of the messages carrying event code {event_code}. The messages of this "
+            f"event code store no data payload, which marks the code as a state-only event. Read the arrival "
+            f"timestamps of a state-only event through get_event_timestamps()."
+        )
+        console.error(message=message, error=ValueError)
+    if any(payload is None for payload in payloads):
+        message = (
+            f"Unable to read the data values of the messages carrying event code {event_code}. At least one of these "
+            f"messages stores a null payload while the rest store data under the {payload_dtype} dtype, which marks "
+            f"the payload-free messages as carrying a prototype code this library does not recognize."
+        )
+        console.error(message=message, error=ValueError)
+    if any(dtype != payload_dtype for dtype in payload_dtypes):
+        message = (
+            f"Unable to read the data values of the messages carrying event code {event_code}. The messages of this "
+            f"event code store data under more than one dtype: {sorted(set(payload_dtypes))}. The firmware assigns "
+            f"each event code a single data object type, so a code storing several dtypes marks a table this library "
+            f"did not write or a firmware revision that reused the code."
+        )
+        console.error(message=message, error=ValueError)
+
+    decoded_values: NDArray[ScalarT] = np.frombuffer(b"".join(payloads), dtype=payload_dtype).astype(values_dtype)
+    if decoded_values.size % timestamps.size != 0:
+        message = (
+            f"Unable to pair the data values of the messages carrying event code {event_code} with their arrival "
+            f"timestamps. The payloads of this event code decode into {decoded_values.size} values, which is not a "
+            f"whole multiple of the {timestamps.size} messages the table stores for the code."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Reshapes the flat decode into one row per message, since an array prototype contributes multiple values per
+    # message and the concatenated buffer preserves no boundary between them.
+    values: NDArray[ScalarT] = decoded_values.reshape(timestamps.size, -1)
+    if values.shape[1] == 1:
+        values = values.reshape(-1)
 
     return timestamps, values

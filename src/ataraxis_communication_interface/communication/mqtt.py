@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from queue import Queue
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from paho.mqtt.enums import CallbackAPIVersion
 import paho.mqtt.client as mqtt
 from ataraxis_base_utilities import console
+
+if TYPE_CHECKING:
+    from paho.mqtt.properties import Properties
+    from paho.mqtt.reasoncodes import ReasonCode
 
 
 class MQTTCommunication:
@@ -52,10 +57,10 @@ class MQTTCommunication:
         self._output_queue: Queue = Queue()  # type: ignore[type-arg]
 
         # Initializes the MQTT client. Note, it needs to be connected before it can send and receive messages!
-        self._client: mqtt.Client = mqtt.Client(  # type: ignore[call-arg]
+        self._client: mqtt.Client = mqtt.Client(
             protocol=mqtt.MQTTv5,
             transport="tcp",
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,  # type: ignore[attr-defined]
+            callback_api_version=CallbackAPIVersion.VERSION2,
         )
 
     def __repr__(self) -> str:
@@ -80,6 +85,26 @@ class MQTTCommunication:
         # Whenever a message is received, it is buffered via the local queue object.
         self._output_queue.put_nowait((message.topic, message.payload))
 
+    def _on_disconnect(  # pragma: no cover
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        _reason_code: ReasonCode,
+        _properties: Properties | None,
+    ) -> None:
+        """Clears the tracked connection state when the client loses its link to the MQTT broker.
+
+        Args:
+            _client: The MQTT client that lost the connection. Currently not used.
+            _userdata: Custom user-defined data. Currently not used.
+            _disconnect_flags: The flags that communicate whether the broker or the client initiated the
+                disconnection. Currently not used.
+            _reason_code: The code that communicates the reason for the disconnection. Currently not used.
+            _properties: The MQTT v5 properties transmitted with the disconnection. Currently not used.
+        """
+        self._connected = False
+
     def connect(self) -> None:
         """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
@@ -97,19 +122,29 @@ class MQTTCommunication:
         if self._connected:
             return
 
-        # Connects to the broker.
+        # Connects to the broker. Newer paho-mqtt versions surface socket-level failures as OSError subclasses instead
+        # of returning an error code, which covers the timed out connection, the refused connection, and the
+        # unresolvable host name.
+        failure_reason: str | None = None
         try:
             result = self._client.connect(host=self._ip, port=self._port)
-        # Catches the TimeoutError that newer paho-mqtt versions raise instead of returning an error code.
-        except TimeoutError:
+        except OSError as error:
             result = mqtt.MQTT_ERR_NO_CONN
+            failure_reason = str(error)
         if result != mqtt.MQTT_ERR_SUCCESS:
+            # Reports the socket-level text whenever the failure carried one, so that a failed name resolution stays
+            # distinguishable from a refused connection.
+            reason = failure_reason if failure_reason is not None else mqtt.error_string(result).removesuffix(".")
             message = (
                 f"Unable to connect MQTTCommunication class instance to the MQTT broker. Failed to connect to MQTT "
-                f"broker at {self._ip}:{self._port}. This likely indicates that the broker is not running or that "
-                f"there is an issue with the provided IP and socket port."
+                f"broker at {self._ip}:{self._port} with the error: {reason}. This likely indicates that the broker is "
+                f"not running or that there is an issue with the provided IP and socket port."
             )
             console.error(message=message, error=ConnectionError)
+
+        # Tracks broker-side and library-side link losses, which keeps the connection guards of the data exchange
+        # methods accurate for publish-only instances as well as for subscribed ones.
+        self._client.on_disconnect = self._on_disconnect
 
         # If the class is configured to connect to any topics, enables the message callback and starts the monitoring
         # thread.
@@ -132,7 +167,8 @@ class MQTTCommunication:
             payload: The data to be published. Setting this to None sends an empty message.
 
         Raises:
-            ConnectionError: If the instance is not connected to the MQTT broker.
+            ConnectionError: If the instance is not connected to the MQTT broker or if the client is unable to hand
+                the payload to the broker.
         """
         if not self._connected:
             message = (
@@ -141,7 +177,16 @@ class MQTTCommunication:
                 f"before sending data."
             )
             console.error(message=message, error=ConnectionError)
-        self._client.publish(topic=topic, payload=payload, qos=0)
+        # The client reports a dropped link through the returned status rather than by raising, so the status is the
+        # only signal that the payload never reached the broker.
+        information = self._client.publish(topic=topic, payload=payload, qos=0)
+        if information.rc != mqtt.MQTT_ERR_SUCCESS:
+            failure = mqtt.error_string(information.rc).removesuffix(".")
+            message = (
+                f"Unable to send data to the MQTT topic {topic} of the broker at {self._ip}:{self._port} via the "
+                f"MQTTCommunication instance. The publication attempt failed with the error: {failure}."
+            )
+            console.error(message=message, error=ConnectionError)
 
     @property
     def has_data(self) -> bool:

@@ -32,6 +32,12 @@ from ataraxis_communication_interface import (
     run_log_processing_pipeline,
 )
 
+_ECHO_RESPONSE_TIMEOUT: int = 1000
+"""The time, in milliseconds, to wait for the microcontroller to answer the one-off echo command before treating the
+communication as broken. The firmware answers the echo inside the runtime cycle that dequeues the command, so the round
+trip costs two short serial frames and stays two orders of magnitude below this bound."""
+
+
 # Guards the runtime to support MicroControllerInterface's multiprocessing architecture.
 if __name__ == "__main__":
     # Enables the console module to communicate the example's runtime progress via the terminal.
@@ -68,100 +74,120 @@ if __name__ == "__main__":
     )
     console.echo(message="Initializing the communication process...")
 
-    # Starts the serial communication with the microcontroller by initializing a separate process that handles the
-    # communication. This method may take up to 30 seconds to execute, as it verifies that the microcontroller is
-    # configured correctly, given the MicroControllerInterface configuration.
-    mc_interface.start()
+    # Guards the runtime below so that a failure still releases every asset reserved above. A microcontroller that is
+    # absent or unplugged makes start() raise, and without this guard that exception would strand the DataLogger
+    # process, both watchdog threads, and three shared memory buffers, and would discard every message already written
+    # to disk.
+    try:
+        # Starts the serial communication with the microcontroller by initializing a separate process that handles the
+        # communication. This method may take up to 30 seconds to execute, as it verifies that the microcontroller is
+        # configured correctly, given the MicroControllerInterface configuration.
+        mc_interface.start()
 
-    console.echo(message="Communication process: Initialized.", level=LogLevel.SUCCESS)
-    console.echo(message="Updating hardware module runtime parameters...")
+        console.echo(message="Communication process: Initialized.", level=LogLevel.SUCCESS)
+        console.echo(message="Updating hardware module runtime parameters...")
 
-    # The shared memory instances are connected in both processes already. Calling the setup here pins the connection
-    # point to a moment the runtime chooses, after the communication process has started.
-    interface_1.start_shared_memory_array()
-    interface_2.start_shared_memory_array()
+        # The shared memory instances are connected in both processes already. Calling the setup here pins the
+        # connection point to a moment the runtime chooses, after the communication process has started.
+        interface_1.start_shared_memory_array()
+        interface_2.start_shared_memory_array()
 
-    # Generates and sends new runtime parameters to both hardware module instances running on the microcontroller.
-    # On and Off durations are in microseconds.
-    interface_1.set_parameters(
-        on_duration=np.uint32(1000000), off_duration=np.uint32(1000000), echo_value=np.uint16(121)
-    )
-    interface_2.set_parameters(
-        on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
-    )
+        # Generates and sends new runtime parameters to both hardware module instances running on the microcontroller.
+        # On and Off durations are in microseconds.
+        interface_1.set_parameters(
+            on_duration=np.uint32(1000000), off_duration=np.uint32(1000000), echo_value=np.uint16(121)
+        )
+        interface_2.set_parameters(
+            on_duration=np.uint32(5000000), off_duration=np.uint32(5000000), echo_value=np.uint16(333)
+        )
 
-    console.echo(message="Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
+        console.echo(message="Hardware module runtime parameters: Updated.", level=LogLevel.SUCCESS)
 
-    console.echo(message="Sending the 'echo' command to the TestModule 1...")
+        console.echo(message="Sending the 'echo' command to the TestModule 1...")
 
-    # Requests instance 1 to return its echo value. By default, the echo command only runs once.
-    interface_1.echo()
+        # Requests instance 1 to return its echo value. By default, the echo command only runs once.
+        interface_1.echo()
 
-    # Waits until the microcontroller responds to the echo command. The interface is configured to update shared
-    # memory array index 2 with the received echo value when it receives the response from the microcontroller.
-    while interface_1.shared_memory[2] == 0:
-        continue
+        # Waits until the microcontroller responds to the echo command. The interface is configured to update shared
+        # memory array index 2 with the received echo value when it receives the response from the microcontroller.
+        # The wait is bounded, since an echo the microcontroller never answers would otherwise spin this loop forever.
+        echo_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        while interface_1.shared_memory[2] == 0:
+            if echo_timer.elapsed > _ECHO_RESPONSE_TIMEOUT:
+                message = (
+                    f"Unable to read the echo value from TestModule 1. The microcontroller did not answer the echo "
+                    f"command within {_ECHO_RESPONSE_TIMEOUT} milliseconds, which indicates that the communication "
+                    f"with the microcontroller is broken."
+                )
+                console.error(message=message, error=RuntimeError)
 
-    # Retrieves and prints the microcontroller's response. The returned value should match the parameter set above: 121.
-    console.echo(message=f"TestModule 1 echo value: {interface_1.shared_memory[2]}.", level=LogLevel.SUCCESS)
+        # Retrieves and prints the microcontroller's response. The returned value should match the echo_value
+        # parameter set above, which is 121.
+        console.echo(message=f"TestModule 1 echo value: {interface_1.shared_memory[2]}.", level=LogLevel.SUCCESS)
 
-    # Demonstrates the use of non-blocking recurrent commands.
-    console.echo(message="Executing the example non-blocking runtime, standby for ~5 seconds...")
+        # Demonstrates the use of non-blocking recurrent commands.
+        console.echo(message="Executing the example non-blocking runtime, standby for ~5 seconds...")
 
-    # Instructs the first TestModule instance to start pulsing the managed pin (Pin 5 by default). With the parameters
-    # sent earlier, it keeps the pin ON for 1 second and keeps it off for ~ 2 seconds (1 from off_duration,
-    # 1 from waiting before repeating the command). The microcontroller repeats this command at regular intervals
-    # until it is given a new command or receives a 'dequeue' command (see below).
-    interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=True)
+        # Instructs the first TestModule instance to start pulsing the managed pin (Pin 5 by default). With the
+        # parameters sent earlier, it keeps the pin ON for 1 second and keeps it off for ~ 2 seconds (1 from
+        # off_duration, 1 from waiting before repeating the command). The microcontroller repeats this command at
+        # regular intervals until it is given a new command or receives a 'dequeue' command (see below).
+        interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=True)
 
-    # Instructs the second TestModule instance to start sending its echo value to the PC every 500 milliseconds.
-    interface_2.echo(repetition_delay=np.uint32(500000))
+        # Instructs the second TestModule instance to start sending its echo value to the PC every 500 milliseconds.
+        interface_2.echo(repetition_delay=np.uint32(500000))
 
-    # Delays for 5 seconds, accumulating echo values from TestModule 2 and pin On / Off notifications from TestModule
-    # 1. Uses the PrecisionTimer instance to delay the main process for 5 seconds.
-    delay_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    delay_timer.delay(delay=5, block=False)
+        # Delays for 5 seconds, accumulating echo values from TestModule 2 and pin On / Off notifications from
+        # TestModule 1. Uses the PrecisionTimer instance to delay the main process for 5 seconds.
+        delay_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+        delay_timer.delay(delay=5, block=False)
 
-    # Cancels both recurrent commands by issuing a dequeue command. Note, the dequeue command does not interrupt already
-    # running commands, it only prevents further command repetitions.
-    interface_1.reset_command_queue()
-    interface_2.reset_command_queue()
+        # Cancels both recurrent commands by issuing a dequeue command. Note, the dequeue command does not interrupt
+        # already running commands, it only prevents further command repetitions.
+        interface_1.reset_command_queue()
+        interface_2.reset_command_queue()
 
-    # The result seen here depends on the communication speed between the PC and the microcontroller and the precision
-    # of the microcontroller's clock. For Teensy 4.1, which was used to write this example, the pin is expected to
-    # pulse ~2 times and the echo value is expected to be transmitted ~10 times during the test period.
-    console.echo(message="Non-blocking runtime: Complete.", level=LogLevel.SUCCESS)
-    console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
-    console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+        # The result seen here depends on the communication speed between the PC and the microcontroller and the
+        # precision of the microcontroller's clock. For Teensy 4.1, which was used to write this example, the pin is
+        # expected to pulse ~2 times and the echo value is expected to be transmitted ~10 times during the test period.
+        console.echo(message="Non-blocking runtime: Complete.", level=LogLevel.SUCCESS)
+        console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+        console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
 
-    # Resets the pulse and echo counters before executing the demonstration below.
-    interface_1.shared_memory[0] = 0
-    interface_2.shared_memory[1] = 0
+        # Resets the pulse and echo counters before executing the demonstration below.
+        interface_1.shared_memory[0] = 0
+        interface_2.shared_memory[1] = 0
 
-    # Repeats the example above, but now uses blocking commands instead of non-blocking.
-    console.echo(message="Executing the example blocking runtime, standby for ~5 seconds...")
-    interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=False)
-    interface_2.echo(repetition_delay=np.uint32(500000))
-    delay_timer.delay(delay=5, block=False)  # Reuses the same delay timer
-    interface_1.reset_command_queue()
-    interface_2.reset_command_queue()
+        # Repeats the example above, but now uses blocking commands instead of non-blocking.
+        console.echo(message="Executing the example blocking runtime, standby for ~5 seconds...")
+        interface_1.pulse(repetition_delay=np.uint32(1000000), noblock=False)
+        interface_2.echo(repetition_delay=np.uint32(500000))
+        delay_timer.delay(delay=5, block=False)  # Reuses the same delay timer
+        interface_1.reset_command_queue()
+        interface_2.reset_command_queue()
 
-    # The pulse period is the same in both modes, so the pin is again expected to pulse ~2 times. This time the pin
-    # pulsing performed by module 1 interferes with the echo command performed by module 2, so the echo counter is
-    # expected to fall below the non-blocking figure above.
-    console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
-    console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
-    console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+        # The pulse period is the same in both modes, so the pin is again expected to pulse ~2 times. This time the pin
+        # pulsing performed by module 1 interferes with the echo command performed by module 2, so the echo counter is
+        # expected to fall below the non-blocking figure above.
+        console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
+        console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
+        console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")
+    finally:
+        # Retires the runtime assets in dependency order, which is what makes this teardown work on the failure path
+        # as well as the success path. The communication process stops first, because it is the last writer feeding
+        # log entries to the DataLogger, and stopping the logger underneath a live writer would drop the entries still
+        # in flight. The DataLogger stops second, which drains its queue and flushes every remaining entry to disk as
+        # a .npy file. The archive assembly runs last, since it consolidates those .npy files into .npz archives and
+        # only sees a complete set once the logger process has exited. Assembling here rather than after the guard
+        # keeps a partial log usable, as the .npy files live in a temporary directory that goes away with this script.
+        mc_interface.stop()
+        console.echo(message="Communication process: Stopped.", level=LogLevel.SUCCESS)
 
-    # Stops the communication process and releases all resources used during runtime.
-    mc_interface.stop()
-    console.echo(message="Communication process: Stopped.", level=LogLevel.SUCCESS)
-
-    # Stops the DataLogger and assembles all logged data into a single .npz archive file. This step is required to be
-    # able to extract the logged message data for further analysis.
-    data_logger.stop()
-    console.echo(message="Assembling the message log archive...")
-    assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
+        # Stops the DataLogger and assembles all logged data into a single .npz archive file. This step is required to
+        # be able to extract the logged message data for further analysis.
+        data_logger.stop()
+        console.echo(message="Assembling the message log archive...")
+        assemble_log_archives(log_directory=data_logger.output_directory, remove_sources=True, verbose=True)
 
     # To process the data logged during runtime, first generate a precursor extraction configuration from the
     # microcontroller manifest. The manifest is automatically created during MicroControllerInterface construction.

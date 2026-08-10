@@ -158,6 +158,36 @@ def test_microcontroller_manifest_multiple_controllers(tmp_path: Path) -> None:
     assert loaded.controllers[1].id == 2
 
 
+def test_microcontroller_manifest_non_list_controllers() -> None:
+    """Verifies that MicroControllerManifest rejects a 'controllers' field that does not store a list."""
+    message = (
+        "Unable to initialize the MicroControllerManifest instance. The 'controllers' field must store a list of "
+        "MicroControllerSourceData instances, but got NoneType."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        MicroControllerManifest(controllers=None)  # type: ignore[arg-type]
+
+
+def test_microcontroller_manifest_null_controllers_yaml(tmp_path: Path) -> None:
+    """Verifies that loading a manifest whose 'controllers' key carries no value raises a ValueError."""
+    manifest_path = tmp_path / MICROCONTROLLER_MANIFEST_FILENAME
+    manifest_path.write_text("controllers:\n", encoding="utf-8")
+
+    message = (
+        "Unable to initialize the MicroControllerManifest instance. The 'controllers' field must store a list of "
+        "MicroControllerSourceData instances, but got NoneType."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        MicroControllerManifest.from_yaml(file_path=manifest_path)
+
+
+def test_extraction_config_empty() -> None:
+    """Verifies that an empty ExtractionConfig can be created."""
+    config = ExtractionConfig(controllers=[])
+
+    assert config.controllers == []
+
+
 def test_extraction_config_save_load_roundtrip(tmp_path: Path) -> None:
     """Verifies that an ExtractionConfig can be saved and loaded with data intact."""
     modules = (ModuleExtractionConfig(module_type=1, module_id=1, event_codes=(10, 20)),)
@@ -197,6 +227,29 @@ def test_extraction_config_no_kernel_roundtrip(tmp_path: Path) -> None:
     loaded = ExtractionConfig.from_yaml(file_path=file_path)
 
     assert loaded.controllers[0].kernel is None
+
+
+def test_extraction_config_non_list_controllers() -> None:
+    """Verifies that ExtractionConfig rejects a 'controllers' field that does not store a list."""
+    message = (
+        "Unable to initialize the ExtractionConfig instance. The 'controllers' field must store a list of "
+        "ControllerExtractionConfig instances, but got NoneType."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        ExtractionConfig(controllers=None)  # type: ignore[arg-type]
+
+
+def test_extraction_config_null_controllers_yaml(tmp_path: Path) -> None:
+    """Verifies that loading a config whose 'controllers' key carries no value raises a ValueError."""
+    config_path = tmp_path / EXTRACTION_CONFIGURATION_FILENAME
+    config_path.write_text("controllers:\n", encoding="utf-8")
+
+    message = (
+        "Unable to initialize the ExtractionConfig instance. The 'controllers' field must store a list of "
+        "ControllerExtractionConfig instances, but got NoneType."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        ExtractionConfig.from_yaml(file_path=config_path)
 
 
 def test_write_microcontroller_manifest_new(tmp_path: Path) -> None:

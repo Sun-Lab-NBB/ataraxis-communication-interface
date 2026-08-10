@@ -24,6 +24,7 @@ from .execution import (
     set_execution_state,
     group_jobs_by_tracker,
     job_execution_manager,
+    start_execution_session,
 )
 from .allocation import (
     SPAWNED_CHILD_MEMORY_MB,
@@ -77,4 +78,5 @@ __all__ = [
     "run_log_processing_pipeline",
     "set_execution_state",
     "size_job",
+    "start_execution_session",
 ]
