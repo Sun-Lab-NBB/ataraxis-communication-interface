@@ -204,6 +204,15 @@ _MODULE_ERROR_DESCRIPTIONS: dict[int, str] = {
 """Maps each service status code that reports a fault to the condition it reports. Membership in this table defines
 which service codes interrupt the runtime, so the code that reports command completion is absent."""
 
+_KERNEL_STATUS_VALUES: frozenset[int] = frozenset(code.value for code in KernelStatusCodes)
+"""The value of every status code the Kernel defines. Every received Kernel message tests its event code against this
+set, which resolves through one hash probe, because testing against the enumeration itself walks a list of values
+behind a metaclass call."""
+
+_MODULE_STATUS_VALUES: frozenset[int] = frozenset(code.value for code in ModuleStatusCodes)
+"""The value of every service status code the base Module class defines. Serves the same per-message membership test
+for module messages that the Kernel set above serves for Kernel messages."""
+
 _COMMUNICATION_STATUS_MEANINGS: dict[int, str] = {
     CommunicationStatusCodes.STANDBY: "no operation completed since the last reset",
     CommunicationStatusCodes.RECEPTION_ERROR: "could not read a complete message from the serial stream",
@@ -273,7 +282,7 @@ def describe_kernel_event(
     # communication loop, so the table lookup that rules out a fault precedes every string the description needs.
     event = int(message.event)
     description = _KERNEL_ERROR_DESCRIPTIONS.get(event)
-    if description is None and event in KernelStatusCodes:
+    if description is None and event in _KERNEL_STATUS_VALUES:
         return None
 
     context = (
@@ -313,7 +322,7 @@ def describe_module_event(
     # that rules out a fault precedes every string the description needs.
     event = int(message.event)
     description = _MODULE_ERROR_DESCRIPTIONS.get(event)
-    if description is None and event in ModuleStatusCodes:
+    if description is None and event in _MODULE_STATUS_VALUES:
         return None
 
     source = _format_module_context(

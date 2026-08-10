@@ -769,6 +769,51 @@ def test_run_log_processing_pipeline_unconfigured_source(tmp_path):
         )
 
 
+@pytest.mark.xdist_group(name="orchestration")
+def test_run_log_processing_pipeline_remote_mode_missing_archive(tmp_path):
+    """Verifies that remote mode raises FileNotFoundError when the requested source has no archive on disk."""
+    log_directory = tmp_path / "logs"
+    _build_archive(log_directory=log_directory, source_id=1, messages=_module_messages())
+    _write_manifest(log_directory=log_directory, source_ids=(1, 2))
+    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 2))
+
+    message = (
+        f"Unable to find the log archive of source '2' in '{log_directory}'. No file named "
+        f"'2{LOG_ARCHIVE_SUFFIX}' was found anywhere under the directory."
+    )
+    with pytest.raises(FileNotFoundError, match=error_format(message)):
+        run_log_processing_pipeline(
+            log_directory=log_directory,
+            output_directory=tmp_path / "output",
+            config=config_path,
+            job_id=generate_job_ids(source_ids=["2"])["2"],
+            workers=1,
+            display_progress=False,
+        )
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_run_log_processing_pipeline_local_mode_missing_archive(tmp_path):
+    """Verifies that local mode raises FileNotFoundError when a configured source has no archive on disk."""
+    log_directory = tmp_path / "logs"
+    _build_archive(log_directory=log_directory, source_id=1, messages=_module_messages())
+    _write_manifest(log_directory=log_directory, source_ids=(1, 2))
+    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 2))
+
+    message = (
+        f"Unable to find the log archive of source '2' in '{log_directory}'. No file named "
+        f"'2{LOG_ARCHIVE_SUFFIX}' was found anywhere under the directory."
+    )
+    with pytest.raises(FileNotFoundError, match=error_format(message)):
+        run_log_processing_pipeline(
+            log_directory=log_directory,
+            output_directory=tmp_path / "output",
+            config=config_path,
+            workers=1,
+            display_progress=False,
+        )
+
+
 def test_run_log_processing_pipeline_missing_config(tmp_path):
     """Verifies that run_log_processing_pipeline raises FileNotFoundError when the config path does not resolve."""
     missing_config = tmp_path / "nonexistent.yaml"

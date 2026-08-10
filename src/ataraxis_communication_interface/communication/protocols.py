@@ -358,6 +358,11 @@ _PROTOTYPE_BYTE_SIZES: dict[int, int] = {code: int(factory().nbytes) for code, f
 alongside the dtype strings, so log processing can check a message's data payload against the size its prototype
 code promises without allocating a prototype object."""
 
+_PROTOTYPE_OBJECTS: dict[int, PrototypeType] = {code: factory() for code, factory in _PROTOTYPE_FACTORIES.items()}
+"""Maps prototype integer codes to one shared instance of the object each code declares. Built once at module load
+alongside the two tables above, so resolving the prototype of a received data message costs a lookup rather than an
+allocation. Every consumer treats the shared instance as read-only."""
+
 
 class SerialProtocols(IntEnum):
     """Defines the protocol codes used to specify incoming and outgoing message layouts during PC-microcontroller
@@ -1036,6 +1041,11 @@ class SerialPrototypes(IntEnum):
     def get_prototype_for_code(code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.
 
+        Notes:
+            The returned object belongs to the module-level prototype table and is shared by every caller, so it is
+            read-only. Sharing it is safe because the TransportLayer reads the dtype and the element count of a
+            prototype and builds a new object to hold the received data.
+
         Args:
             code: The prototype code for which to retrieve the prototype object. The code is converted to an integer
                 before lookup.
@@ -1044,10 +1054,7 @@ class SerialPrototypes(IntEnum):
             The prototype object that is either a numpy scalar or shallow array type. If the input code is not one of
             the supported codes, returns None to indicate a matching error.
         """
-        factory = _PROTOTYPE_FACTORIES.get(int(code))
-        if factory is None:
-            return None
-        return factory()
+        return _PROTOTYPE_OBJECTS.get(int(code))
 
     @staticmethod
     def get_byte_size_for_code(code: int) -> int | None:

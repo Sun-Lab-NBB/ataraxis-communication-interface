@@ -261,11 +261,13 @@ def test_discover_microcontroller_jobs_resolves_manifest_controllers(tmp_path):
         _write_manifest_entry(directory=tmp_path, source_id=source_id)
         _write_archive(directory=tmp_path, source_id=source_id)
 
-    universe, possible = discover_microcontroller_jobs(log_directory=tmp_path)
+    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
 
     assert universe == [(EXTRACTION_JOB_NAME, "1"), (EXTRACTION_JOB_NAME, "10"), (EXTRACTION_JOB_NAME, "2")]
     assert possible == universe
     assert all(isinstance(specifier, str) for _, specifier in universe)
+    assert sorted(archives) == ["1", "10", "2"]
+    assert archives["10"] == tmp_path / f"10{LOG_ARCHIVE_SUFFIX}"
 
 
 def test_discover_microcontroller_jobs_deduplicates_repeated_controllers(tmp_path):
@@ -274,10 +276,11 @@ def test_discover_microcontroller_jobs_deduplicates_repeated_controllers(tmp_pat
     _write_manifest_entry(directory=tmp_path, source_id=1)
     _write_archive(directory=tmp_path, source_id=1)
 
-    universe, possible = discover_microcontroller_jobs(log_directory=tmp_path)
+    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
 
     assert universe == [(EXTRACTION_JOB_NAME, "1")]
     assert possible == [(EXTRACTION_JOB_NAME, "1")]
+    assert sorted(archives) == ["1"]
 
 
 def test_discover_microcontroller_jobs_finds_manifest_and_archives_in_subdirectories(tmp_path):
@@ -287,10 +290,11 @@ def test_discover_microcontroller_jobs_finds_manifest_and_archives_in_subdirecto
     _write_manifest_entry(directory=logger_directory, source_id=3)
     _write_archive(directory=logger_directory / "archives", source_id=3)
 
-    universe, possible = discover_microcontroller_jobs(log_directory=tmp_path)
+    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
 
     assert universe == [(EXTRACTION_JOB_NAME, "3")]
     assert possible == [(EXTRACTION_JOB_NAME, "3")]
+    assert archives["3"] == logger_directory / "archives" / f"3{LOG_ARCHIVE_SUFFIX}"
 
 
 def test_discover_microcontroller_jobs_excludes_controller_without_archive(tmp_path):
@@ -299,10 +303,11 @@ def test_discover_microcontroller_jobs_excludes_controller_without_archive(tmp_p
     _write_manifest_entry(directory=tmp_path, source_id=2)
     _write_archive(directory=tmp_path, source_id=1)
 
-    universe, possible = discover_microcontroller_jobs(log_directory=tmp_path)
+    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
 
     assert universe == [(EXTRACTION_JOB_NAME, "1"), (EXTRACTION_JOB_NAME, "2")]
     assert possible == [(EXTRACTION_JOB_NAME, "1")]
+    assert sorted(archives) == ["1"]
 
 
 def test_discover_microcontroller_jobs_excludes_ambiguous_controller(tmp_path):
@@ -313,10 +318,11 @@ def test_discover_microcontroller_jobs_excludes_ambiguous_controller(tmp_path):
     _write_archive(directory=tmp_path / "logger_one", source_id=2)
     _write_archive(directory=tmp_path / "logger_two", source_id=2)
 
-    universe, possible = discover_microcontroller_jobs(log_directory=tmp_path)
+    universe, possible, archives = discover_microcontroller_jobs(log_directory=tmp_path)
 
     assert universe == [(EXTRACTION_JOB_NAME, "1"), (EXTRACTION_JOB_NAME, "2")]
     assert possible == [(EXTRACTION_JOB_NAME, "1")]
+    assert archives["1"] == tmp_path / "logger_one" / f"1{LOG_ARCHIVE_SUFFIX}"
 
 
 def test_find_module_feathers(tmp_path: Path) -> None:

@@ -85,7 +85,9 @@ class PendingJob:
         return str(self.tracker_path), self.job_id
 
 
-def discover_microcontroller_jobs(log_directory: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+def discover_microcontroller_jobs(
+    log_directory: Path,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], dict[str, Path]]:
     """Resolves the data extraction job universe and the subset backed by an archive on disk.
 
     Notes:
@@ -98,7 +100,9 @@ def discover_microcontroller_jobs(log_directory: Path) -> tuple[list[tuple[str, 
 
     Returns:
         The full job universe the manifest defines and the subset whose archives resolve to exactly one file, each as
-        a list of job name and source identifier pairs.
+        a list of job name and source identifier pairs, followed by the resolved archive path of every source in that
+        subset, keyed by the source identifier. Carrying the paths lets a caller dispatch without searching the tree a
+        second time for the archives this pass already found.
 
     Raises:
         FileNotFoundError: If the log directory does not exist, is not a directory, or holds no microcontroller
@@ -141,13 +145,11 @@ def discover_microcontroller_jobs(log_directory: Path) -> tuple[list[tuple[str, 
         directory=log_directory,
         marker_names=[f"{source_id}{LOG_ARCHIVE_SUFFIX}" for source_id in source_ids],
     )
-    possible = [
-        (EXTRACTION_JOB_NAME, source_id)
-        for source_id in source_ids
-        if len(archives[f"{source_id}{LOG_ARCHIVE_SUFFIX}"]) == 1
-    ]
+    matches = {source_id: archives[f"{source_id}{LOG_ARCHIVE_SUFFIX}"] for source_id in source_ids}
+    resolved = {source_id: paths[0] for source_id, paths in matches.items() if len(paths) == 1}
+    possible = [(EXTRACTION_JOB_NAME, source_id) for source_id in resolved]
 
-    return universe, possible
+    return universe, possible, resolved
 
 
 def generate_job_ids(source_ids: list[str]) -> dict[str, str]:

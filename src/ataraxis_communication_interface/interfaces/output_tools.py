@@ -79,7 +79,10 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
             entry["type"] = "unknown"
 
         try:
-            dataframe = pl.read_ipc(source=feather_file)
+            # Reads the schema block and a projected row count, so the payload column stays on disk. The verification
+            # below reads the column names and the row count alone, which both of these supply.
+            schema = pl.read_ipc_schema(source=feather_file)
+            row_count = pl.scan_ipc(source=feather_file).select(pl.len()).collect().item()
         except Exception as error:
             entry["valid"] = False
             entry["error"] = f"Unable to read feather file: {error}"
@@ -87,12 +90,13 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
             file_results.append(entry)
             continue
 
-        actual_columns = set(dataframe.columns)
+        columns = list(schema)
+        actual_columns = set(columns)
         schema_valid = actual_columns == expected_columns
 
         entry["valid"] = schema_valid
-        entry["columns"] = dataframe.columns
-        entry["row_count"] = dataframe.height
+        entry["columns"] = columns
+        entry["row_count"] = row_count
 
         if not schema_valid:
             missing = expected_columns - actual_columns
@@ -241,12 +245,22 @@ def _analyze_single_event_feather(
         return {"file": feather_file, "error": f"Path is not a file: {feather_file}"}
 
     try:
-        dataframe = pl.read_ipc(source=file_path)
+        schema = pl.read_ipc_schema(source=file_path)
     except Exception as error:
         return {"file": feather_file, "error": f"Unable to read feather file: {error}"}
 
-    if ExtractedDataColumns.TIMESTAMP not in dataframe.columns:
-        return {"file": feather_file, "error": f"Missing required 'timestamp_us' column. Found: {dataframe.columns}"}
+    columns = list(schema)
+    if ExtractedDataColumns.TIMESTAMP not in columns:
+        return {"file": feather_file, "error": f"Missing required 'timestamp_us' column. Found: {columns}"}
+
+    # Projects the fixed-width columns every statistic below reads, so the dtype and payload columns are loaded only
+    # for the handful of sample rows the response carries.
+    statistic_columns = [
+        column
+        for column in (ExtractedDataColumns.TIMESTAMP, ExtractedDataColumns.COMMAND, ExtractedDataColumns.EVENT)
+        if column in columns
+    ]
+    dataframe = pl.scan_ipc(source=file_path).select(statistic_columns).collect()
 
     total_rows = dataframe.height
 
@@ -331,7 +345,7 @@ def _analyze_single_event_feather(
     # Builds sample rows with binary data omitted for readability.
     sample_rows: list[dict[str, Any]] = []
     sample_count = min(max_sample_rows, total_rows)
-    sample_df = dataframe.head(sample_count)
+    sample_df = pl.scan_ipc(source=file_path).head(sample_count).collect()
 
     for row in sample_df.iter_rows(named=True):
         sample_entry: dict[str, Any] = {ExtractedDataColumns.TIMESTAMP: int(row[ExtractedDataColumns.TIMESTAMP])}

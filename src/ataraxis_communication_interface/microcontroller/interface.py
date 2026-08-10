@@ -1216,14 +1216,15 @@ class MicroControllerInterface:  # pragma: no cover
                 # Module class of the firmware and are resolved by this library, and the codes at or above that bound
                 # are assigned by module developers to communicate states and errors.
                 elif isinstance(incoming_data, (ModuleState, ModuleData)):
-                    # Computes the combined type and id code for the incoming data. This is used to find the specific
+                    # Reads the combined type and id code of the incoming data. This is used to find the specific
                     # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
                     # additional processing methods.
-                    target_type_id: np.uint16 = np.uint16(
-                        (incoming_data.module_type.astype(np.uint16) << 8) | incoming_data.module_id.astype(np.uint16)
-                    )
+                    target_type_id: np.uint16 = incoming_data.type_id
 
-                    if incoming_data.event < MINIMUM_CUSTOM_STATUS_CODE:
+                    # Binds the event code once, as the branches below test it against three separate collections.
+                    event = incoming_data.event
+
+                    if event < MINIMUM_CUSTOM_STATUS_CODE:
                         MicroControllerInterface._parse_service_module_data(
                             incoming_data=incoming_data,
                             controller_id=controller_id,
@@ -1232,30 +1233,28 @@ class MicroControllerInterface:  # pragma: no cover
                         )
                     else:
                         # If the interface addressed by the message is not configured to raise errors or process
-                        # the data, ends processing.
-                        if target_type_id not in processing_map:
+                        # the data, ends processing. Otherwise, binds the reference to the targeted interface.
+                        target_module = processing_map.get(target_type_id)
+                        if target_module is None:
                             continue
-
-                        # Otherwise, gets the reference to the targeted interface.
-                        module = processing_map[target_type_id]
 
                         # If the incoming message contains an event code matching one of the interface's error-codes,
                         # raises an error that carries the explanation the interface registered for that code.
-                        explanation = module.error_codes.get(incoming_data.event)
+                        explanation = target_module.error_codes.get(event)
                         if explanation is not None:
                             message = describe_custom_module_error(
                                 message=incoming_data,
                                 controller_id=controller_id,
                                 controller_name=controller_name,
-                                module_name=module.name,
+                                module_name=target_module.name,
                                 description=explanation,
                             )
                             console.error(message=message, error=RuntimeError)
 
                         # Otherwise, if the incoming message is not an error and contains an event-code matching
                         # one of the interface's data-codes, calls the data processing method.
-                        if incoming_data.event in module.data_codes:
-                            module.process_received_data(message=incoming_data)
+                        if event in target_module.data_codes:
+                            target_module.process_received_data(message=incoming_data)
 
         # If an unknown and unhandled exception occurs, prints and flushes the exception message to the terminal
         # before re-raising the exception to terminate the process.

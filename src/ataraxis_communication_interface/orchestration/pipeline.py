@@ -174,7 +174,7 @@ def run_log_processing_pipeline(
     # Builds the universe of every job the manifest could produce: one extraction job per registered controller ID.
     # The universe is a manifest fingerprint, not an invocation fingerprint, so every invocation (full, subset, or
     # single remote job) aligns the tracker against the same set and never resets sibling jobs.
-    universe, _ = discover_microcontroller_jobs(log_directory=log_directory)
+    universe, _, discovered_archives = discover_microcontroller_jobs(log_directory=log_directory)
     universe_ids = [specifier for _, specifier in universe]
 
     # Creates the microcontroller_data subdirectory under the output path. All tracker and feather files go here.
@@ -205,8 +205,14 @@ def run_log_processing_pipeline(
 
         tracker.align_jobs(jobs=universe, universe=universe)
 
+        # Reads the archive the discovery pass already resolved. A source absent from that mapping either has no
+        # archive or has several, and the single-source search raises the error that names which.
+        log_path = discovered_archives.get(source_id)
+        if log_path is None:
+            log_path = find_log_archive(log_directory=log_directory, source_id=source_id)
+
         _execute_sized_job(
-            log_path=find_log_archive(log_directory=log_directory, source_id=source_id),
+            log_path=log_path,
             output_directory=data_path,
             source_id=source_id,
             job_id=job_id,
@@ -219,8 +225,13 @@ def run_log_processing_pipeline(
         source_ids = sorted(controller_configs)
         console.echo(message=f"Resolved {len(source_ids)} controller ID(s) from config: {', '.join(source_ids)}")
 
-        # Resolves all requested archive paths in one pass and validates they belong to the same DataLogger directory.
-        archive_paths = find_log_archives(log_directory=log_directory, source_ids=source_ids)
+        # Reads the requested archive paths from the index the discovery pass already built, and validates they belong
+        # to the same DataLogger directory. A requested source missing from that index either has no archive or has
+        # several, and the multi-source search raises the error that names which.
+        if set(source_ids) <= set(discovered_archives):
+            archive_paths = {source_id: discovered_archives[source_id] for source_id in source_ids}
+        else:
+            archive_paths = find_log_archives(log_directory=log_directory, source_ids=source_ids)
         parent_directories = {path.parent for path in archive_paths.values()}
         if len(parent_directories) > 1:
             message = (
