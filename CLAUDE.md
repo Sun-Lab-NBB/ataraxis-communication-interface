@@ -224,17 +224,17 @@ data from DataLogger archives.
   budget. `pipeline.py` exposes `execute_job()` and `run_log_processing_pipeline()`, which supports local (all jobs)
   and remote (single job by ID) execution modes. Outputs Polars DataFrames as Feather (Arrow IPC) files written
   through `atomic_write()` into a `microcontroller_data/` subdirectory.
-- **MCP Server**: `FastMCP` instance (`name="ataraxis-communication-interface"`, `json_response=True`) defined in
+- **MCP Server**: `MCPServer` instance (`name="ataraxis-communication-interface"`) defined in
   `interfaces/mcp_instance.py`, with 19 tools split across `interfaces/discovery_tools.py`, `config_tools.py`,
   `processing_tools.py`, and `output_tools.py`. The tool modules register on the shared instance via `@mcp.tool()`
-  decorators and are imported for their side effects by the thin `interfaces/mcp_server.py`, which also exposes
-  `run_server()`. Tool categories: microcontroller discovery (2), log archive management (1), manifest management (2),
-  recording discovery (1), extraction config management (3), batch processing execution (2), processing status and
-  management (5), and output verification and cleanup (3). Batch log processing uses `JobExecutionState` (in
-  `orchestration/execution.py`, accessed via `get_execution_state()` / `set_execution_state()`), which admits each
-  job once the running set has room for both the cores and the memory that job's own archive resolved. The MCP server
-  is registered with MCP clients via the **communication** plugin in the ataraxis marketplace, not directly from this
-  repository.
+  decorators and are imported for their side effects by the thin `interfaces/mcp_server.py`, whose `run_server()`
+  enables JSON responses when it starts the streamable-http transport. Tool categories: microcontroller discovery (2),
+  log archive management (1), manifest management (2), recording discovery (1), extraction config management (3),
+  batch processing execution (2), processing status and management (5), and output verification and cleanup (3).
+  Batch log processing uses `JobExecutionState` (in `orchestration/execution.py`, accessed via
+  `get_execution_state()` / `set_execution_state()`), which admits each job once the running set has room for both the
+  cores and the memory that job's own archive resolved. The MCP server is registered with MCP clients via the
+  **communication** plugin in the ataraxis marketplace, not directly from this repository.
 - **CLI**: Click command group (`axci`) with `id` for microcontroller discovery, `mqtt` for broker verification,
   `config` subgroup (`create`, `show`) for extraction configuration management, `process` for log data processing,
   and `mcp` for starting the MCP server.

@@ -302,5 +302,12 @@ def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
     management, log data processing, output verification, and event querying through the MCP protocol, enabling AI
     agents to programmatically interact with the library.
     """
-    console.echo(message=f"Starting AXCI MCP server with {transport} transport...", level=LogLevel.INFO)
+    # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes
+    # every message up to the WARNING level. Silencing the console keeps library output out of that stream, as a
+    # single logged line renders the message it interleaves with unparsable for the connected client.
+    if transport == "stdio":
+        console.disable()
+    else:
+        console.echo(message=f"Starting AXCI MCP server with {transport} transport...", level=LogLevel.INFO)
+
     run_mcp(transport=transport)
