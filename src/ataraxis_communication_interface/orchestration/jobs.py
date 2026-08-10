@@ -1,26 +1,21 @@
-"""Provides the job identity constants, the batch job descriptor, and the manifest-derived job discovery shared by
-every consumer that schedules microcontroller data extraction.
+"""Provides the job identity constants, the output layout names and resolvers, and the descriptor and sizing records
+every consumer that schedules microcontroller data extraction exchanges.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from dataclasses import dataclass
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from dataclasses import fields, dataclass
 
 from ataraxis_base_utilities import console
-from ataraxis_data_structures import (
-    LOG_ARCHIVE_SUFFIX,
-    ProcessingTracker,
-    index_marker_files,
-    discover_marker_files,
-)
-
-from ..microcontroller import MICROCONTROLLER_MANIFEST_FILENAME, MicroControllerManifest
+from ataraxis_data_structures import ProcessingTracker
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Mapping, Sequence
 
-EXTRACTION_JOB_NAME: str = "microcontroller_data_extraction"
+CONTROLLER_EXTRACTION_JOB_NAME: str = "microcontroller_data_extraction"
 """The job name under which microcontroller data extraction is registered in a ProcessingTracker.
 
 Notes:
@@ -28,131 +23,193 @@ Notes:
     tracker already holds and every identifier a scheduler derived independently.
 """
 
-TRACKER_FILENAME: str = "microcontroller_processing_tracker.yaml"
-"""The name of the processing tracker file the pipeline places in its output directory."""
-
-MICROCONTROLLER_DATA_DIRECTORY: str = "microcontroller_data"
-"""The name of the subdirectory the pipeline creates under its output path for tracker and feather files."""
-
-CONTROLLER_FEATHER_PREFIX: str = "controller_"
-"""The prefix of every feather file an extraction job writes."""
-
-MODULE_FEATHER_INFIX: str = "_module_"
-"""The infix separating the controller source identifier from the module type and identifier codes."""
-
-KERNEL_FEATHER_INFIX: str = "_kernel"
-"""The infix identifying the feather file holding kernel messages."""
-
-FEATHER_SUFFIX: str = ".feather"
-"""The filename suffix of every feather (Arrow IPC) file an extraction job writes."""
-
-_MODULE_FEATHER_FIELD_COUNT: int = 5
-"""The underscore-separated fields a module feather filename carries, which are the controller prefix, the source
+_MODULE_FILE_FIELD_COUNT: int = 5
+"""The underscore-separated fields a module output filename carries, which are the controller prefix, the source
 identifier, the module infix, the module type code, and the module identifier code."""
 
 
-@dataclass(slots=True)
-class PendingJob:
-    """Describes a single data extraction job queued for batch execution.
+class OutputLayout(StrEnum):
+    """Defines the filesystem names an extraction job writes its tracker and its output files under."""
+
+    DIRECTORY_NAME = "microcontroller_data"
+    """The subdirectory created under a caller's output path for the tracker and the extracted files."""
+    TRACKER_FILENAME = "microcontroller_processing_tracker.yaml"
+    """The processing tracker file recording the outcome of every job writing to one directory."""
+    FILE_PREFIX = "controller_"
+    """The prefix of every output file an extraction job writes."""
+    MODULE_INFIX = "_module_"
+    """The infix separating the controller source identifier from the module type and identifier codes."""
+    KERNEL_INFIX = "_kernel"
+    """The infix marking an output file as holding kernel messages."""
+    FILE_SUFFIX = ".feather"
+    """The filename suffix of every output (Arrow IPC) file an extraction job writes."""
+
+
+@dataclass(frozen=True, slots=True)
+class JobDescriptor:
+    """Describes one microcontroller data extraction job, addressed by the single log archive it reads.
 
     Notes:
-        The core and memory weights are resolved from the job's own archive before dispatch, so admission weighs each
-        job against the budgets at the size that archive actually demands.
+        Every field is a path, a string, or an integer, so an instance pickles into a spawned worker and crosses a
+        scheduler boundary or a tool payload unchanged.
+
+        The archive path is resolved rather than optional, so a dispatched job never searches the tree.
+
+        The figures a sizing pass produces live in the paired JobSizing record, which a worker never sees.
     """
 
     log_directory: Path
     """The path to the DataLogger output directory whose tree holds the log archive."""
+    archive_path: Path
+    """The path to the .npz log archive this job reads."""
     output_directory: Path
-    """The path to the directory the extracted feather files are written to."""
+    """The path to the directory this job writes its output files into."""
+    config_path: Path
+    """The path to the ExtractionConfig .yaml file naming the events this job extracts.
+
+    Notes:
+        A controller declares its extraction targets in a configuration file rather than in the archive, so the
+        descriptor carries the file the job body reads them from.
+    """
     tracker_path: Path
     """The path to the ProcessingTracker file that records this job's outcome."""
+    job_name: str
+    """The tracker job name this job is registered under."""
     job_id: str
-    """The unique hexadecimal identifier for this job in the tracker."""
+    """The unique hexadecimal identifier of this job in its tracker."""
     source_id: str
     """The identifier of the controller source whose archive this job reads."""
-    config_path: Path
-    """The path to the ExtractionConfig .yaml file naming the events this job extracts."""
-    core_weight: int = 1
-    """The cores this job occupies while it runs."""
-    memory_mb: int = 0
-    """The memory this job occupies while it runs, estimated from the archive it reads."""
-    archive_path: Path | None = None
-    """The path to the archive this job reads, resolved while the job is sized, or None when it did not resolve."""
+    core_weight: int
+    """The cores this job occupies while it runs, which is the width of the extraction pool its body opens."""
+
+    @classmethod
+    def for_archive(
+        cls,
+        archive_path: Path,
+        output_directory: Path,
+        config_path: Path,
+        tracker_path: Path,
+        source_id: str,
+        log_directory: Path | None = None,
+        core_weight: int = 1,
+    ) -> JobDescriptor:
+        """Builds a descriptor for one archive an external scheduler has already resolved.
+
+        Notes:
+            Derives the job identifier as this library's own preparation does, so one built here addresses the same
+            tracker entry.
+
+        Args:
+            archive_path: The path to the .npz log archive the job reads.
+            output_directory: The path to the directory the job writes its output files into.
+            config_path: The path to the ExtractionConfig .yaml file naming the events the job extracts.
+            tracker_path: The path to the ProcessingTracker file that records the job's outcome.
+            source_id: The identifier of the controller source whose archive the job reads.
+            log_directory: The path to the DataLogger output directory holding the archive. Leaving this unset uses
+                the archive's own parent directory.
+            core_weight: The cores the job occupies while it runs.
+
+        Returns:
+            The built descriptor.
+        """
+        return cls(
+            log_directory=log_directory if log_directory is not None else archive_path.parent,
+            archive_path=archive_path,
+            output_directory=output_directory,
+            config_path=config_path,
+            tracker_path=tracker_path,
+            job_name=CONTROLLER_EXTRACTION_JOB_NAME,
+            job_id=ProcessingTracker.generate_job_id(job_name=CONTROLLER_EXTRACTION_JOB_NAME, specifier=source_id),
+            source_id=source_id,
+            core_weight=core_weight,
+        )
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> JobDescriptor:
+        """Reconstructs a descriptor from the mapping a caller received across a tool boundary.
+
+        Args:
+            mapping: The mapping to read, carrying every field name to_mapping writes.
+
+        Returns:
+            The reconstructed descriptor.
+
+        Raises:
+            ValueError: If a required key is absent, or if a value cannot be read as the type its field declares.
+        """
+        field_names = tuple(field.name for field in fields(cls))
+        missing_keys = [name for name in field_names if name not in mapping]
+
+        if missing_keys:
+            message = (
+                f"Unable to read a microcontroller data extraction job descriptor from the supplied mapping. The "
+                f"following required keys are absent: {', '.join(sorted(missing_keys))}. A descriptor mapping "
+                f"carries every key the descriptor writes: {', '.join(field_names)}."
+            )
+            console.error(message=message, error=ValueError)
+
+        try:
+            return cls(
+                log_directory=Path(mapping["log_directory"]),
+                archive_path=Path(mapping["archive_path"]),
+                output_directory=Path(mapping["output_directory"]),
+                config_path=Path(mapping["config_path"]),
+                tracker_path=Path(mapping["tracker_path"]),
+                job_name=str(mapping["job_name"]),
+                job_id=str(mapping["job_id"]),
+                source_id=str(mapping["source_id"]),
+                core_weight=int(mapping["core_weight"]),
+            )
+        except (TypeError, ValueError) as error:
+            message = (
+                f"Unable to read a microcontroller data extraction job descriptor from the supplied mapping. One of "
+                f"its values cannot be read as the type its field declares: {error}."
+            )
+            console.error(message=message, error=ValueError)
+            raise  # pragma: no cover - console.error always raises, this satisfies the linter's return analysis.
 
     @property
     def dispatch_key(self) -> tuple[str, str]:
-        """Returns the composite tracker path and job identifier pair that identifies this job across the batch."""
+        """Returns the tracker path and job identifier pair that identifies this job across the batch."""
         return str(self.tracker_path), self.job_id
 
+    def to_mapping(self) -> dict[str, str | int]:
+        """Renders this descriptor as the flat mapping the interface layer exchanges.
 
-def discover_microcontroller_jobs(
-    log_directory: Path,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]], dict[str, Path]]:
-    """Resolves the data extraction job universe and the subset backed by an archive on disk.
+        Notes:
+            Every value is a string or an integer, so the mapping reconstructs through from_mapping without loss.
 
-    Notes:
-        The universe is a manifest fingerprint rather than an invocation fingerprint, so every invocation aligns a
-        tracker against the same set and no invocation resets the jobs it did not request. The microcontroller manifest
-        also gates the discovery, which keeps archives written by other libraries out of the resolved set.
-
-    Args:
-        log_directory: The root directory whose tree is searched for the microcontroller manifest and the log archives.
-
-    Returns:
-        The full job universe the manifest defines and the subset whose archives resolve to exactly one file, each as
-        a list of job name and source identifier pairs, followed by the resolved archive path of every source in that
-        subset, keyed by the source identifier. Carrying the paths lets a caller dispatch without searching the tree a
-        second time for the archives this pass already found.
-
-    Raises:
-        FileNotFoundError: If the log directory does not exist, is not a directory, or holds no microcontroller
-            manifest.
-        OSError: If any directory beneath the log directory cannot be read.
-        ValueError: If the microcontroller manifest registers no controllers.
-    """
-    if not log_directory.is_dir():
-        message = (
-            f"Unable to discover microcontroller data extraction jobs in '{log_directory}'. The path does not exist "
-            f"or is not a directory."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    candidates = discover_marker_files(directory=log_directory, marker_name=MICROCONTROLLER_MANIFEST_FILENAME)
-    if not candidates:
-        message = (
-            f"Unable to discover microcontroller data extraction jobs in '{log_directory}'. No "
-            f"{MICROCONTROLLER_MANIFEST_FILENAME} was found. A microcontroller manifest is required to identify which "
-            f"log archives were produced by ataraxis-communication-interface."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    manifest = MicroControllerManifest.from_yaml(file_path=candidates[0])
-    source_ids = sorted({str(controller.id) for controller in manifest.controllers})
-
-    if not source_ids:
-        message = (
-            f"Unable to discover microcontroller data extraction jobs in '{log_directory}'. The "
-            f"{MICROCONTROLLER_MANIFEST_FILENAME} at '{candidates[0]}' contains no controller entries."
-        )
-        console.error(message=message, error=ValueError)
-
-    universe = [(EXTRACTION_JOB_NAME, source_id) for source_id in source_ids]
-
-    # Indexes every source's archive in one pass, since the archive names are known once the manifest resolves. A
-    # source whose name resolves to several archives spans several loggers, which is ambiguous rather than redundant,
-    # so it is left out of the possible set alongside the sources holding no archive at all.
-    archives = index_marker_files(
-        directory=log_directory,
-        marker_names=[f"{source_id}{LOG_ARCHIVE_SUFFIX}" for source_id in source_ids],
-    )
-    matches = {source_id: archives[f"{source_id}{LOG_ARCHIVE_SUFFIX}"] for source_id in source_ids}
-    resolved = {source_id: paths[0] for source_id, paths in matches.items() if len(paths) == 1}
-    possible = [(EXTRACTION_JOB_NAME, source_id) for source_id in resolved]
-
-    return universe, possible, resolved
+        Returns:
+            The descriptor's fields keyed by their field names, with every path rendered as a string.
+        """
+        return {
+            "log_directory": str(self.log_directory),
+            "archive_path": str(self.archive_path),
+            "output_directory": str(self.output_directory),
+            "config_path": str(self.config_path),
+            "tracker_path": str(self.tracker_path),
+            "job_name": self.job_name,
+            "job_id": self.job_id,
+            "source_id": self.source_id,
+            "core_weight": self.core_weight,
+        }
 
 
-def generate_job_ids(source_ids: list[str]) -> dict[str, str]:
+@dataclass(frozen=True, slots=True)
+class JobSizing:
+    """Describes the resource figures one sizing pass resolved for a single extraction job."""
+
+    memory_mb: int
+    """The memory the job occupies while it runs, estimated from the archive it reads."""
+    message_count: int
+    """The data messages the archive holds, as the sizing pass read them."""
+    archive_bytes: int
+    """The size of the archive on disk, in bytes, as the sizing pass read it."""
+    modeled: bool
+    """Determines whether the figures follow from the archive's own properties rather than from the job baseline."""
+
+
+def generate_job_ids(source_ids: Sequence[str]) -> dict[str, str]:
     """Generates the processing job identifier of every requested controller source.
 
     Args:
@@ -162,13 +219,37 @@ def generate_job_ids(source_ids: list[str]) -> dict[str, str]:
         The generated hexadecimal job identifier of each source, keyed by that source identifier.
     """
     return {
-        source_id: ProcessingTracker.generate_job_id(job_name=EXTRACTION_JOB_NAME, specifier=source_id)
+        source_id: ProcessingTracker.generate_job_id(job_name=CONTROLLER_EXTRACTION_JOB_NAME, specifier=source_id)
         for source_id in source_ids
     }
 
 
-def resolve_module_feather_path(output_directory: Path, source_id: str, module_type: int, module_id: int) -> Path:
-    """Resolves the path of the feather file holding the target module's extracted messages.
+def resolve_output_directory(output_directory: Path) -> Path:
+    """Resolves the subdirectory the extraction output and its tracker are written into.
+
+    Args:
+        output_directory: The root output directory the caller nominated.
+
+    Returns:
+        The path to the library's own subdirectory under the nominated root.
+    """
+    return output_directory / OutputLayout.DIRECTORY_NAME
+
+
+def resolve_tracker_path(output_directory: Path) -> Path:
+    """Resolves the path of the processing tracker recording the outcome of every job writing to a directory.
+
+    Args:
+        output_directory: The directory the extraction jobs write their output into.
+
+    Returns:
+        The path to the tracker file.
+    """
+    return output_directory / OutputLayout.TRACKER_FILENAME
+
+
+def resolve_module_path(output_directory: Path, source_id: str, module_type: int, module_id: int) -> Path:
+    """Resolves the path of the file holding the target module's extracted messages.
 
     Args:
         output_directory: The directory the extraction job writes its output into.
@@ -177,70 +258,76 @@ def resolve_module_feather_path(output_directory: Path, source_id: str, module_t
         module_id: The unique identifier code of the hardware module.
 
     Returns:
-        The path to the module's message feather file.
+        The path to the module's message file.
     """
-    filename = f"{CONTROLLER_FEATHER_PREFIX}{source_id}{MODULE_FEATHER_INFIX}{module_type}_{module_id}{FEATHER_SUFFIX}"
+    filename = (
+        f"{OutputLayout.FILE_PREFIX}{source_id}{OutputLayout.MODULE_INFIX}{module_type}_{module_id}"
+        f"{OutputLayout.FILE_SUFFIX}"
+    )
     return output_directory / filename
 
 
-def find_module_feathers(data_directory: Path) -> list[Path]:
-    """Discovers every module feather file an extraction job wrote into the target directory.
-
-    Args:
-        data_directory: The directory the extraction jobs write their output into.
-
-    Returns:
-        The paths to every module feather file the directory holds, sorted by path, and an empty list when the
-        directory does not exist.
-    """
-    if not data_directory.is_dir():
-        return []
-    return sorted(data_directory.glob(f"{CONTROLLER_FEATHER_PREFIX}*{MODULE_FEATHER_INFIX}*{FEATHER_SUFFIX}"))
-
-
-def parse_module_feather_name(feather_path: Path) -> tuple[int, int, int]:
-    """Reads the controller source, the module type, and the module identifier a module feather filename encodes.
-
-    Notes:
-        Inverts resolve_module_feather_path(), so a consumer recovers the identity of the module a feather holds
-        from the file alone rather than from the manifest that named it.
-
-    Args:
-        feather_path: The path to the module feather file to read the identity of.
-
-    Returns:
-        The controller source identifier, the module type code, and the module identifier code, in that order.
-
-    Raises:
-        ValueError: If the filename does not follow the module feather naming convention, or if any of its three
-            identity fields is not an integer.
-    """
-    parts = feather_path.stem.split("_")
-
-    if (
-        len(parts) != _MODULE_FEATHER_FIELD_COUNT
-        or f"{parts[0]}_" != CONTROLLER_FEATHER_PREFIX
-        or f"_{parts[2]}_" != MODULE_FEATHER_INFIX
-        or not all(field.isdigit() for field in (parts[1], parts[3], parts[4]))
-    ):
-        message = (
-            f"Unable to parse the module feather filename '{feather_path.name}'. The filename does not follow the "
-            f"'{CONTROLLER_FEATHER_PREFIX}{{source_id}}{MODULE_FEATHER_INFIX}{{module_type}}_{{module_id}}"
-            f"{FEATHER_SUFFIX}' naming convention."
-        )
-        console.error(message=message, error=ValueError)
-
-    return int(parts[1]), int(parts[3]), int(parts[4])
-
-
-def resolve_kernel_feather_path(output_directory: Path, source_id: str) -> Path:
-    """Resolves the path of the feather file holding the target source's extracted kernel messages.
+def resolve_kernel_path(output_directory: Path, source_id: str) -> Path:
+    """Resolves the path of the file holding the target source's extracted kernel messages.
 
     Args:
         output_directory: The directory the extraction job writes its output into.
         source_id: The identifier of the controller source whose kernel messages the file holds.
 
     Returns:
-        The path to the source's kernel message feather file.
+        The path to the source's kernel message file.
     """
-    return output_directory / f"{CONTROLLER_FEATHER_PREFIX}{source_id}{KERNEL_FEATHER_INFIX}{FEATHER_SUFFIX}"
+    filename = f"{OutputLayout.FILE_PREFIX}{source_id}{OutputLayout.KERNEL_INFIX}{OutputLayout.FILE_SUFFIX}"
+    return output_directory / filename
+
+
+def find_module_paths(data_directory: Path) -> list[Path]:
+    """Discovers every module output file an extraction job wrote into the target directory.
+
+    Args:
+        data_directory: The directory the extraction jobs write their output into.
+
+    Returns:
+        The paths to every module output file the directory holds, sorted by path, and an empty list when the
+        directory does not exist.
+    """
+    if not data_directory.is_dir():
+        return []
+
+    pattern = f"{OutputLayout.FILE_PREFIX}*{OutputLayout.MODULE_INFIX}*{OutputLayout.FILE_SUFFIX}"
+    return sorted(data_directory.glob(pattern))
+
+
+def parse_module_path(file_path: Path) -> tuple[int, int, int]:
+    """Reads the controller source, the module type, and the module identifier a module output filename encodes.
+
+    Notes:
+        Inverts resolve_module_path(), so a consumer recovers the identity of the module a file holds from the file
+        alone rather than from the manifest that named it.
+
+    Args:
+        file_path: The path to the module output file to read the identity of.
+
+    Returns:
+        The controller source identifier, the module type code, and the module identifier code, in that order.
+
+    Raises:
+        ValueError: If the filename does not follow the module output naming convention, or if any of its three
+            identity fields is not an integer.
+    """
+    parts = file_path.stem.split("_")
+
+    if (
+        len(parts) != _MODULE_FILE_FIELD_COUNT
+        or f"{parts[0]}_" != OutputLayout.FILE_PREFIX
+        or f"_{parts[2]}_" != OutputLayout.MODULE_INFIX
+        or not all(field.isdigit() for field in (parts[1], parts[3], parts[4]))
+    ):
+        message = (
+            f"Unable to parse the module output filename '{file_path.name}'. The filename does not follow the "
+            f"'{OutputLayout.FILE_PREFIX}{{source_id}}{OutputLayout.MODULE_INFIX}{{module_type}}_{{module_id}}"
+            f"{OutputLayout.FILE_SUFFIX}' naming convention."
+        )
+        console.error(message=message, error=ValueError)
+
+    return int(parts[1]), int(parts[3]), int(parts[4])

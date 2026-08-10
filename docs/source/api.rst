@@ -36,14 +36,9 @@ Orchestration
    :show-inheritance:
 
 .. Documents the package constants explicitly, for the reason given above the MicroController autodata directives.
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.EXTRACTION_JOB_NAME
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.TRACKER_FILENAME
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.MICROCONTROLLER_DATA_DIRECTORY
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.CONTROLLER_FEATHER_PREFIX
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.MODULE_FEATHER_INFIX
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.KERNEL_FEATHER_INFIX
-.. autodata:: ataraxis_communication_interface.orchestration.jobs.FEATHER_SUFFIX
-.. autodata:: ataraxis_communication_interface.orchestration.allocation.EXTRACTION_JOB_CORES
+.. autodata:: ataraxis_communication_interface.orchestration.jobs.CONTROLLER_EXTRACTION_JOB_NAME
+.. autodata:: ataraxis_communication_interface.orchestration.allocation.CONTROLLER_EXTRACTION_JOB_CORES
+.. autodata:: ataraxis_communication_interface.orchestration.allocation.SPAWNED_CHILD_MEMORY_MB
 
 CLI
 ===
