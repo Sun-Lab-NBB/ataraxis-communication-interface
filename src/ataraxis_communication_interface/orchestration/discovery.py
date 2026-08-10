@@ -270,8 +270,9 @@ def prepare_jobs(
         FileNotFoundError: If the log directory or the configuration file does not exist, or if a requested source's
             archive is absent under strict sourcing.
         ValueError: If the tree holds more than one manifest, if a manifest registers no sources, if the
-            configuration declares no controllers, if a requested source or job identifier is not registered, or if
-            the resolved archives span several directories.
+            configuration declares no controllers, if a job identifier matches no configured controller, if a
+            requested source is registered by neither the manifest nor the configuration under strict sourcing, or
+            if the resolved archives span several directories.
         OSError: If any directory beneath the log directory cannot be read.
     """
     if not config_path.is_file():
@@ -305,7 +306,7 @@ def prepare_jobs(
             core_ceiling=ceiling,
         )
 
-    configured_ids = _resolve_configured_ids(config_path=config_path, registered_ids=registered_ids)
+    configured_ids, unregistered_ids = _resolve_configured_ids(config_path=config_path, registered_ids=registered_ids)
 
     if job_id is not None:
         # An identifier names one job, so the requested set is the source whose identifier matches it. Resolving it
@@ -326,8 +327,26 @@ def prepare_jobs(
     else:
         requested_ids = sorted(source_ids) if source_ids else configured_ids
 
+    # A controller the configuration declares but the manifest does not register bears on this call only when it is
+    # requested, so a shared configuration spanning several recordings still prepares the sources each one holds.
+    unregistered_requests = sorted(set(requested_ids) & set(unregistered_ids))
     unconfigured_ids = [source_id for source_id in requested_ids if source_id not in configured_ids]
     skipped: list[tuple[str, str]] = []
+
+    if unregistered_requests:
+        message = (
+            f"Unable to prepare microcontroller data extraction jobs using the extraction config at "
+            f"'{config_path}'. The following controller IDs are not registered in the "
+            f"{MICROCONTROLLER_MANIFEST_FILENAME}: {', '.join(unregistered_requests)}. The corresponding log "
+            f"archives were not produced by ataraxis-communication-interface. Registered IDs: "
+            f"{', '.join(registered_ids)}."
+        )
+        if strict_sources:
+            console.error(message=message, error=ValueError)
+        skipped.extend(
+            (source_id, "The controller is absent from the microcontroller manifest.")
+            for source_id in unregistered_requests
+        )
 
     if unconfigured_ids:
         message = (
@@ -342,7 +361,9 @@ def prepare_jobs(
         )
 
     unresolved_ids = [
-        source_id for source_id in requested_ids if source_id in configured_ids and source_id not in archives
+        source_id
+        for source_id in requested_ids
+        if source_id in configured_ids and source_id not in unregistered_ids and source_id not in archives
     ]
 
     if unresolved_ids:
@@ -444,19 +465,19 @@ def size_job(job: JobDescriptor, core_ceiling: int = -1) -> tuple[JobDescriptor,
     )
 
 
-def _resolve_configured_ids(config_path: Path, registered_ids: Sequence[str]) -> list[str]:
-    """Reads the extraction configuration and validates its controllers against the manifest job universe.
+def _resolve_configured_ids(config_path: Path, registered_ids: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Reads the extraction configuration and resolves its controllers against the manifest job universe.
 
     Args:
         config_path: The path to the extraction configuration .yaml file.
         registered_ids: The controller source identifiers the microcontroller manifest registers.
 
     Returns:
-        The controller source identifiers the configuration declares, in ascending order.
+        The controller source identifiers the configuration declares, and the subset of them the manifest does not
+        register, both in ascending order.
 
     Raises:
-        ValueError: If the configuration declares no controllers, or if it declares a controller the manifest does
-            not register.
+        ValueError: If the configuration declares no controllers.
     """
     resolved_config = ExtractionConfig.from_yaml(file_path=config_path)
     configured_ids = sorted({str(controller.controller_id) for controller in resolved_config.controllers})
@@ -468,14 +489,4 @@ def _resolve_configured_ids(config_path: Path, registered_ids: Sequence[str]) ->
         )
         console.error(message=message, error=ValueError)
 
-    unregistered_ids = sorted(set(configured_ids) - set(registered_ids))
-    if unregistered_ids:
-        message = (
-            f"Unable to prepare microcontroller data extraction jobs using the extraction config at "
-            f"'{config_path}'. The following controller IDs are not registered in the "
-            f"{MICROCONTROLLER_MANIFEST_FILENAME}: {', '.join(unregistered_ids)}. The corresponding log archives "
-            f"were not produced by ataraxis-communication-interface. Registered IDs: {', '.join(registered_ids)}."
-        )
-        console.error(message=message, error=ValueError)
-
-    return configured_ids
+    return configured_ids, sorted(set(configured_ids) - set(registered_ids))

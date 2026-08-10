@@ -34,6 +34,7 @@ from ataraxis_communication_interface.communication import (
     RepeatedModuleCommand,
     ControllerIdentification,
 )
+from ataraxis_communication_interface.communication.messages import _MAXIMUM_PARAMETERS_SIZE
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -266,6 +267,8 @@ def test_repeated_module_command() -> None:
     assert command.packed_data.dtype == np.uint8
     assert command.packed_data.size == 10
     assert np.array_equal(command.packed_data[0:6], [command.protocol_code, 1, 2, 4, 3, False])
+    # The firmware reads the cycle delay as a little-endian uint32, so the trailing bytes pin the value and the order.
+    assert command.packed_data[6:10].tobytes() == np.uint32(1000).tobytes()
 
     # Verifies repr.
     expected_repr = (
@@ -371,12 +374,52 @@ def test_module_parameters() -> None:
     assert params.packed_data.size > 4  # Header size is 4 bytes
     assert np.array_equal(params.packed_data[0:4], [params.protocol_code, 1, 2, 6])
 
+    # The serialized body concatenates each parameter's own bytes in declaration order, so comparing against that
+    # concatenation pins the order, the per-parameter widths, and the absence of any padding between them.
+    expected_body = np.uint8(3).tobytes() + np.uint16(4).tobytes() + np.float32(5.0).tobytes()
+    assert params.parameters_size == len(expected_body)
+    assert params.packed_data[4:].tobytes() == expected_body
+
     # Verifies repr.
     expected_repr = (
         f"ModuleParameters(protocol_code={params.protocol_code}, module_type=1, "
         f"module_id=2, return_code=6, parameter_object_size={params.parameters_size} bytes)"
     )
     assert repr(params) == expected_repr
+
+
+def test_module_parameters_maximum_size() -> None:
+    """Verifies that ModuleParameters serializes a parameter tuple that exactly fills the maximum transmittable size."""
+    params = ModuleParameters(
+        module_type=np.uint8(1),
+        module_id=np.uint8(2),
+        parameter_data=tuple(np.uint8(3) for _ in range(_MAXIMUM_PARAMETERS_SIZE)),
+        return_code=np.uint8(6),
+    )
+
+    # The ceiling is inclusive, so the message that exactly fills it packs the four-byte header followed by every
+    # parameter byte.
+    assert isinstance(params.packed_data, np.ndarray)
+    assert params.parameters_size == _MAXIMUM_PARAMETERS_SIZE
+    assert params.packed_data.size == 4 + _MAXIMUM_PARAMETERS_SIZE
+
+
+def test_module_parameters_oversized_error() -> None:
+    """Verifies the error handling of the ModuleParameters class for parameters exceeding the maximum size."""
+    oversized_size = _MAXIMUM_PARAMETERS_SIZE + 1
+
+    message = (
+        f"Unable to serialize the parameters message addressed to the module with ID 2 and type 1. The combined "
+        f"size of the serialized parameter values must be at most {_MAXIMUM_PARAMETERS_SIZE} bytes, but got "
+        f"{oversized_size} bytes."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        ModuleParameters(
+            module_type=np.uint8(1),
+            module_id=np.uint8(2),
+            parameter_data=tuple(np.uint8(3) for _ in range(oversized_size)),
+            return_code=np.uint8(6),
+        )
 
 
 @pytest.mark.parametrize(
@@ -887,6 +930,53 @@ def test_mqtt_communication_send_receive_errors() -> None:
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
         unity_communication.get_data()
+
+
+def test_mqtt_communication_send_data_publish_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that send_data() delivers the payload when the client accepts it for publication."""
+    # Marks the instance as connected without contacting a broker, as the publication status is only evaluated past
+    # the connection guard.
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication._connected = True
+
+    publications: list[tuple[str, Any, int]] = []
+
+    def publish(topic: str, payload: Any, qos: int) -> mqtt.MQTTMessageInfo:
+        """Records the publication arguments and reports that the payload reached the broker."""
+        publications.append((topic, payload, qos))
+        information = mqtt.MQTTMessageInfo(mid=1)
+        information.rc = mqtt.MQTT_ERR_SUCCESS
+        return information
+
+    monkeypatch.setattr(unity_communication._client, "publish", publish)
+
+    unity_communication.send_data(topic=TEST_TOPICS[0], payload="test message")
+
+    assert publications == [(TEST_TOPICS[0], "test message", 0)]
+
+
+def test_mqtt_communication_send_data_publish_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies the error handling of the MQTTCommunication send_data() method for a rejected publication."""
+    # Marks the instance as connected without contacting a broker, as the publication status is only evaluated past
+    # the connection guard.
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication._connected = True
+
+    def publish(topic: str, payload: Any, qos: int) -> mqtt.MQTTMessageInfo:
+        """Reports a dropped link through the returned status instead of handing the payload to the broker."""
+        information = mqtt.MQTTMessageInfo(mid=1)
+        information.rc = mqtt.MQTT_ERR_NO_CONN
+        return information
+
+    monkeypatch.setattr(unity_communication._client, "publish", publish)
+
+    failure = mqtt.error_string(mqtt.MQTT_ERR_NO_CONN).removesuffix(".")
+    message = (
+        f"Unable to send data to the MQTT topic {TEST_TOPICS[0]} of the broker at {BROKER_IP}:{BROKER_PORT} via the "
+        f"MQTTCommunication instance. The publication attempt failed with the error: {failure}."
+    )
+    with pytest.raises(ConnectionError, match=error_format(message)):
+        unity_communication.send_data(topic=TEST_TOPICS[0], payload="test message")
 
 
 @pytest.mark.xdist_group(name="group1")

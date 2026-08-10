@@ -4,6 +4,8 @@ import json
 
 import numpy as np
 import polars as pl
+import pytest
+from ataraxis_base_utilities import error_format
 
 from ataraxis_communication_interface.microcontroller.extracted_data import (
     ExtractedDataColumns,
@@ -121,6 +123,115 @@ def test_get_event_data_absent_code() -> None:
     assert timestamps.size == 0
     assert values.dtype == np.float32
     assert values.size == 0
+
+
+def test_get_event_data_array_prototype() -> None:
+    """Verifies that get_event_data returns one row of values per message for an array prototype event code."""
+    payloads = [np.array(values, dtype=np.uint16).tobytes() for values in ((1, 2), (3, 4), (5, 6))]
+    table = _table([(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(payloads)])
+
+    timestamps, values = get_event_data(
+        partition=partition_events(module_dataframe=table), event_code=20, values_dtype=np.uint32
+    )
+
+    assert values.dtype == np.uint32
+    assert values.shape == (3, 2)
+    assert len(values) == len(timestamps)
+    assert values.tolist() == [[1, 2], [3, 4], [5, 6]]
+
+    # A scalar prototype has its trailing value axis squeezed, so the same three messages carrying one value each
+    # still decode into a 1-D array holding one value per timestamp.
+    scalar_payloads = [np.uint16(value).tobytes() for value in (1, 3, 5)]
+    scalar_table = _table(
+        [(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(scalar_payloads)]
+    )
+
+    scalar_timestamps, scalar_values = get_event_data(
+        partition=partition_events(module_dataframe=scalar_table), event_code=20, values_dtype=np.uint32
+    )
+
+    assert scalar_values.shape == (3,)
+    assert len(scalar_values) == len(scalar_timestamps)
+    assert scalar_values.tolist() == [1, 3, 5]
+
+
+def test_get_event_data_state_only_event() -> None:
+    """Verifies that get_event_data refuses to read the data values of a state-only event code."""
+    messages = ExtractedMessages(
+        timestamps=np.array([100, 200], dtype=np.uint64),
+        commands=np.array([1, 1], dtype=np.uint8),
+        events=np.array([20, 20], dtype=np.uint8),
+        dtypes=(None, None),
+        data_payloads=(None, None),
+    )
+    partition = partition_events(module_dataframe=build_message_dataframe(messages=messages))
+
+    message = (
+        "Unable to read the data values of the messages carrying event code 20. The messages of this event code "
+        "store no data payload, which marks the code as a state-only event. Read the arrival timestamps of a "
+        "state-only event through get_event_timestamps()."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        get_event_data(partition=partition, event_code=20, values_dtype=np.uint32)
+
+
+def test_get_event_data_null_payload_inside_decodable_stream() -> None:
+    """Verifies that get_event_data refuses to decode a stream mixing a null payload into typed payloads."""
+    messages = ExtractedMessages(
+        timestamps=np.array([100, 200], dtype=np.uint64),
+        commands=np.array([1, 1], dtype=np.uint8),
+        events=np.array([20, 20], dtype=np.uint8),
+        dtypes=("uint16", None),
+        data_payloads=(np.uint16(172).tobytes(), None),
+    )
+    partition = partition_events(module_dataframe=build_message_dataframe(messages=messages))
+
+    message = (
+        "Unable to read the data values of the messages carrying event code 20. At least one of these messages "
+        "stores a null payload while the rest store data under the uint16 dtype, which marks the payload-free "
+        "messages as carrying a prototype code this library does not recognize."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        get_event_data(partition=partition, event_code=20, values_dtype=np.uint32)
+
+
+def test_get_event_data_non_uniform_dtype() -> None:
+    """Verifies that get_event_data refuses to decode an event stream storing data under more than one dtype."""
+    table = _table(
+        [
+            (100, 1, 20, "uint16", np.uint16(172).tobytes()),
+            (200, 1, 20, "uint32", np.uint32(5).tobytes()),
+        ]
+    )
+
+    message = (
+        "Unable to read the data values of the messages carrying event code 20. The messages of this event code "
+        "store data under more than one dtype: ['uint16', 'uint32']. The firmware assigns each event code a single "
+        "data object type, so a code storing several dtypes marks a table this library did not write or a firmware "
+        "revision that reused the code."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        get_event_data(partition=partition_events(module_dataframe=table), event_code=20, values_dtype=np.uint32)
+
+
+def test_get_event_data_indivisible_value_count() -> None:
+    """Verifies that get_event_data refuses to pair a value count that is not a whole multiple of the message count."""
+    # The extracted schema stores the dtype string but not the element count, so a stream whose messages share a dtype
+    # while carrying different element counts is caught by the value count alone.
+    table = _table(
+        [
+            (100, 1, 20, "uint16", np.uint16(172).tobytes()),
+            (200, 1, 20, "uint16", np.array((5, 61_000), dtype=np.uint16).tobytes()),
+        ]
+    )
+
+    message = (
+        "Unable to pair the data values of the messages carrying event code 20 with their arrival timestamps. The "
+        "payloads of this event code decode into 3 values, which is not a whole multiple of the 2 messages the table "
+        "stores for the code."
+    )
+    with pytest.raises(ValueError, match=error_format(message)):
+        get_event_data(partition=partition_events(module_dataframe=table), event_code=20, values_dtype=np.uint32)
 
 
 def test_build_message_dataframe() -> None:

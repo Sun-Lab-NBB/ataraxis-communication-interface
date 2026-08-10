@@ -84,7 +84,6 @@ dev = [
     "ataraxis-automation>=9,<10",
 
     # Types
-    "types-paho-mqtt>=1,<2",
     "types-psutil>=7,<8",
     "types-pyserial>=3,<4",
 ]

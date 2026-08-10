@@ -114,6 +114,12 @@ class JobExecutionState:
     is charged, since a break fails every in-flight job whatever caused it."""
 
 
+_execution_lock: Lock = Lock()
+"""Serializes the check-and-reserve that admits one batch execution session at a time. The test of the reference below
+and its replacement sit on opposite sides of a bytecode boundary, so two callers finding the slot free would otherwise
+both publish a session, and the second would strand the first session's worker pool beyond the reach of every
+cancellation tool."""
+
 _execution_state: JobExecutionState | None = None
 """Stores the active execution state for batch log processing jobs, or None when no session exists."""
 
@@ -130,7 +136,41 @@ def set_execution_state(state: JobExecutionState | None) -> None:
         state: The execution state to store, or None to clear the active session.
     """
     global _execution_state
-    _execution_state = state
+
+    with _execution_lock:
+        _execution_state = state
+
+
+def start_execution_session(state: JobExecutionState) -> bool:
+    """Publishes one execution state as the session of record and starts the thread that manages it.
+
+    Notes:
+        The incumbent test, the publication, and the thread start all happen under one lock. A thread reports itself
+        alive only once it has started, so a state published before its thread runs reads as a finished session, and
+        splitting these steps lets two callers each start a manager and double-commit the host's cores and memory.
+
+        A session whose manager thread has ended is replaced, so a completed or an abandoned batch does not block
+        every later batch.
+
+    Args:
+        state: The execution state to publish. Its manager thread is created, recorded, and started here.
+
+    Returns:
+        True when this state became the session of record, and False when a live session already holds that place.
+    """
+    global _execution_state
+
+    with _execution_lock:
+        active = _execution_state
+        if active is not None and active.manager_thread is not None and active.manager_thread.is_alive():
+            return False
+
+        manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+        state.manager_thread = manager
+        _execution_state = state
+        manager.start()
+
+    return True
 
 
 def job_execution_manager(state: JobExecutionState) -> None:
@@ -503,21 +543,28 @@ def _abandon_batch(
 
 
 def _job_is_unrecorded(job: JobDescriptor) -> bool:
-    """Returns True when the target job's tracker entry still reads running rather than a terminal outcome."""
+    """Returns True when the target job's tracker entry still reads running rather than a terminal outcome.
+
+    Notes:
+        A scheduled entry is excluded. A job that reached a worker leaves a running entry behind, so a finished job
+        reading scheduled was reset by an operator asking for a re-run, and recording an outcome over it would
+        discard that re-run.
+    """
     try:
         snapshot = ProcessingTracker(file_path=job.tracker_path).snapshot()
     except Exception:
         return False
 
     state = snapshot.get(job.job_id)
-    return state is not None and state.status not in (ProcessingStatus.SUCCEEDED, ProcessingStatus.FAILED)
+    return state is not None and state.status == ProcessingStatus.RUNNING
 
 
 def _reconcile_unrecorded_job(job: JobDescriptor) -> None:
     """Records a terminal outcome for a job whose body ended without reaching its tracker.
 
     Notes:
-        A body that raised before the tracker's run_job() context opened leaves no recorded outcome.
+        A body killed after the tracker's run_job() context opened leaves its entry reading running with no outcome
+        of its own.
 
     Args:
         job: The finished job to reconcile.

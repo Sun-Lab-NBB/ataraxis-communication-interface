@@ -5,6 +5,7 @@ extraction configurations.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from threading import Lock
 from dataclasses import dataclass
 
 from ataraxis_base_utilities import console
@@ -20,6 +21,9 @@ MICROCONTROLLER_MANIFEST_FILENAME: str = "microcontroller_manifest.yaml"
 EXTRACTION_CONFIGURATION_FILENAME: str = "extraction_configuration.yaml"
 """The default filename used for extraction configuration files."""
 
+_MANIFEST_WRITE_LOCK: Lock = Lock()
+"""The lock that serializes the manifest read-modify-write sequence performed by write_microcontroller_manifest()."""
+
 
 def write_microcontroller_manifest(
     log_directory: Path,
@@ -30,8 +34,8 @@ def write_microcontroller_manifest(
     """Writes or updates the microcontroller manifest file in the specified log directory.
 
     If the manifest file already exists (another MicroControllerInterface instance has already registered), reads the
-    existing manifest, appends the new controller entry, and writes it back. Otherwise, creates a new manifest with a
-    single entry.
+    existing manifest, replaces the entry registered under the same controller_id or appends a new entry when the
+    manifest carries none, and writes it back. Otherwise, creates a new manifest with a single entry.
 
     Args:
         log_directory: The path to the DataLogger output directory where the manifest file is stored.
@@ -40,18 +44,32 @@ def write_microcontroller_manifest(
         modules: A tuple of ModuleSourceData instances describing the hardware modules managed by this controller.
     """
     manifest_path = log_directory / MICROCONTROLLER_MANIFEST_FILENAME
+    entry = MicroControllerSourceData(id=controller_id, name=controller_name, modules=modules)
 
-    # Reads the existing manifest if one has already been written by another MicroControllerInterface instance sharing
-    # this DataLogger.
-    manifest = (
-        MicroControllerManifest.from_yaml(file_path=manifest_path)
-        if manifest_path.exists()
-        else MicroControllerManifest(controllers=[])
-    )
+    # The read, the append, and the write do not form an atomic sequence across the separate threads that concurrent
+    # MCP tool calls run on. The temporary file atomic_write() opens is named per process, so two threads of one
+    # process collide on that name instead of serializing behind it.
+    with _MANIFEST_WRITE_LOCK:
+        # Reads the existing manifest if one has already been written by another MicroControllerInterface instance
+        # sharing this DataLogger.
+        manifest = (
+            MicroControllerManifest.from_yaml(file_path=manifest_path)
+            if manifest_path.exists()
+            else MicroControllerManifest(controllers=[])
+        )
 
-    # Appends the new controller entry and writes the updated manifest back to disk.
-    manifest.controllers.append(MicroControllerSourceData(id=controller_id, name=controller_name, modules=modules))
-    manifest.to_yaml(file_path=manifest_path)
+        # Replaces the entry a re-registering controller already owns, since two entries sharing one controller_id
+        # leave every downstream reader keyed by that id silently dropping one of them.
+        replaced_index = next(
+            (index for index, controller in enumerate(manifest.controllers) if controller.id == controller_id),
+            None,
+        )
+        if replaced_index is None:
+            manifest.controllers.append(entry)
+        else:
+            manifest.controllers[replaced_index] = entry
+
+        manifest.to_yaml(file_path=manifest_path)
 
 
 def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
@@ -151,6 +169,21 @@ class MicroControllerManifest(YamlConfig):
     controllers: list[MicroControllerSourceData]
     """The list of microcontroller source entries registered in this manifest."""
 
+    def __post_init__(self) -> None:
+        """Verifies that the manifest stores its controller entries as a list.
+
+        Raises:
+            ValueError: If the 'controllers' field does not store a list.
+        """
+        # Deserialization skips per-field type validation, so a document whose 'controllers' key carries no value
+        # loads the field as None and breaks every consumer that iterates it.
+        if not isinstance(self.controllers, list):
+            message = (
+                f"Unable to initialize the MicroControllerManifest instance. The 'controllers' field must store a "
+                f"list of MicroControllerSourceData instances, but got {type(self.controllers).__name__}."
+            )
+            console.error(message=message, error=ValueError)
+
 
 @dataclass(frozen=True, slots=True)
 class ModuleExtractionConfig:
@@ -207,3 +240,18 @@ class ExtractionConfig(YamlConfig):
 
     controllers: list[ControllerExtractionConfig]
     """The list of controller extraction configurations."""
+
+    def __post_init__(self) -> None:
+        """Verifies that the configuration stores its controller entries as a list.
+
+        Raises:
+            ValueError: If the 'controllers' field does not store a list.
+        """
+        # Deserialization skips per-field type validation, so a document whose 'controllers' key carries no value
+        # loads the field as None and breaks every consumer that iterates it.
+        if not isinstance(self.controllers, list):
+            message = (
+                f"Unable to initialize the ExtractionConfig instance. The 'controllers' field must store a list of "
+                f"ControllerExtractionConfig instances, but got {type(self.controllers).__name__}."
+            )
+            console.error(message=message, error=ValueError)

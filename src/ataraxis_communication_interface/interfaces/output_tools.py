@@ -141,13 +141,19 @@ def query_extracted_events_tool(
         feather_files: The list of absolute paths to feather files produced by the log processing pipeline.
             Expected filename pattern: ``controller_{source_id}_module_{type}_{id}.feather`` or
             ``controller_{source_id}_kernel.feather``.
-        max_sample_rows: The maximum number of sample rows to include per file. Defaults to 10.
+        max_sample_rows: The maximum number of sample rows to include per file. Must not be negative. Defaults to 10.
 
     Returns:
         A dictionary containing a 'results' list with per-file statistics (each with 'file', 'summary',
         'event_distribution', 'command_distribution', 'inter_event_timing', and 'sample_rows' keys) and a
-        'total_files' count. Files that cannot be read produce an entry with 'file' and 'error' keys.
+        'total_files' count. Files that cannot be read produce an entry with 'file' and 'error' keys. Returns an error
+        dictionary if max_sample_rows is negative.
     """
+    # Validates the sample bound before any file is read, so an out-of-range argument cannot discard the statistics
+    # already computed for the preceding files.
+    if max_sample_rows < 0:
+        return {"error": f"Invalid max_sample_rows: {max_sample_rows}. The value must not be negative."}
+
     results = [
         _analyze_single_event_feather(feather_file=feather_file, max_sample_rows=max_sample_rows)
         for feather_file in feather_files

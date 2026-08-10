@@ -449,6 +449,34 @@ def test_extract_logged_microcontroller_data_module_and_kernel(tmp_path: Path) -
     )
 
 
+def test_extract_logged_microcontroller_data_isolates_the_per_module_event_codes(tmp_path: Path) -> None:
+    """Verifies that each module is filtered against its own event codes rather than against the union of all sets."""
+    archive_path = tmp_path / f"{_SOURCE_ID}{LOG_ARCHIVE_SUFFIX}"
+    # Both modules emit both event codes, so a filter applied as a union would extract every one of these messages.
+    _build_archive(
+        archive_path=archive_path,
+        messages=[
+            _module_state(elapsed_us=1000, command=1, event=10),
+            _module_state(elapsed_us=2000, command=1, event=20),
+            (3000, make_module_state_payload(module_type=3, module_id=4, command=1, event=10)),
+            (4000, make_module_state_payload(module_type=3, module_id=4, command=1, event=20)),
+        ],
+    )
+
+    extracted = extract_logged_microcontroller_data(
+        log_path=archive_path,
+        module_filters={_MODULE_KEY: frozenset({10}), (3, 4): frozenset({20})},
+        kernel_event_codes=None,
+        workers=1,
+    )
+
+    messages = {(module.module_type, module.module_id): module.messages for module in extracted.modules}
+
+    assert set(messages.keys()) == {_MODULE_KEY, (3, 4)}
+    np.testing.assert_array_equal(messages[_MODULE_KEY].events, [10])
+    np.testing.assert_array_equal(messages[(3, 4)].events, [20])
+
+
 def test_extract_logged_microcontroller_data_no_matching_messages(tmp_path: Path) -> None:
     """Verifies that a filter no message matches yields no module entries and an empty kernel block."""
     archive_path = tmp_path / f"{_SOURCE_ID}{LOG_ARCHIVE_SUFFIX}"

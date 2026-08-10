@@ -1,7 +1,7 @@
 """Contains tests for the classes and functions provided by the orchestration/execution.py module."""
 
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
 
@@ -28,12 +28,14 @@ from ataraxis_communication_interface.orchestration.execution import (
     _abandon_batch,
     _job_is_unrecorded,
     _admit_pending_jobs,
+    _handle_broken_pool,
     _reap_finished_jobs,
     get_execution_state,
     set_execution_state,
     group_jobs_by_tracker,
     job_execution_manager,
     _select_admissible_jobs,
+    start_execution_session,
     _reconcile_unrecorded_job,
 )
 from ataraxis_communication_interface.orchestration.allocation import (
@@ -81,11 +83,98 @@ class _RecordingPool:
         return future
 
 
+class _StandInPool:
+    """Stands in for the shared process pool a rebuild retires and for the replacement it installs in its place.
+
+    Notes:
+        The rebuild pass only disposes of the broken pool and hands back its replacement, so neither pool is ever
+        asked to run work and only the disposal request needs recording.
+    """
+
+    def __init__(self):
+        self.slot_count = 0
+        self.shutdown_requests = []
+
+    def shutdown(self, *, wait, cancel_futures):
+        """Records the disposal flags one shutdown request carries."""
+        self.shutdown_requests.append((wait, cancel_futures))
+
+
+class _StandInManager:
+    """Stands in for the session's execution manager, recording how each session starts the thread that runs it.
+
+    Notes:
+        A real manager builds a shared process pool, which the session handshake itself never needs. Holding every
+        body on one event instead keeps a published session readable as live for as long as a test requires.
+
+        The thread the state already carries is read at the moment that thread is started, because a session that
+        started the thread before recording it would leave the running body reading its own session as finished.
+    """
+
+    def __init__(self):
+        self.threads = []
+        self.recorded_threads = []
+        self.sessions = []
+        self.release = Event()
+
+    def build_thread(self, target, kwargs, daemon):
+        """Builds one session's manager thread, wrapping its start with the record of what the state held."""
+        state = kwargs["state"]
+        thread = Thread(target=target, kwargs=kwargs, daemon=daemon)
+        start_thread = thread.start
+
+        def start():
+            """Records the thread the state already carries, then starts the manager thread."""
+            self.recorded_threads.append(state.manager_thread)
+            start_thread()
+
+        thread.start = start
+        self.threads.append(thread)
+        return thread
+
+    def run_session(self, state):
+        """Serves as one session's manager body, holding that session alive until the test releases it."""
+        self.sessions.append(state)
+        self.release.wait(timeout=_MANAGER_TIMEOUT_SECONDS)
+
+    def settle(self):
+        """Releases every held session and waits for the thread running it to end."""
+        self.release.set()
+        for thread in self.threads:
+            thread.join(timeout=_MANAGER_TIMEOUT_SECONDS)
+
+
 @pytest.fixture(autouse=True)
 def execution_state_guard():
     """Clears the module-global execution state after every test, so no session leaks into the next test."""
     yield
     set_execution_state(state=None)
+
+
+@pytest.fixture
+def replacement_pool(monkeypatch):
+    """Points the rebuild pass at a stand-in pool factory and returns the pool that factory installs."""
+    pool = _StandInPool()
+
+    def _build_replacement_pool(pool_size):
+        """Builds the stand-in replacement pool opening the requested number of slots."""
+        pool.slot_count = pool_size
+        return pool
+
+    monkeypatch.setattr(execution, "_create_job_pool", _build_replacement_pool)
+    return pool
+
+
+@pytest.fixture
+def session_manager(monkeypatch):
+    """Points a started session at a stand-in manager, then releases and joins every thread that session started."""
+    manager = _StandInManager()
+    monkeypatch.setattr(execution, "Thread", manager.build_thread)
+    monkeypatch.setattr(execution, "job_execution_manager", manager.run_session)
+
+    yield manager
+
+    manager.settle()
 
 
 def _build_descriptor(directory, source_id, core_weight=1):
@@ -396,6 +485,64 @@ def test_execution_state_round_trip():
 
 
 @pytest.mark.xdist_group(name="orchestration")
+def test_start_execution_session_claims_a_free_slot(session_manager):
+    """Verifies that a session started with no incumbent is published and runs the manager thread recorded on it."""
+    state = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+
+    assert start_execution_session(state=state)
+    assert get_execution_state() is state
+    assert isinstance(state.manager_thread, Thread)
+
+    # Pins the ordering the handshake rests on. The thread sits on the state before it is started, so the body
+    # running in it never reads its own session as one that has already finished.
+    assert session_manager.recorded_threads == [state.manager_thread]
+
+    session_manager.settle()
+
+    assert session_manager.sessions == [state]
+    assert not state.manager_thread.is_alive()
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_start_execution_session_refuses_a_live_session(session_manager):
+    """Verifies that a second session is refused while the incumbent's manager thread is still running."""
+    incumbent = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+    contender = JobExecutionState(core_budget=2, memory_budget_mb=2048)
+
+    assert start_execution_session(state=incumbent)
+    assert incumbent.manager_thread.is_alive()
+
+    # The incumbent stays the session of record, so every cancellation and status tool still reaches it, and the
+    # contender gets no thread of its own to commit the host's cores and memory a second time.
+    assert not start_execution_session(state=contender)
+    assert get_execution_state() is incumbent
+    assert contender.manager_thread is None
+    assert session_manager.threads == [incumbent.manager_thread]
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_start_execution_session_replaces_a_dead_session(session_manager):
+    """Verifies that a session whose manager thread has ended is replaced by the next batch asking for the slot."""
+    incumbent = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+
+    assert start_execution_session(state=incumbent)
+
+    session_manager.settle()
+    assert not incumbent.manager_thread.is_alive()
+
+    replacement = JobExecutionState(core_budget=2, memory_budget_mb=2048)
+
+    assert start_execution_session(state=replacement)
+    assert get_execution_state() is replacement
+    assert replacement.manager_thread is not incumbent.manager_thread
+    assert session_manager.recorded_threads == [incumbent.manager_thread, replacement.manager_thread]
+
+    session_manager.settle()
+
+    assert session_manager.sessions == [incumbent, replacement]
+
+
+@pytest.mark.xdist_group(name="orchestration")
 def test_group_jobs_by_tracker(tmp_path):
     """Verifies that every job in the registry is grouped under the tracker path that records it."""
     first_directory = tmp_path / "first"
@@ -505,10 +652,16 @@ def test_admit_pending_jobs_requeues_a_job_a_broken_pool_rejected(tmp_path):
 
 @pytest.mark.xdist_group(name="orchestration")
 def test_job_is_unrecorded_running_entry(tmp_path):
-    """Verifies that a job whose tracker entry holds no terminal outcome, scheduled or running, reads as unrecorded."""
+    """Verifies that only a running tracker entry reads as unrecorded, while a scheduled one does not.
+
+    Notes:
+        A job that reached a worker and finished can never legitimately read as scheduled, so a scheduled entry means
+        an external reset landed while the job ran. Reporting it as unrecorded would let the reap overwrite the
+        re-run the operator asked for with a fabricated failure.
+    """
     job = _register_job(directory=tmp_path, source_id="1")
 
-    assert _job_is_unrecorded(job=job)
+    assert not _job_is_unrecorded(job=job)
 
     ProcessingTracker(file_path=job.tracker_path).start_job(job_id=job.job_id)
 
@@ -641,6 +794,7 @@ def test_reap_finished_jobs_keeps_a_running_job(tmp_path):
 def test_reap_finished_jobs_reconciles_an_unrecorded_return(tmp_path):
     """Verifies that a job returning without recording its outcome is failed rather than left unfinished."""
     job = _register_job(directory=tmp_path, source_id="1")
+    ProcessingTracker(file_path=job.tracker_path).start_job(job_id=job.job_id)
     future = Future()
     future.set_result(None)
 
@@ -651,6 +805,33 @@ def test_reap_finished_jobs_reconciles_an_unrecorded_return(tmp_path):
 
     assert state.active_jobs == {}
     assert _job_status(job=job) == ProcessingStatus.FAILED
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_reap_finished_jobs_keeps_an_externally_reset_job(tmp_path):
+    """Verifies that a job reset to scheduled while it ran keeps that state instead of being failed by the reap.
+
+    Notes:
+        Pins the tracker-reset race directly. A job that completed and was then reset by an operator must survive the
+        reap that follows, because overwriting it would record a failure that never happened and discard the re-run
+        the reset requested.
+    """
+    job = _register_job(directory=tmp_path, source_id="1")
+    tracker = ProcessingTracker(file_path=job.tracker_path)
+    tracker.start_job(job_id=job.job_id)
+    tracker.complete_job(job_id=job.job_id)
+    tracker.reset_jobs(job_ids=[job.job_id])
+
+    future = Future()
+    future.set_result(None)
+
+    state = JobExecutionState()
+    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
+
+    _reap_finished_jobs(state=state)
+
+    assert state.active_jobs == {}
+    assert _job_status(job=job) == ProcessingStatus.SCHEDULED
 
 
 @pytest.mark.xdist_group(name="orchestration")
@@ -714,6 +895,76 @@ def test_reap_finished_jobs_ignores_a_break_after_a_recorded_outcome(tmp_path):
     assert not state.pool_broken
     assert state.broken_jobs == []
     assert _job_status(job=job) == ProcessingStatus.SUCCEEDED
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_handle_broken_pool_charges_the_job_that_ran_alone(tmp_path, replacement_pool):
+    """Verifies that a break with a single job in flight is attributed to that job and charged one requeue."""
+    job = _register_job(directory=tmp_path, source_id="1")
+    ProcessingTracker(file_path=job.tracker_path).start_job(job_id=job.job_id)
+    sizing = _build_sizing(memory_mb=1024)
+
+    broken_pool = _StandInPool()
+    state = JobExecutionState(broken_jobs=[(job, sizing)], pool_size=2, pool_broken=True)
+
+    result = _handle_broken_pool(state=state, executor=broken_pool)
+
+    assert result is replacement_pool
+    assert replacement_pool.slot_count == 2
+    assert broken_pool.shutdown_requests == [(False, True)]
+    assert state.requeue_counts == {job.dispatch_key: 1}
+    assert state.pending_jobs == [(job, sizing)]
+    assert state.broken_jobs == []
+    assert not state.pool_broken
+    assert state.pool_rebuilds == 1
+    assert _job_status(job=job) == ProcessingStatus.SCHEDULED
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_handle_broken_pool_charges_no_job_for_a_multi_job_break(tmp_path, replacement_pool):
+    """Verifies that a break killing several jobs at once requeues every one of them free of charge."""
+    first = _register_job(directory=tmp_path / "first", source_id="1")
+    second = _register_job(directory=tmp_path / "second", source_id="2")
+    sizing = _build_sizing(memory_mb=1024)
+    for job in (first, second):
+        ProcessingTracker(file_path=job.tracker_path).start_job(job_id=job.job_id)
+
+    state = JobExecutionState(broken_jobs=[(first, sizing), (second, sizing)], pool_broken=True)
+
+    result = _handle_broken_pool(state=state, executor=_StandInPool())
+
+    assert result is replacement_pool
+    # The break fails every job the pool was running, so it is attributable to none of them.
+    assert state.requeue_counts == {}
+    assert state.pending_jobs == [(first, sizing), (second, sizing)]
+    assert state.broken_jobs == []
+    assert _job_status(job=first) == ProcessingStatus.SCHEDULED
+    assert _job_status(job=second) == ProcessingStatus.SCHEDULED
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_handle_broken_pool_spares_the_budget_of_an_unattributable_break(tmp_path, replacement_pool):
+    """Verifies that a job already at its requeue ceiling is requeued when the break killed a second job with it."""
+    spent = _register_job(directory=tmp_path / "spent", source_id="1")
+    companion = _register_job(directory=tmp_path / "companion", source_id="2")
+    sizing = _build_sizing(memory_mb=1024)
+    for job in (spent, companion):
+        ProcessingTracker(file_path=job.tracker_path).start_job(job_id=job.job_id)
+
+    state = JobExecutionState(
+        broken_jobs=[(spent, sizing), (companion, sizing)],
+        pool_broken=True,
+        requeue_counts={spent.dispatch_key: _MAXIMUM_JOB_REQUEUES},
+    )
+
+    result = _handle_broken_pool(state=state, executor=_StandInPool())
+
+    assert result is replacement_pool
+    # An unattributable break spends no budget, so the job holding a spent one is requeued rather than failed.
+    assert state.requeue_counts == {spent.dispatch_key: _MAXIMUM_JOB_REQUEUES}
+    assert state.pending_jobs == [(spent, sizing), (companion, sizing)]
+    assert _job_status(job=spent) == ProcessingStatus.SCHEDULED
+    assert _job_status(job=companion) == ProcessingStatus.SCHEDULED
 
 
 @pytest.mark.xdist_group(name="orchestration")

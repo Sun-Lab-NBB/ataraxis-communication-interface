@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 from pathlib import Path
-from threading import Thread
 from dataclasses import replace
 
 from ataraxis_time import TimeUnits, TimestampFormats, TimestampPrecisions, convert_time, get_timestamp
@@ -23,10 +22,9 @@ from ..orchestration import (
     get_execution_state,
     resolve_core_budget,
     resolve_job_workers,
-    set_execution_state,
     group_jobs_by_tracker,
-    job_execution_manager,
     estimate_job_memory_mb,
+    start_execution_session,
     resolve_memory_budget_mb,
 )
 from ..microcontroller import ExtractionConfig
@@ -70,8 +68,11 @@ def prepare_log_processing_batch_tool(
     Returns:
         A dictionary containing a 'success' flag and per-log-directory manifests in 'log_directories', each carrying
         'tracker_path', 'output_directory', 'source_ids', 'jobs', 'summary', and 'skipped_sources' keys, together
-        with total counts and any invalid paths. Returns an error dictionary if the extraction config is missing or
-        unreadable, or if the log directory and output directory lists differ in length.
+        with total counts. A path that is not a directory is listed under 'invalid_paths', and a directory whose
+        preparation raised is listed under 'failed_directories' as an entry carrying 'log_directory' and 'error'. The
+        'success' flag reads False when no directory prepared and at least one failed. Returns an error dictionary if
+        the extraction config is missing or unreadable, or if the log directory and output directory lists differ in
+        length.
     """
     config_file = Path(config_path)
     if not config_file.is_file():
@@ -92,6 +93,7 @@ def prepare_log_processing_batch_tool(
 
     result_log_directories: dict[str, Any] = {}
     invalid_paths: list[str] = []
+    failed_directories: list[dict[str, str]] = []
     total_jobs = 0
 
     for entry_index, log_directory_string in enumerate(log_directories):
@@ -114,8 +116,8 @@ def prepare_log_processing_batch_tool(
             )
             sized_jobs = [size_job(job=job, core_ceiling=job_set.core_ceiling) for job in job_set.jobs]
             sized_jobs.sort(key=lambda entry: entry[1].memory_mb, reverse=True)
-        except Exception:
-            invalid_paths.append(log_directory_string)
+        except Exception as error:
+            failed_directories.append({"log_directory": log_directory_string, "error": str(error)})
             continue
 
         # Merges the tracker's live state over the prepared set, so a directory prepared twice reports what its jobs
@@ -152,8 +154,10 @@ def prepare_log_processing_batch_tool(
         }
         total_jobs += len(jobs)
 
+    # A request that prepared no directory while at least one raised reports no success, since the caller holds no
+    # manifest to execute and the recorded failures are the reason.
     result: dict[str, Any] = {
-        "success": True,
+        "success": bool(result_log_directories) or not failed_directories,
         "log_directories": result_log_directories,
         "total_log_directories": len(result_log_directories),
         "total_jobs": total_jobs,
@@ -161,6 +165,9 @@ def prepare_log_processing_batch_tool(
 
     if invalid_paths:
         result["invalid_paths"] = invalid_paths
+
+    if failed_directories:
+        result["failed_directories"] = failed_directories
 
     return result
 
@@ -269,7 +276,10 @@ def execute_log_processing_jobs_tool(
     if not pending:
         return {"error": "No valid jobs to execute.", "invalid_jobs": invalid_jobs}
 
-    # Creates execution state and starts the manager thread.
+    # Creates the execution state and claims it as the session of record. The claim tests the incumbent, publishes the
+    # replacement, and starts the manager thread under one lock, so a second caller arriving mid-start finds a live
+    # session rather than an empty slot. The guard above rejects the common sequential case with a specific message,
+    # while this claim closes the window two concurrent tool calls open.
     pool_size = resolve_pool_size(job_count=len(pending), core_budget=resolved_cores, memory_budget_mb=resolved_memory)
     state = JobExecutionState(
         all_jobs=all_jobs,
@@ -278,11 +288,9 @@ def execute_log_processing_jobs_tool(
         memory_budget_mb=resolved_memory,
         pool_size=pool_size,
     )
-    set_execution_state(state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
-    manager.start()
-    state.manager_thread = manager
+    if not start_execution_session(state=state):
+        return {"error": "An execution session is already active. Cancel it first or wait for completion."}
 
     result: dict[str, Any] = {
         "started": True,
@@ -505,21 +513,26 @@ def cancel_log_processing_tool() -> dict[str, Any]:
         state.pending_jobs.clear()
         active_count = len(state.active_jobs)
 
-    # Counts final job statuses from tracker files.
+    # Counts the final status of this session's own jobs alone. A tracker records every job that ever wrote to its
+    # directory, so counting its whole registry would credit this session with the outcomes of earlier ones.
     succeeded = 0
     failed = 0
-    tracker_paths: set[Path] = {job.tracker_path for job in state.all_jobs.values()}
 
-    for tracker_path in tracker_paths:
+    for tracker_path, path_jobs in group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
-            for job_state in registry.values():
-                if job_state.status == ProcessingStatus.SUCCEEDED:
-                    succeeded += 1
-                elif job_state.status == ProcessingStatus.FAILED:
-                    failed += 1
-        except Exception:  # noqa: S110
-            pass
+        except Exception:  # noqa: S112
+            continue
+
+        for job in path_jobs:
+            if job.job_id not in registry:
+                continue
+
+            job_state = registry[job.job_id]
+            if job_state.status == ProcessingStatus.SUCCEEDED:
+                succeeded += 1
+            elif job_state.status == ProcessingStatus.FAILED:
+                failed += 1
 
     return {
         "canceled": True,
@@ -546,7 +559,8 @@ def reset_log_processing_jobs_tool(
     Returns:
         A dictionary containing a 'reset' flag, the number of jobs reset, and updated job statuses. Returns an error
         dictionary if the tracker file is missing or unreadable, and a 'reset' flag set to False with an explanatory
-        'message' when no job matches the requested source IDs.
+        'message' when no job matches the requested source IDs or when the active execution session holds one of the
+        targeted jobs.
     """
     path = Path(tracker_path)
 
@@ -569,6 +583,20 @@ def reset_log_processing_jobs_tool(
 
     if not target_ids:
         return {"reset": False, "message": "No matching jobs found to reset."}
+
+    # Refuses a reset that targets a job the live session holds, since the session's manager and the job's own worker
+    # both write that job's outcome over the reset entry, discarding the re-run the operator asked for.
+    state = get_execution_state()
+    if state is not None and state.manager_thread is not None and state.manager_thread.is_alive():
+        session_job_ids = {job_id for tracker_key, job_id in state.all_jobs if tracker_key == str(path)}
+        contested_ids = [job_id for job_id in target_ids if job_id in session_job_ids]
+
+        if contested_ids:
+            message = (
+                f"Unable to reset {len(contested_ids)} job(s) currently held by the active execution session. Cancel "
+                f"the session with cancel_log_processing_tool before resetting these jobs."
+            )
+            return {"reset": False, "message": message}
 
     # Resets the targeted jobs back to SCHEDULED under the tracker's lock, leaving every other job untouched.
     tracker.reset_jobs(job_ids=target_ids)
