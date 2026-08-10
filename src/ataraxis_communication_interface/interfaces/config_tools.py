@@ -151,7 +151,8 @@ def validate_extraction_config_tool(
     """Validates an extraction configuration for structural correctness and optionally cross-references it against
     a microcontroller manifest.
 
-    Checks that every controller has at least one extraction target (modules or kernel). Verifies that all module
+    Rejects a configuration that holds no controller entries. Checks that every controller has at least one
+    extraction target (modules or kernel). Verifies that all module
     and kernel entries have non-empty event codes without duplicates. Confirms that module (type, id) pairs are
     unique within each controller. When a manifest path is provided, additionally verifies that every controller ID
     and module identifier in the config matches a registered entry in the manifest.

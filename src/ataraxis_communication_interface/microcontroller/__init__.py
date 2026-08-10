@@ -1,5 +1,6 @@
-"""Provides the microcontroller interface classes, the configuration dataclasses, and the log data extraction
-algorithm.
+"""Provides the microcontroller interface classes, the configuration dataclasses, the firmware status code mirrors
+and their message translators, the log data extraction algorithm, and the extracted message table schema and its
+access primitives.
 """
 
 from .interface import ModuleInterface, MicroControllerInterface, evaluate_port

@@ -270,7 +270,7 @@ def test_select_admissible_jobs_backfills_past_unfitting_job(tmp_path):
 
 @pytest.mark.xdist_group(name="orchestration")
 def test_select_admissible_jobs_gated_by_memory(tmp_path):
-    """Verifies that a job whose memory exceeds the remaining budget is deferred even when every core is free."""
+    """Verifies that a job whose memory exceeds the remaining budget is deferred while another job is running."""
     job = _build_entry(directory=tmp_path, source_id="1", core_weight=1, memory_mb=512)
 
     admitted, deferred = _select_admissible_jobs(
@@ -505,7 +505,7 @@ def test_admit_pending_jobs_requeues_a_job_a_broken_pool_rejected(tmp_path):
 
 @pytest.mark.xdist_group(name="orchestration")
 def test_job_is_unrecorded_running_entry(tmp_path):
-    """Verifies that a job whose tracker entry still reads running is reported as unrecorded."""
+    """Verifies that a job whose tracker entry holds no terminal outcome, scheduled or running, reads as unrecorded."""
     job = _register_job(directory=tmp_path, source_id="1")
 
     assert _job_is_unrecorded(job=job)

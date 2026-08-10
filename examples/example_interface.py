@@ -61,8 +61,8 @@ class TestModuleInterface(ModuleInterface):
         )
 
         # Initializes the shared memory array used to transfer data from the remote communication process to the main
-        # runtime control process. The shared memory array needs to be connected from both the main and the remote
-        # communication processes.
+        # runtime control process. The array is created connected, and every process that receives it connects while
+        # unpickling, so the explicit connect() call pins the connection point rather than establishing it.
         self._shared_memory: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{self.type_id}_shm", prototype=np.zeros(shape=3, dtype=np.uint16), exists_ok=True
         )

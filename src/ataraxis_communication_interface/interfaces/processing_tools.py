@@ -58,7 +58,9 @@ def prepare_log_processing_batch_tool(
             Accepts paths from the 'log_directories' list returned by discover_microcontroller_data_tool.
         source_ids: The list of confirmed source IDs to process. Accepts IDs from the 'source_id' field of
             entries in the 'sources' list returned by discover_microcontroller_data_tool. Applied uniformly: each
-            log directory creates jobs for every source ID in this list that has a matching archive on disk.
+            log directory creates a job for every source ID in this list that both has a matching archive on disk
+            and is declared in the extraction configuration. A source failing either condition is reported under
+            that directory's 'skipped_sources'.
         output_directories: The list of absolute paths for per-log-directory output. Must match the length of
             log_directories. Each output directory receives a ``microcontroller_data/`` subdirectory containing
             the processing tracker and output files.
@@ -66,8 +68,10 @@ def prepare_log_processing_batch_tool(
             for each controller. Validated before batch preparation and embedded in every job descriptor.
 
     Returns:
-        A dictionary containing per-log-directory manifests in 'log_directories' with tracker paths and job
-        lists, total counts, and any invalid paths.
+        A dictionary containing a 'success' flag and per-log-directory manifests in 'log_directories', each carrying
+        'tracker_path', 'output_directory', 'source_ids', 'jobs', 'summary', and 'skipped_sources' keys, together
+        with total counts and any invalid paths. Returns an error dictionary if the extraction config is missing or
+        unreadable, or if the log directory and output directory lists differ in length.
     """
     config_file = Path(config_path)
     if not config_file.is_file():
@@ -183,8 +187,10 @@ def execute_log_processing_jobs_tool(
         session before starting a new one.
 
     Args:
-        jobs: The list of job descriptors from prepare_log_processing_batch_tool. Each dictionary must have
-            'log_directory', 'output_directory', 'tracker_path', 'job_id', 'source_id', and 'config_path' keys.
+        jobs: The list of job descriptors from prepare_log_processing_batch_tool, each passed through unchanged.
+            Every key that tool emits is required, which is 'log_directory', 'archive_path', 'output_directory',
+            'config_path', 'tracker_path', 'job_name', 'job_id', 'source_id', 'core_weight', 'message_count',
+            'archive_bytes', and 'modeled'.
         core_budget: The total number of CPU cores available for the execution session. Set to -1 to auto-resolve
             to every available core minus the reserved host cores.
         memory_budget_mb: The total memory in megabytes available for the execution session. Set to -1 to
@@ -192,9 +198,9 @@ def execute_log_processing_jobs_tool(
 
     Returns:
         A dictionary containing a 'started' flag, 'total_jobs', the resolved 'core_budget', 'memory_budget_mb',
-        and 'pool_size',
-        a 'job_allocations' entry per job naming its resolved cores, memory, and archive message count, and any
-        invalid jobs.
+        and 'pool_size', a 'job_allocations' entry per job naming its 'job_id', 'source_id', resolved 'cores',
+        'memory_mb', archive 'message_count', and 'modeled' flag, and any invalid jobs. Returns an error dictionary
+        when a session is already active, and an error dictionary carrying 'invalid_jobs' when no job is valid.
     """
     # Enforces single-session constraint.
     existing_state = get_execution_state()
@@ -302,7 +308,8 @@ def get_log_processing_status_tool() -> dict[str, Any]:
 
     Returns:
         A dictionary containing an 'active' flag, a 'canceled' flag, per-job status entries in 'jobs', and a
-        'summary' with counts for scheduled, running, succeeded, and failed jobs.
+        'summary' with the job total alongside counts for scheduled, running, succeeded, and failed jobs. A call
+        made with no execution session returns only an 'active' flag set to False and an explanatory 'message'.
     """
     state = get_execution_state()
     if state is None:
@@ -374,7 +381,8 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     Returns:
         A dictionary containing an 'active' flag, per-job timing in 'jobs', and a 'session' summary with total
         elapsed seconds and completed, failed, running, and pending counts. The session also includes a throughput in
-        jobs per hour once at least one job has completed.
+        jobs per hour once at least one job has completed. A call made with no execution session returns only an
+        'active' flag set to False and an explanatory 'message'.
     """
     state = get_execution_state()
     if state is None:
@@ -536,7 +544,9 @@ def reset_log_processing_jobs_tool(
         source_ids: An optional list of source IDs whose jobs should be reset. If not provided, all jobs are reset.
 
     Returns:
-        A dictionary containing a 'reset' flag, the number of jobs reset, and updated job statuses.
+        A dictionary containing a 'reset' flag, the number of jobs reset, and updated job statuses. Returns an error
+        dictionary if the tracker file is missing or unreadable, and a 'reset' flag set to False with an explanatory
+        'message' when no job matches the requested source IDs.
     """
     path = Path(tracker_path)
 

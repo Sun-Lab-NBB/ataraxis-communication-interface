@@ -72,7 +72,9 @@ def run_log_processing_pipeline(
             archive is absent, or if the recording resolves no job to run.
         ValueError: If the tree holds more than one microcontroller manifest, if a manifest registers no controllers,
             if the configuration declares no controllers, if a requested controller or job identifier is not
-            registered, or if the resolved archives span several directories.
+            registered, or if the resolved archives span several directories. Also raised once a job runs, if a
+            configured module or the kernel declares empty event codes, if a controller declares no extraction
+            targets, or if a logged data message's payload size disagrees with its prototype code.
         OSError: If any directory beneath the log directory cannot be read.
     """
     job_set = prepare_jobs(

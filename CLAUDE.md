@@ -206,9 +206,10 @@ data from DataLogger archives.
   was detected rather than what caused it.
 - **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
   CRC16-CCITT checksummed serial I/O. Supports 12 message protocols (`SerialProtocols` enum) and 252 numpy data
-  prototypes (`SerialPrototypes` enum) covering all numpy scalar and array types. `send_message()` accepts
-  command and parameter message objects, and `receive_message()` returns typed message objects (`ModuleData`,
-  `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`, `ControllerIdentification`, `ModuleIdentification`).
+  prototypes (`SerialPrototypes` enum) covering the boolean, 8/16/32/64-bit integer, and 32/64-bit float dtypes in
+  scalar and array form. `send_message()` accepts command and parameter message objects, and `receive_message()`
+  returns typed message objects (`ModuleData`, `ModuleState`, `KernelData`, `KernelState`, `ReceptionCode`,
+  `ControllerIdentification`, `ModuleIdentification`).
   All received data is timestamped via `PrecisionTimer` and logged to `DataLogger` through an `MPQueue`.
 - **MQTT Communication**: `MQTTCommunication` provides publish/subscribe messaging over MQTT via `paho-mqtt`.
   Constructor takes `ip`, `port`, and optional `monitored_topics`. `get_data()` returns `(topic, message)`
@@ -277,11 +278,11 @@ data from DataLogger archives.
   measured peaks, so this stage's jobs and the stages queued beside them are sized on one scale. Changing a constant
   here changes how this stage competes for admission against every other stage a scheduler plans with it.
 - **Library-Owned Output Contract**: This library owns both directions of the format it writes.
-  `resolve_module_feather_path()` and `resolve_kernel_feather_path()` name the files, `find_module_feathers()` and
-  `parse_module_feather_name()` recover them, and `partition_events()`, `get_event_timestamps()`, and
+  `resolve_module_path()` and `resolve_kernel_path()` name the files, `find_module_paths()` and `parse_module_path()`
+  recover them, all four in `orchestration/jobs.py`, and `partition_events()`, `get_event_timestamps()`, and
   `get_event_data()` read the table through the ``ExtractedDataColumns`` enumeration rather than through string
-  literals. A downstream
-  consumer reads the extracted data through these rather than reimplementing the naming convention and the schema.
+  literals. A downstream consumer reads the extracted data through these rather than reimplementing the naming
+  convention and the schema.
 - **Frozen Dataclasses**: Inner data classes (`ModuleSourceData`, `MicroControllerSourceData`,
   `ModuleExtractionConfig`, `KernelExtractionConfig`, `ControllerExtractionConfig`) use `frozen=True` for
   immutability and `slots=True` for performance. The top-level `MicroControllerManifest` and `ExtractionConfig`

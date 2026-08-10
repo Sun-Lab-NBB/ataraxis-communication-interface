@@ -143,8 +143,8 @@ def job_execution_manager(state: JobExecutionState) -> None:
 
         Cancellation stops new admissions and lets the running jobs finish.
 
-        Every exit path leaves each job in a terminal tracker state, since the tracker is the only channel a status
-        reader consults.
+        Every exit path leaves each job it dispatched in a terminal tracker state, since the tracker is the only
+        channel a status reader consults. A canceled batch's queued jobs stay scheduled and remain re-runnable.
 
     Args:
         state: The active job execution state. Mutated under its own lock as jobs move between the queues.
@@ -320,8 +320,8 @@ def _reap_finished_jobs(state: JobExecutionState) -> None:
         reached the future.
 
         A break of the shared pool is recognized by two facts together. The exception is a BrokenProcessPool, which
-        a job body cannot produce because the extraction pool re-raises its own break under a name of its own, and
-        the job's tracker entry still reads running.
+        a job body's own extraction pool can also raise, and the job's tracker entry still reads running, which a
+        body that recorded its own failure would not leave behind.
 
     Args:
         state: The active job execution state, mutated in place.

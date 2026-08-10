@@ -83,15 +83,12 @@ class _RuntimeParameters(IntEnum):
     """The maximum number of microcontroller ID information request attempts the communication process can carry out 
     during the initialization before raising an error."""
     PROCESS_TERMINATION_TIMEOUT = 60
-    """The maximum period of time, in seconds, to wait for the communication process to terminate gracefully before 
-    sending a SIGKILL signal to terminate it forcibly. This prevents being stuck in a graceful process termination 
+    """The maximum period of time, in seconds, to wait for the communication process to terminate gracefully. The
+    caller stops waiting once this period elapses, which prevents being stuck in a graceful process termination
     loop."""
     WATCHDOG_INTERVAL = 20
     """The frequency, in milliseconds, at which the MicroControllerInterface's watchdog thread checks the state 
     of the remote communication process."""
-    MINIMUM_MODULE_DATA_SIZE = 5
-    """The smallest non-service data payload size currently used by hardware module instances to communicate with the 
-    PC."""
 
 
 class ModuleInterface(ABC):  # pragma: no cover
@@ -240,9 +237,9 @@ class ModuleInterface(ABC):  # pragma: no cover
         # from the microcontroller to the PC, and surfaces the registered explanation alongside the raised error.
         self._error_codes: dict[np.uint8, str] = error_codes if error_codes is not None else {}
 
-        # These attributes are initialized to placeholder values. The actual values are assigned by the
+        # This attribute is initialized to a placeholder value. The actual value is assigned by the
         # MicroControllerInterface class that manages this ModuleInterface. During MicroControllerInterface
-        # initialization, it updates these attributes for all managed interfaces via referencing.
+        # initialization, it updates the attribute for all managed interfaces via referencing.
         self._input_queue: MPQueue | None = None  # type: ignore[type-arg]
 
         #  Pre-creates the Dequeue command object, as it does not change throughout runtime.
@@ -559,8 +556,8 @@ class MicroControllerInterface:  # pragma: no cover
         _keepalive_interval: Stores the keepalive interval in milliseconds.
     """
 
-    # Pre-packages user-addressable Kernel commands into attributes. Since Kernel commands are known and fixed at class
-    # initialization, they only need to be defined once.
+    # Pre-packages the user-addressable Kernel reset command into a class attribute. Since the command is known and
+    # fixed at class initialization, it only needs to be defined once.
     _reset_command = KernelCommand(
         command=np.uint8(KernelCommandCodes.RESET_CONTROLLER.value),
         return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
@@ -735,7 +732,8 @@ class MicroControllerInterface:  # pragma: no cover
 
         Notes:
             If the method detects that the communication process has terminated prematurely, it carries out the
-            necessary resource cleanup steps before raising the error and terminating the overall runtime.
+            necessary resource cleanup steps before raising the error. The watchdog runs in a daemon thread, so the
+            error surfaces as a traceback on stderr while the main process continues.
         """
         timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
@@ -830,8 +828,8 @@ class MicroControllerInterface:  # pragma: no cover
                 # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
                 self._terminator_array[0] = 1
 
-                # Waits for at most _RuntimeParameters.PROCESS_TERMINATION_TIMEOUT seconds before forcibly terminating
-                # the communication process to prevent deadlocks.
+                # Waits for at most _RuntimeParameters.PROCESS_TERMINATION_TIMEOUT seconds and gives up on the join
+                # once that period elapses, to prevent deadlocks.
                 self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.

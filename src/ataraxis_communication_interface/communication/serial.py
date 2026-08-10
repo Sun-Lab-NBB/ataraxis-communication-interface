@@ -79,7 +79,7 @@ class SerialCommunication:
             logged to the logger process.
         baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
             the value used by the microcontroller. This parameter is ignored when using the USB interface.
-        test_mode: Determines whether the instance uses a pySerial (real) or a StreamMock (mocked) communication
+        test_mode: Determines whether the instance uses a pySerial (real) or a SerialMock (mocked) communication
             interface. This flag is used during testing and should be disabled for all production runtimes.
 
     Attributes:
@@ -212,8 +212,8 @@ class SerialCommunication:
             # Parses the static header data from the extracted message.
             self._module_data.message = self._transport_layer.read_data(data_object=self._module_data.message)
 
-            # Resolves the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
-            # instance.
+            # Resolves the prototype code and uses it to retrieve the prototype object from the SerialPrototypes
+            # lookup table.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._module_data.prototype_code)
 
             # If prototype retrieval fails, raises ValueError.
@@ -235,8 +235,8 @@ class SerialCommunication:
             # Parses the static header data from the extracted message.
             self._kernel_data.message = self._transport_layer.read_data(data_object=self._kernel_data.message)
 
-            # Resolves the prototype code and uses it to retrieve the prototype object from the prototypes dataclass
-            # instance.
+            # Resolves the prototype code and uses it to retrieve the prototype object from the SerialPrototypes
+            # lookup table.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._kernel_data.prototype_code)
 
             # If the prototype retrieval fails, raises ValueError.

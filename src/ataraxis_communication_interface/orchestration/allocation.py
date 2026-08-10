@@ -43,15 +43,16 @@ enumerate and the variation between archives of the same size. The penalty for u
 batch that overcommits its host swaps or is killed outright, so estimates round up.
 
 Notes:
-    This term and the four that follow it carry the values the platform's own estimators were calibrated to against
-    measured peaks. A scheduler plans a batch that mixes this stage with the stages those estimators cover, so the
-    figures have to be read on one scale, and a value that drifts from the calibrated one makes this stage's jobs
-    admit against a different standard than everything queued beside them.
+    This term and the other memory model constants in this module are empirically derived. A scheduler plans a batch
+    that mixes this stage with the stages the platform's other estimators cover, so the figures have to be read on
+    one scale, and a value that drifts makes this stage's jobs admit against a different standard than everything
+    queued beside them.
 """
 
 SPAWNED_CHILD_MEMORY_MB: int = 200
 """The resident memory one spawned child holds before it touches any data, covering the interpreter and the package's
-import graph. The term is charged once for a job's body and once for each core the job holds."""
+import graph. The term is charged once for a job's body, and once more for each core a job that opens an extraction
+pool holds."""
 
 _POOL_MEMORY_RESERVATION_DIVISOR: int = 2
 """The share of the memory budget the shared pool's warmed job bodies may claim, expressed as a divisor. The
@@ -96,8 +97,8 @@ def resolve_archive_footprint(archive_path: Path, *, read_message_count: bool = 
 
     Args:
         archive_path: The path to the .npz log archive to read.
-        read_message_count: Determines whether to open the archive and count the messages it holds. Leaving this
-            unset yields a footprint whose message count is zero, which sizes memory correctly and resolves cores to
+        read_message_count: Determines whether to open the archive and count the messages it holds. Unsetting this
+            yields a footprint whose message count is zero, which sizes memory correctly and resolves cores to
             a single worker.
 
     Returns:

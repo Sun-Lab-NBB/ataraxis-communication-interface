@@ -69,15 +69,15 @@ if __name__ == "__main__":
     console.echo(message="Initializing the communication process...")
 
     # Starts the serial communication with the microcontroller by initializing a separate process that handles the
-    # communication. This method may take up to 15 seconds to execute, as it verifies that the microcontroller is
+    # communication. This method may take up to 30 seconds to execute, as it verifies that the microcontroller is
     # configured correctly, given the MicroControllerInterface configuration.
     mc_interface.start()
 
     console.echo(message="Communication process: Initialized.", level=LogLevel.SUCCESS)
     console.echo(message="Updating hardware module runtime parameters...")
 
-    # Due to the current SharedMemoryArray implementation, the shared memory instances require additional setup after
-    # the communication process is started.
+    # The shared memory instances are connected in both processes already. Calling the setup here pins the connection
+    # point to a moment the runtime chooses, after the communication process has started.
     interface_1.start_shared_memory_array()
     interface_2.start_shared_memory_array()
 
@@ -146,8 +146,9 @@ if __name__ == "__main__":
     interface_1.reset_command_queue()
     interface_2.reset_command_queue()
 
-    # This time, since the pin pulsing performed by module 1 interferes with the echo command performed by module 2,
-    # both pulse and echo counters are expected to be ~5.
+    # The pulse period is the same in both modes, so the pin is again expected to pulse ~2 times. This time the pin
+    # pulsing performed by module 1 interferes with the echo command performed by module 2, so the echo counter is
+    # expected to fall below the non-blocking figure above.
     console.echo(message="Blocking runtime: Complete.", level=LogLevel.SUCCESS)
     console.echo(message=f"TestModule 1 Pin pulses: {interface_1.shared_memory[0]}")
     console.echo(message=f"TestModule 2 Echo values: {interface_2.shared_memory[1]}")

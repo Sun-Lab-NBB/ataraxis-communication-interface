@@ -172,8 +172,8 @@ def config_group() -> None:
 def config_create(manifest_path: Path, output_path: Path) -> None:
     """Generates a precursor extraction configuration from a microcontroller manifest.
 
-    Creates an extraction_config.yaml with all controllers and modules populated from the manifest,
-    but with empty event codes that must be filled in before processing. Edit the generated file to
+    Writes the configuration to the requested output path with all controllers and modules populated from the
+    manifest, but with empty event codes that must be filled in before processing. Edit the generated file to
     specify the event codes for each module and kernel entry.
     """
     config = create_extraction_config(manifest_path=manifest_path)
@@ -259,7 +259,8 @@ def config_show(config_path: Path) -> None:
     type=int,
     default=-1,
     show_default=True,
-    help="The number of worker processes to use. Set to -1 (default) to use all available CPU cores.",
+    help="The number of worker processes to use. Set to -1 (default) to use every available CPU core minus the "
+    "cores reserved for the host system.",
 )
 @click.option(
     "-p",
@@ -283,8 +284,8 @@ def process(
     Extracts data as specified by the extraction configuration and writes the results to feather (IPC) files.
     Targets a single recording and runs its archives one at a time. Controller IDs in the extraction config
     determine which archives are processed. Passing a job ID runs that single job alone, which is how an external
-    scheduler dispatches one unit of work. Requires an extraction_config.yaml file -- use 'axci config create' to
-    generate one from a manifest. Use the MCP server to orchestrate batches spanning many recordings.
+    scheduler dispatches one unit of work. Requires an extraction configuration .yaml file, which 'axci config
+    create' generates from a manifest. Use the MCP server to orchestrate batches spanning many recordings.
     """
     run_log_processing_pipeline(
         log_directory=log_directory,
@@ -310,9 +311,10 @@ def process(
 def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic interaction with the library.
 
-    The MCP server exposes microcontroller discovery, MQTT connectivity checking, extraction configuration
-    management, log data processing, output verification, and event querying through the MCP protocol, enabling AI
-    agents to programmatically interact with the library.
+    The MCP server exposes microcontroller discovery, MQTT connectivity checking, log archive assembly,
+    microcontroller manifest management, extraction configuration management, log data processing, output
+    verification, output cleanup, and event querying through the MCP protocol, enabling AI agents to
+    programmatically interact with the library.
     """
     # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes
     # every message up to the WARNING level. Silencing the console keeps library output out of that stream, as a
