@@ -330,7 +330,7 @@ def _create_job_pool(pool_size: int) -> ProcessPoolExecutor:
     return pool
 
 
-def _pin_pool_worker(thread_count: int, barrier: Barrier) -> None:  # pragma: no cover - runs in a spawned child.
+def _pin_pool_worker(thread_count: int, barrier: Barrier) -> None:
     """Pins one shared-pool worker's numeric backends and holds it until every sibling worker has started.
 
     Notes:
@@ -348,7 +348,7 @@ def _pin_pool_worker(thread_count: int, barrier: Barrier) -> None:  # pragma: no
     barrier.wait(timeout=_POOL_WARMUP_TIMEOUT_SECONDS)
 
 
-def _warm_pool_worker() -> None:  # pragma: no cover - runs in a spawned child.
+def _warm_pool_worker() -> None:
     """Serves as the task whose submission forces one shared-pool worker to spawn."""
 
 

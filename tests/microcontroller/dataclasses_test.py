@@ -1,10 +1,15 @@
 """Contains tests for the classes and functions defined in the dataclasses module."""
 
+from typing import Any
 from pathlib import Path
+import threading
+import multiprocessing
 
 import pytest
+from filelock import Timeout, FileLock
 from ataraxis_base_utilities import error_format
 
+from ataraxis_communication_interface.microcontroller import dataclasses
 from ataraxis_communication_interface.microcontroller.dataclasses import (
     EXTRACTION_CONFIGURATION_FILENAME,
     MICROCONTROLLER_MANIFEST_FILENAME,
@@ -18,6 +23,20 @@ from ataraxis_communication_interface.microcontroller.dataclasses import (
     create_extraction_config,
     write_microcontroller_manifest,
 )
+
+_CONCURRENCY_TIMEOUT: int = 30
+"""Stores the time, in seconds, the concurrency tests wait for a helper process or a lock before giving up."""
+
+
+def _register_controller(log_directory: Path, controller_id: int, barrier: Any) -> None:
+    """Registers one controller in the shared manifest once every sibling process has reached the barrier."""
+    barrier.wait(timeout=_CONCURRENCY_TIMEOUT)
+    write_microcontroller_manifest(
+        log_directory=log_directory,
+        controller_id=controller_id,
+        controller_name=f"controller_{controller_id}",
+        modules=(ModuleSourceData(module_type=1, module_id=1, name="encoder"),),
+    )
 
 
 def test_constants() -> None:
@@ -269,7 +288,7 @@ def test_write_microcontroller_manifest_new(tmp_path: Path) -> None:
 
 
 def test_write_microcontroller_manifest_append(tmp_path: Path) -> None:
-    """Verifies that write_microcontroller_manifest appends to an existing manifest."""
+    """Verifies that write_microcontroller_manifest appends a controller the manifest does not already carry."""
     modules_1 = (ModuleSourceData(module_type=1, module_id=1, name="encoder"),)
     modules_2 = (ModuleSourceData(module_type=2, module_id=1, name="lick_sensor"),)
 
@@ -286,6 +305,95 @@ def test_write_microcontroller_manifest_append(tmp_path: Path) -> None:
     assert len(loaded.controllers) == 2
     assert loaded.controllers[0].id == 10
     assert loaded.controllers[1].id == 20
+
+
+def test_write_microcontroller_manifest_replaces_a_repeated_controller(tmp_path: Path) -> None:
+    """Verifies that re-registering a controller id replaces its entry instead of adding a second one."""
+    write_microcontroller_manifest(
+        log_directory=tmp_path,
+        controller_id=10,
+        controller_name="controller_1",
+        modules=(ModuleSourceData(module_type=1, module_id=1, name="encoder"),),
+    )
+    write_microcontroller_manifest(
+        log_directory=tmp_path,
+        controller_id=10,
+        controller_name="controller_2",
+        modules=(ModuleSourceData(module_type=2, module_id=1, name="lick_sensor"),),
+    )
+
+    loaded = MicroControllerManifest.from_yaml(file_path=tmp_path / MICROCONTROLLER_MANIFEST_FILENAME)
+
+    assert len(loaded.controllers) == 1
+    assert loaded.controllers[0].name == "controller_2"
+    assert loaded.controllers[0].modules[0].name == "lick_sensor"
+
+
+def test_write_microcontroller_manifest_serializes_concurrent_processes(tmp_path: Path) -> None:
+    """Verifies that controllers registered from separate processes all survive in the manifest."""
+    # Separate processes are what the file lock adds over a thread lock. Each writer reads the manifest, adds its own
+    # entry, and writes the result back, so a writer that slips past the lock overwrites the entries written between
+    # its own read and its own write. The barrier releases every writer into that sequence at once.
+    controller_ids = (10, 20, 30, 40, 50, 60)
+    barrier = multiprocessing.Barrier(parties=len(controller_ids))
+    processes = [
+        multiprocessing.Process(target=_register_controller, args=(tmp_path, controller_id, barrier))
+        for controller_id in controller_ids
+    ]
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=_CONCURRENCY_TIMEOUT)
+
+    assert [process.exitcode for process in processes] == [0] * len(controller_ids)
+
+    loaded = MicroControllerManifest.from_yaml(file_path=tmp_path / MICROCONTROLLER_MANIFEST_FILENAME)
+    assert sorted(controller.id for controller in loaded.controllers) == sorted(controller_ids)
+
+
+def test_write_microcontroller_manifest_serializes_concurrent_threads(tmp_path: Path) -> None:
+    """Verifies that controllers registered from separate threads of one process all survive in the manifest."""
+    # The threads that concurrent MCP tool calls run on reach this function as well, so the file lock has to serialize
+    # them the way the thread lock it replaced did.
+    controller_ids = (10, 20, 30, 40, 50, 60)
+    barrier = threading.Barrier(parties=len(controller_ids))
+    failures: list[Exception] = []
+
+    def register(controller_id: int) -> None:
+        """Registers one controller and records the error a failed write raises, which a thread otherwise swallows."""
+        try:
+            _register_controller(log_directory=tmp_path, controller_id=controller_id, barrier=barrier)
+        except Exception as error:
+            failures.append(error)
+
+    threads = [threading.Thread(target=register, args=(controller_id,)) for controller_id in controller_ids]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=_CONCURRENCY_TIMEOUT)
+
+    assert failures == []
+
+    loaded = MicroControllerManifest.from_yaml(file_path=tmp_path / MICROCONTROLLER_MANIFEST_FILENAME)
+    assert sorted(controller.id for controller in loaded.controllers) == sorted(controller_ids)
+
+
+def test_write_microcontroller_manifest_times_out_on_a_held_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies that a manifest write aborts when another writer holds the lock past the timeout."""
+    monkeypatch.setattr(dataclasses, "_MANIFEST_LOCK_TIMEOUT", 0.1)
+    holder = FileLock(lock_file=str(tmp_path / f"{MICROCONTROLLER_MANIFEST_FILENAME}.lock"))
+
+    with holder.acquire(timeout=_CONCURRENCY_TIMEOUT), pytest.raises(Timeout):
+        write_microcontroller_manifest(
+            log_directory=tmp_path,
+            controller_id=10,
+            controller_name="controller",
+            modules=(ModuleSourceData(module_type=1, module_id=1, name="encoder"),),
+        )
 
 
 def test_create_extraction_config(tmp_path: Path) -> None:

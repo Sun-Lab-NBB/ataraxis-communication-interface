@@ -317,7 +317,7 @@ def _process_message_batch(
     onset_us: np.uint64,
     module_filters: dict[tuple[int, int], frozenset[int]] | None,
     kernel_event_codes: frozenset[int] | None,
-) -> _BatchResult:  # pragma: no cover
+) -> _BatchResult:
     """Processes a batch of messages from a MicroControllerInterface log archive, extracting both hardware module
     and kernel messages in a single pass into columnar accumulators.
 

@@ -55,6 +55,9 @@ dependencies = [
     # Host Resource Introspection
     "psutil>=7,<8",
 
+    # Cross-process File Locking
+    "filelock>=3,<4",
+
     # CLI
     "click>=8,<9",
 
@@ -228,6 +231,11 @@ pythonpath = ["."]
 # 'concurrency' keys extend measurement to the spawned communication and log-processing worker processes and to the
 # threads they run, giving each worker its own data file for the 'coverage' task to combine.
 [tool.coverage.run]
+
+# Names the measured package inside this file, which is the only configuration a spawned worker reads. A worker builds
+# its own coverage instance and inherits no command-line argument, so without this key it treats the installed
+# distribution the test tasks measure as third-party code and reports nothing for the statements it runs.
+source_pkgs = ["ataraxis_communication_interface"]
 parallel = true
 concurrency = ["multiprocessing", "thread"]
 omit = ["*/ataraxis_communication_interface/interfaces/*"]

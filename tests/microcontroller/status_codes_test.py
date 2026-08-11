@@ -229,6 +229,15 @@ def test_module_transmission_error_names_both_serial_layer_codes() -> None:
     assert "PACKET_PARTIALLY_SENT (code 29)" in description
 
 
+def test_module_transmission_error_drops_the_serial_clause_for_state_messages() -> None:
+    """Verifies that a module transmission fault delivered as a state message reports no serial layer codes."""
+    description = _describe_module(_module_state(command=4, event=ModuleStatusCodes.TRANSMISSION_ERROR))
+
+    assert description is not None
+    assert "TRANSMISSION_ERROR (code 1)" in description
+    assert "Communication " not in description
+
+
 def test_module_addressed_faults_name_the_reported_module() -> None:
     """Verifies that the Kernel faults carrying a module type and id pair report both codes."""
     payload = np.array([7, 2], dtype=np.uint8)
@@ -240,6 +249,16 @@ def test_module_addressed_faults_name_the_reported_module() -> None:
         description = _describe_kernel(_kernel_data(command=2, event=code, payload=payload))
         assert description is not None
         assert "Hardware module: type 7, id 2." in description
+
+
+def test_module_addressed_faults_drop_the_module_clause_for_narrow_payloads() -> None:
+    """Verifies that a Kernel fault whose payload omits one of the two module codes reports neither code."""
+    message = _kernel_data(command=2, event=KernelStatusCodes.MODULE_SETUP_ERROR, payload=np.uint8(7))
+    description = _describe_kernel(message)
+
+    assert description is not None
+    assert "MODULE_SETUP_ERROR (code 2)" in description
+    assert "Hardware module:" not in description
 
 
 def test_invalid_protocol_fault_names_the_rejected_protocol() -> None:
