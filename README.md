@@ -563,12 +563,11 @@ the condition that code reports, then raises the result as a RuntimeError from t
 
 The messages state what the reported codes establish and stop there, because a status code records where a fault was
 detected rather than what caused it. A packet corrupted between the microcontroller and the PC surfaces as the
-following, rather than as the raw codes 3, 53, and 19:
+following, rather than as the raw codes 3, 52, and 19:
 ```text
 Microcontroller 3 ('actor_controller') Kernel status RECEPTION_ERROR (code 3) during Kernel command RECEIVE_DATA
-(code 1). Reception failed. Communication PARSING_ERROR (code 53): message payload did not match the layout its
-protocol code declares. TransportLayer CRC_CHECK_FAILED (code 19): CRC mismatch, packet bytes likely corrupted in
-transit.
+(code 1). Reception failed. Communication RECEPTION_ERROR (code 52): could not read a complete message from the
+serial stream. TransportLayer CRC_CHECK_FAILED (code 19): CRC mismatch, packet bytes likely corrupted in transit.
 ```
 
 A code matching no member of its firmware enumeration reports that it falls outside the range this library resolves,
