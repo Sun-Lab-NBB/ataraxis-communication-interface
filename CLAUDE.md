@@ -109,8 +109,9 @@ library. The C++, C#, and PlatformIO skills serve other project archetypes.
 
 ## MCP server
 
-This library provides an MCP server (`axci mcp`) that exposes microcontroller discovery, MQTT broker checking,
-manifest management, extraction configuration management, and log data processing tools. When working with this project
+This library provides an MCP server (`axci mcp`) that exposes microcontroller discovery, MQTT broker checking, log
+archive assembly, recording discovery, manifest management, extraction configuration management, log data processing,
+output verification, output cleanup, and extracted event querying tools. When working with this project
 or its dependencies, prefer using available MCP tools over direct code execution when appropriate.
 
 **Guidelines for MCP usage:**
@@ -183,7 +184,8 @@ data from DataLogger archives.
 
 - **MicroControllerInterface**: Multiprocessing architecture for bidirectional microcontroller communication.
   Constructor requires `controller_id`, `data_logger`, `module_interfaces`, `buffer_size`, `port`, and `name` as
-  positional arguments. `__init__` writes a microcontroller manifest entry associating the controller_id with the
+  positional arguments, plus optional `baudrate` (defaults to 115200) and `keepalive_interval` (defaults to 0, which
+  disables keepalive messaging). `__init__` writes a microcontroller manifest entry associating the controller_id with the
   human-readable name and its module list. A dedicated communication process handles serial I/O via
   `SerialCommunication` and dispatches received messages to the appropriate `ModuleInterface` based on
   `(module_type, module_id)` routing. A watchdog thread monitors process health. Commands and parameters flow from
@@ -212,7 +214,8 @@ data from DataLogger archives.
   `ControllerIdentification`, `ModuleIdentification`).
   All received data is timestamped via `PrecisionTimer` and logged to `DataLogger` through an `MPQueue`.
 - **MQTT Communication**: `MQTTCommunication` provides publish/subscribe messaging over MQTT via `paho-mqtt`.
-  Constructor takes `ip`, `port`, and optional `monitored_topics`. `get_data()` returns `(topic, message)`
+  Constructor takes an optional `ip` (defaults to `127.0.0.1`), an optional `port` (defaults to `1883`), and an
+  optional `monitored_topics`. `get_data()` returns `(topic, message)`
   tuples from an internal `Queue` populated by the on_message callback.
 - **Microcontroller Manifest**: `MicroControllerManifest` (`YamlConfig` subclass) associates controller IDs with
   human-readable names and their module lists in a `microcontroller_manifest.yaml` file alongside DataLogger
@@ -243,9 +246,11 @@ data from DataLogger archives.
   enables JSON responses when it starts the streamable-http transport. Tool categories: microcontroller discovery (2),
   log archive management (1), manifest management (2), recording discovery (1), extraction config management (3),
   batch processing execution (2), processing status and management (5), and output verification and cleanup (3).
-  Batch log processing uses `JobExecutionState` (in `orchestration/execution.py`, accessed via
-  `get_execution_state()` / `set_execution_state()`), which admits each job once the running set has room for both the
-  cores and the memory that job's own archive resolved. The MCP server is registered with MCP clients via the
+  Batch log processing uses `JobExecutionState` (in `orchestration/execution.py`), read through
+  `get_execution_state()` and published through `start_execution_session()`, which claims the session slot and starts
+  the manager thread under one lock, while `set_execution_state()` replaces or clears the reference outright. The
+  manager admits each job once the running set has room for both the cores and the memory that job's own archive
+  resolved. The MCP server is registered with MCP clients via the
   **communication** plugin in the ataraxis marketplace, not directly from this repository.
 - **CLI**: Click command group (`axci`) with `id` for microcontroller discovery, `mqtt` for broker verification,
   `config` subgroup (`create`, `show`) for extraction configuration management, `process` for log data processing,
@@ -253,8 +258,9 @@ data from DataLogger archives.
 
 ### Key patterns
 
-- **Daemon Communication Process**: The communication process is a daemon process requiring an explicit `stop()`
-  call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
+- **Daemon Communication Process**: Construction does not start communication. `start()` spawns the daemon
+  communication process, verifies the controller and module identity, and launches the watchdog thread, and the
+  process requires an explicit `stop()` call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
 - **Message Protocol Stack**: Four levels: `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
   frame encoding), message protocols (12 types via `SerialProtocols` enum), and data prototypes (252 numpy types
   via `SerialPrototypes` enum).
@@ -337,9 +343,11 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   config requesting a subset never resets its sibling jobs. `execute_job()` wraps the work in
   `ProcessingTracker.run_job()`, which records the start, the completion, and the failure without a hand-written
   guard.
-- **CLI** (`interfaces/cli.py`): use `console.echo()` for output and `console.error()` for errors. The `config`
+- **CLI** (`interfaces/cli.py`): use `console.echo()` for output, including for errors, which are reported at
+  `LogLevel.ERROR` so a failed command exits zero rather than raising. The `config`
   subgroup demonstrates nested Click command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via
   `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return
-  JSON-serializable `dict[str, Any]`. Execution uses `JobExecutionState` (`orchestration/execution.py`) with
+  JSON-serializable `dict[str, Any]`, except the two discovery tools `list_microcontrollers_tool` and
+  `check_mqtt_broker_tool`, which return a preformatted `str`. Execution uses `JobExecutionState` (`orchestration/execution.py`) with
   archive-derived core and memory budgets.

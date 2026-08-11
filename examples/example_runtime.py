@@ -76,7 +76,7 @@ if __name__ == "__main__":
 
     # Guards the runtime below so that a failure still releases every asset reserved above. A microcontroller that is
     # absent or unplugged makes start() raise, and without this guard that exception would strand the DataLogger
-    # process, both watchdog threads, and three shared memory buffers, and would discard every message already written
+    # process, its watchdog thread, and its shared memory buffer, and would discard every message already written
     # to disk.
     try:
         # Starts the serial communication with the microcontroller by initializing a separate process that handles the
@@ -178,8 +178,8 @@ if __name__ == "__main__":
         # log entries to the DataLogger, and stopping the logger underneath a live writer would drop the entries still
         # in flight. The DataLogger stops second, which drains its queue and flushes every remaining entry to disk as
         # a .npy file. The archive assembly runs last, since it consolidates those .npy files into .npz archives and
-        # only sees a complete set once the logger process has exited. Assembling here rather than after the guard
-        # keeps a partial log usable, as the .npy files live in a temporary directory that goes away with this script.
+        # only sees a complete set once the logger process has exited. This example writes into a temporary directory
+        # that goes away with the script, so the archive is discarded on the failure path along with its sources.
         mc_interface.stop()
         console.echo(message="Communication process: Stopped.", level=LogLevel.SUCCESS)
 

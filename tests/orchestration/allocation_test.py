@@ -423,7 +423,7 @@ def test_resolve_memory_budget_mb_auto_resolves(requested_budget_mb):
 
     assert budget_mb == max(_MINIMUM_MEMORY_BUDGET_MB, int(host_memory_mb * _MEMORY_BUDGET_FRACTION))
     assert budget_mb >= _MINIMUM_MEMORY_BUDGET_MB
-    # The auto-resolved budget always leaves the host a share of its own memory.
+    # The auto-resolved budget never exceeds the greater of the host's memory and the floor a small host is held to.
     assert budget_mb <= max(_MINIMUM_MEMORY_BUDGET_MB, host_memory_mb)
 
 

@@ -29,7 +29,7 @@ _CONCURRENCY_TIMEOUT: int = 30
 
 
 def _register_controller(log_directory: Path, controller_id: int, barrier: Any) -> None:
-    """Registers one controller in the shared manifest once every sibling process has reached the barrier."""
+    """Registers one controller in the shared manifest once every sibling worker has reached the barrier."""
     barrier.wait(timeout=_CONCURRENCY_TIMEOUT)
     write_microcontroller_manifest(
         log_directory=log_directory,

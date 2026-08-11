@@ -278,7 +278,8 @@ def describe_kernel_event(
         controller_name: The human-readable name of the microcontroller that sent the message.
 
     Returns:
-        The description of the reported fault, or None when the message reports an ordinary Kernel state.
+        The description of the reported fault, or None when the message reports an ordinary Kernel state. A code
+        matching no enumeration member yields a description reporting that the code falls outside the resolved range.
     """
     # The Kernel reports ordinary progress far more often than it reports a fault, and this runs inside the
     # communication loop, so the table lookup that rules out a fault precedes every string the description needs.
@@ -318,7 +319,8 @@ def describe_module_event(
         module_name: The human-readable name of the hardware module that sent the message.
 
     Returns:
-        The description of the reported fault, or None when the message reports an ordinary module state.
+        The description of the reported fault, or None when the message reports an ordinary module state. A code
+        matching no enumeration member yields a description reporting that the code falls outside the resolved range.
     """
     # Every completed command reaches this function, and it runs inside the communication loop, so the table lookup
     # that rules out a fault precedes every string the description needs.

@@ -174,7 +174,8 @@ def config_create(manifest_path: Path, output_path: Path) -> None:
 
     Writes the configuration to the requested output path with all controllers and modules populated from the
     manifest, but with empty event codes that must be filled in before processing. Edit the generated file to
-    specify the event codes for each module and kernel entry.
+    specify the event codes for each module entry. Kernel extraction is left unconfigured, so a user who wants
+    kernel messages adds a kernel entry with its own event codes.
     """
     config = create_extraction_config(manifest_path=manifest_path)
     config.to_yaml(file_path=output_path)
@@ -259,8 +260,9 @@ def config_show(config_path: Path) -> None:
     type=int,
     default=-1,
     show_default=True,
-    help="The number of worker processes to use. Set to -1 (default) to use every available CPU core minus the "
-    "cores reserved for the host system.",
+    help="The ceiling on the worker processes any single job receives. Set to -1 (default) to resolve the ceiling "
+    "from every available CPU core minus the cores reserved for the host system. The resolved ceiling is capped at "
+    "the declared per-job allocation of 8 cores.",
 )
 @click.option(
     "-p",
@@ -311,8 +313,8 @@ def process(
 def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic interaction with the library.
 
-    The MCP server exposes microcontroller discovery, MQTT connectivity checking, log archive assembly,
-    microcontroller manifest management, extraction configuration management, log data processing, output
+    The MCP server exposes microcontroller discovery, MQTT connectivity checking, log archive assembly, recording
+    discovery, microcontroller manifest management, extraction configuration management, log data processing, output
     verification, output cleanup, and event querying through the MCP protocol, enabling AI agents to
     programmatically interact with the library.
     """

@@ -53,10 +53,12 @@ _MODULE_ID: int = 2
 """Stores the identifier code of the hardware module every synthetic archive logs messages for."""
 
 _MODULE_EVENT_CODES: tuple[int, ...] = (10, 20)
-"""Stores the module event codes every extraction configuration built by this module requests."""
+"""Stores the module event codes the shared configuration builders request by default, which the empty-filter
+tests override deliberately."""
 
 _KERNEL_EVENT_CODES: tuple[int, ...] = (5,)
-"""Stores the kernel event codes every configuration exercising kernel extraction requests."""
+"""Stores the kernel event codes the shared configuration builders request by default for kernel extraction,
+which the empty-filter tests override deliberately."""
 
 
 class _CountingExecutor(ProcessPoolExecutor):
@@ -608,7 +610,8 @@ def test_run_extraction_job_runs_the_job_from_its_descriptor(tmp_path):
     output_directory = tmp_path / "output" / OutputLayout.DIRECTORY_NAME
     job = _build_descriptor(log_directory=log_directory, output_directory=output_directory, config_path=config_path)
 
-    # The tracker is aligned by the caller that prepared the job, exactly as the preparation stage does it.
+    # Some caller has to register the job on the tracker before the runner opens it, which the preparation stage
+    # does through align_jobs over the manifest universe.
     _initialize_tracker(tracker_path=job.tracker_path)
 
     run_extraction_job(job=job)

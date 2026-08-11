@@ -88,11 +88,13 @@ def execute_job(
         workers: The number of worker processes to use for parallel processing.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
         config_path: The path to the ExtractionConfig .yaml file declaring this controller's extraction targets.
-        display_progress: Determines whether to display a progress bar during extraction.
+        display_progress: Determines whether to display a progress bar during parallel batch processing. A job that
+            runs sequentially displays nothing.
         executor: When provided, parallel processing reuses this pool instead of creating a new one. The pool is
             passed through to extract_logged_microcontroller_data to avoid spawning a redundant process pool.
 
     Raises:
+        FileNotFoundError: If no file exists at the supplied configuration path.
         ValueError: If the configuration declares no entry for this controller, if it declares a module or a kernel
             entry with empty event codes, or if it declares no extraction targets at all. Also raised if the archive
             path does not resolve to a readable .npz file, if a data message's payload size disagrees with its

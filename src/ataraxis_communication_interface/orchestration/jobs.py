@@ -80,7 +80,8 @@ class JobDescriptor:
     source_id: str
     """The identifier of the controller source whose archive this job reads."""
     core_weight: int
-    """The cores this job occupies while it runs, which is the width of the extraction pool its body opens."""
+    """The cores this job occupies while it runs, which is the width of the extraction pool its body opens once the
+    job holds more than one core."""
 
     @classmethod
     def for_archive(

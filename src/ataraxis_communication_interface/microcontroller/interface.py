@@ -1,5 +1,7 @@
 """Provides the ModuleInterface and MicroControllerInterface classes that aggregate the methods allowing Python PC
-clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers.
+clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers,
+alongside the evaluate_port() function that determines whether a serial port is connected to an Ataraxis
+microcontroller.
 """
 
 from __future__ import annotations
@@ -117,7 +119,7 @@ class ModuleInterface(ABC):
         module_type: The code that identifies the type (family) of the interfaced module.
         module_id: The code that identifies the specific interfaced module instance.
         name: A colloquial human-readable name for this hardware module (e.g., 'encoder', 'lick_sensor'). Written
-            to the microcontroller manifest file alongside the type+id code to identify this module.
+            to the microcontroller manifest file alongside the module's type and id codes to identify this module.
         error_codes: An optional mapping of the codes used by the module to communicate runtime errors to the
             explanations surfaced when those errors arrive. Receiving a message with an event-code from this mapping
             raises a RuntimeError that carries the matching explanation and aborts the runtime. Every code must fall

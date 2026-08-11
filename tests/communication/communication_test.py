@@ -61,7 +61,7 @@ def _loop_back_mocked_port(communication: SerialCommunication) -> None:
     """Feeds the bytes the instance last transmitted back to it as bytes to receive.
 
     The mocked serial port the TransportLayer builds under test mode is reachable only through private attributes, so
-    every reception test routes through this helper and the coupling to that layout is named in one place.
+    every reception test in this module routes through this helper rather than touching that layout directly.
     """
     port = communication._transport_layer._port
     port.rx_buffer = port.tx_buffer
@@ -773,7 +773,8 @@ def test_serial_communication_kernel_data_invalid_prototype(logger_queue: Queue[
         communication.receive_message()
 
 
-# The MQTT communication tests below require a local MQTT broker running at the address configured by these constants.
+# Names the local MQTT broker the tests below use. The MQTT tests that exchange real traffic skip themselves when
+# no broker is reachable at this address, while the callback and publication-status tests run without one.
 BROKER_IP: str = "127.0.0.1"
 """The loopback address of the local MQTT broker used by the MQTT communication tests."""
 

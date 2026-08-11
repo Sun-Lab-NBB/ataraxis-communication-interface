@@ -155,7 +155,8 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
 
     Args:
         footprint: The footprint of the archive this job reads.
-        cores: The cores this job holds, which is how many extraction pool children it opens.
+        cores: The cores this job holds, which is how many extraction pool children it opens once it holds more
+            than one.
 
     Returns:
         The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to a whole gigabyte.

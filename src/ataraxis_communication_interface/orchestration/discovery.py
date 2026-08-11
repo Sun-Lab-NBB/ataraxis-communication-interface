@@ -86,7 +86,8 @@ class JobSet:
     log_directory: Path
     """The root directory holding the manifest and the log archives."""
     output_directory: Path
-    """The subdirectory the preparation created, which holds the tracker and every output file."""
+    """The subdirectory the preparation resolves, created once at least one job is prepared, which holds the tracker
+    and every output file."""
     tracker_path: Path
     """The path to the ProcessingTracker file recording every job in this set."""
     universe: tuple[tuple[str, str], ...]
@@ -236,13 +237,14 @@ def prepare_jobs(
     """Resolves and registers the microcontroller data extraction jobs of one log directory.
 
     Notes:
-        Materializes the output subdirectory and aligns the tracker against the manifest universe, which is every
-        write this call performs outside a job's own output. The prepared job list lives in the returned set rather
-        than on disk.
+        Materializes the output subdirectory and aligns the tracker against the manifest universe once at least one
+        job is prepared, which is every write this call performs outside a job's own output. The prepared job list
+        lives in the returned set rather than on disk.
 
-        Reads no archive. Every job carries the core ceiling as its width, and the extraction narrows that to what
-        its own archive repays, so a caller that only runs jobs pays nothing to prepare them. A caller that weighs
-        jobs against a budget sizes each one through size_job.
+        Reads no archive. Every job carries the core ceiling as its width, and the extraction reads an archive below
+        the parallel processing threshold sequentially whatever width it is given, so a caller that only runs jobs
+        pays nothing to prepare them. A caller that weighs jobs against a budget sizes each one through size_job,
+        which narrows the width to the workers the archive repays.
 
         A tree holding no manifest prepares no job whatever the configuration declares, matching the empty universe
         the resolution reports for it.
@@ -271,9 +273,10 @@ def prepare_jobs(
             archive is absent under strict sourcing.
         ValueError: If the tree holds more than one manifest, if a manifest registers no sources, if the
             configuration declares no controllers, if a job identifier matches no configured controller, if a
-            requested source is registered by neither the manifest nor the configuration under strict sourcing, or
-            if the resolved archives span several directories.
+            requested source is absent from the microcontroller manifest or from the extraction configuration under
+            strict sourcing, or if the resolved archives span several directories.
         OSError: If any directory beneath the log directory cannot be read.
+        TimeoutError: If the tracker's lock cannot be acquired.
     """
     if not config_path.is_file():
         message = (

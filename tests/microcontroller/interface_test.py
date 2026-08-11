@@ -79,7 +79,8 @@ _ONE_UINT8_PROTOTYPE: int = 2
 """Stores the SerialPrototypes code for a single uint8 value, which every data message below carries."""
 
 _JOIN_TIMEOUT: int = 30
-"""Stores the time, in seconds, the tests below wait for a helper process to terminate before giving up."""
+"""Stores the time, in seconds, the tests below wait for a helper process or thread to terminate before
+giving up."""
 
 _IDENTIFICATION_TIMEOUT: int = 20
 """Stores the shortened identification timeout, in milliseconds, the verification tests wait out in full."""
@@ -283,7 +284,7 @@ class _ScriptedTerminatorArray:
         return 0
 
     def __setitem__(self, index: int, value: int) -> None:
-        """Stores the runtime flag the communication cycle reports under the requested index."""
+        """Records the completed initialization the communication cycle reports, and drops every other index."""
         if index == 1:
             self.initialized = bool(value)
 
@@ -495,7 +496,8 @@ def test_module_interface_type_id_is_position_aware() -> None:
 
 @pytest.mark.parametrize("module_type", [0, 1, np.uint16(1), np.uint8(0)])
 def test_module_interface_initialization_invalid_module_type(module_type: Any) -> None:
-    """Verifies that ModuleInterface rejects a module type code outside the valid byte range."""
+    """Verifies that ModuleInterface rejects a module type code that is not a numpy uint8 inside the valid byte
+    range."""
     message = (
         f"Unable to initialize the ModuleInterface instance for module {_MODULE_ID} of type {module_type}. "
         f"Expected an unsigned integer value between 1 and 255 for 'module_type' argument, but encountered "
@@ -507,7 +509,8 @@ def test_module_interface_initialization_invalid_module_type(module_type: Any) -
 
 @pytest.mark.parametrize("module_id", [0, 2, np.uint16(2), np.uint8(0)])
 def test_module_interface_initialization_invalid_module_id(module_id: Any) -> None:
-    """Verifies that ModuleInterface rejects a module id code outside the valid byte range."""
+    """Verifies that ModuleInterface rejects a module id code that is not a numpy uint8 inside the valid byte
+    range."""
     message = (
         f"Unable to initialize the ModuleInterface instance for module {module_id} of type {_MODULE_TYPE}. "
         f"Expected an unsigned integer value between 1 and 255 for 'module_id' argument, but encountered "
@@ -743,7 +746,8 @@ def test_microcontroller_interface_reset_controller(logger: DataLogger) -> None:
 
 @pytest.mark.parametrize("controller_id", [0, 1, np.uint16(1), np.uint8(0)])
 def test_microcontroller_interface_initialization_invalid_controller_id(logger: DataLogger, controller_id: Any) -> None:
-    """Verifies that MicroControllerInterface rejects a controller id outside the valid byte range."""
+    """Verifies that MicroControllerInterface rejects a controller id that is not a numpy uint8 inside the valid
+    byte range."""
     message = (
         f"Unable to initialize the MicroControllerInterface instance. Expected an unsigned integer value "
         f"between 1 and 255 for the 'controller_id' argument, but encountered {controller_id} of type "
@@ -819,7 +823,8 @@ def test_microcontroller_interface_initialization_invalid_data_logger() -> None:
 
 @pytest.mark.parametrize("buffer_size", [8, 300.0, None])
 def test_microcontroller_interface_initialization_invalid_buffer_size(logger: DataLogger, buffer_size: Any) -> None:
-    """Verifies that MicroControllerInterface rejects a serial buffer size below the transport layer's minimum."""
+    """Verifies that MicroControllerInterface rejects a serial buffer size that is not an integer at or above the
+    transport layer's minimum."""
     message = (
         f"Unable to initialize the MicroControllerInterface instance for the microcontroller with id "
         f"{_CONTROLLER_ID}. Expected an integer value of at least {interface._MINIMUM_SERIAL_BUFFER_SIZE} for the "
@@ -1491,7 +1496,8 @@ def test_watchdog_yields_the_shutdown_to_a_concurrent_stop(
 
 
 def test_watchdog_waits_out_the_communication_process_startup(logger: DataLogger) -> None:
-    """Verifies that the watchdog monitors no process state until the interface reports a started runtime."""
+    """Verifies that the watchdog completes its cycle without error while the interface reports an unstarted
+    runtime."""
     controller = MicroControllerInterface(
         controller_id=_CONTROLLER_ID,
         data_logger=logger,

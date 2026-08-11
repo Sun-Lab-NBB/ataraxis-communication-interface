@@ -28,7 +28,7 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
     Returns:
         A dictionary containing the config path, a list of controller entries with their modules and
         kernel settings, and the total controller count. Returns an error dictionary if the file is
-        missing or cannot be parsed.
+        missing, is not a file, or cannot be parsed.
     """
     path = Path(config_path)
 
@@ -164,7 +164,8 @@ def validate_extraction_config_tool(
 
     Returns:
         A dictionary containing a 'valid' flag, a 'config_path' key, a list of 'errors' (empty when valid), and
-        a 'summary' with controller and module counts. Returns an error dictionary if the file cannot be read.
+        a 'summary' carrying 'total_controllers', 'total_modules', and 'controllers_with_kernel'. Returns an
+        error dictionary if the file cannot be read.
     """
     path = Path(config_path)
 

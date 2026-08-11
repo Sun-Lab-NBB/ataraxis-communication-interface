@@ -1,9 +1,9 @@
 """Provides a Model Context Protocol (MCP) server for agentic interaction with the library.
 
-Exposes microcontroller discovery, MQTT broker connectivity checking, log archive assembly, microcontroller manifest
-management, extraction configuration management, microcontroller data log processing, output verification, output
-cleanup, and extracted event querying through the MCP protocol, enabling AI agents to programmatically interact with
-the library's core features.
+Exposes microcontroller discovery, MQTT broker connectivity checking, log archive assembly, recording discovery,
+microcontroller manifest management, extraction configuration management, microcontroller data log processing, output
+verification, output cleanup, and extracted event querying through the MCP protocol, enabling AI agents to
+programmatically interact with the library's core features.
 """
 
 from __future__ import annotations

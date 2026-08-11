@@ -127,7 +127,8 @@ def test_custom_status_code_range_abuts_the_service_range() -> None:
 
 
 def test_description_tables_cover_every_fault_code() -> None:
-    """Verifies that each description table holds exactly the codes that report a fault."""
+    """Verifies that the Kernel and module tables hold exactly the codes that report a fault, while the two
+    serial layer tables hold their whole enumeration."""
     assert set(_KERNEL_ERROR_DESCRIPTIONS) == {
         KernelStatusCodes.STANDBY,
         KernelStatusCodes.MODULE_SETUP_ERROR,

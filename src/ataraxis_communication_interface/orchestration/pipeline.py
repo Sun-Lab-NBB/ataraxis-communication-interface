@@ -46,9 +46,10 @@ def run_log_processing_pipeline(
         lets independent external jobs share one tracker without resetting each other's state. That is what supports
         running every controller of one recording in parallel under an external scheduler.
 
-        Each job runs at the requested worker ceiling, and the extraction narrows that to what its own archive
-        repays. A sequential run commits one job's resources at a time, so it weighs nothing against a budget and
-        reads no archive before dispatching it.
+        Each job runs at the smaller of the requested worker ceiling and the declared per-job allocation, and the
+        extraction reads an archive below the parallel processing threshold sequentially whatever width it is given.
+        A sequential run commits one job's resources at a time, so it weighs nothing against a budget and reads no
+        archive before dispatching it.
 
     Args:
         log_directory: The path to the root directory to search for .npz log archives. The directory is searched
@@ -64,8 +65,10 @@ def run_log_processing_pipeline(
             configuration and resolve to exactly one archive. If not provided, processes every configured controller.
             This argument is ignored in external mode.
         workers: The ceiling on the workers any single job receives. Setting this to a value less than 1 resolves the
-            ceiling from the host's core count. Setting this to 1 conducts every job sequentially.
-        display_progress: Determines whether to display progress bars during extraction.
+            ceiling from the host's core count. Setting this to 1 conducts every job sequentially. The resolved
+            ceiling is capped at the declared per-job allocation of 8 cores.
+        display_progress: Determines whether to display progress bars during parallel batch processing. A job that
+            runs sequentially displays nothing.
 
     Raises:
         FileNotFoundError: If the log directory or the configuration file does not exist, if a requested controller's
@@ -76,6 +79,8 @@ def run_log_processing_pipeline(
             configured module or the kernel declares empty event codes, if a controller declares no extraction
             targets, or if a logged data message's payload size disagrees with its prototype code.
         OSError: If any directory beneath the log directory cannot be read.
+        TimeoutError: If the processing tracker's lock cannot be acquired, which a batch running concurrently over
+            the same output directory can cause.
     """
     job_set = prepare_jobs(
         log_directory=log_directory,

@@ -82,8 +82,9 @@ def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
     """Generates a precursor extraction configuration from a microcontroller manifest.
 
     Reads the manifest file and populates a ControllerExtractionConfig entry for each registered controller
-    with placeholder empty event codes. The user must fill in the actual event codes for each module and kernel
-    entry before the configuration is usable for processing.
+    with placeholder empty event codes. The user must fill in the actual event codes for each module entry before
+    the configuration is usable for processing. Each controller entry leaves kernel extraction unconfigured, so a
+    user who wants kernel messages adds a kernel entry with its own event codes.
 
     Args:
         manifest_path: The path to the microcontroller_manifest.yaml file.
@@ -197,8 +198,9 @@ class ModuleExtractionConfig:
 
     Notes:
         Event codes must be globally unique within each module. The same event code must not be reused with
-        different semantics across commands. This invariance is enforced by the microcontroller firmware and enables
-        extraction to filter by event code alone without requiring command code disambiguation.
+        different semantics across commands. The microcontroller firmware requires this invariance of every module
+        implementation, which enables extraction to filter by event code alone without requiring command code
+        disambiguation.
     """
 
     module_type: int

@@ -33,10 +33,10 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
 
     Returns:
         A dictionary containing a 'verified' flag, the 'output_directory' and 'data_path', per-file results in 'files'
-        (each with path, filename, type, schema validity, row count, and column names, plus an 'error' for a file that
-        cannot be read and 'missing_columns' and 'extra_columns' for a file whose schema mismatches), tracker status
-        in 'tracker', and a 'total_files' count. Returns an error dictionary if the output directory is missing, is
-        not a directory, or holds no ``microcontroller_data/`` subdirectory.
+        (each with path, filename, type, and schema validity, carrying row count and column names when the file was
+        read, an 'error' instead when it was not, and 'missing_columns' and 'extra_columns' when the schema
+        mismatches), tracker status in 'tracker', and a 'total_files' count. Returns an error dictionary if the
+        output directory is missing, is not a directory, or holds no ``microcontroller_data/`` subdirectory.
     """
     output_path = Path(output_directory)
 
@@ -134,8 +134,8 @@ def query_extracted_events_tool(
 
     For each file, computes the total row count, time range, per-event-code frequency distribution, per-command-code
     frequency distribution, and inter-event timing statistics. Also returns a configurable number of sample rows
-    (head of the file) with binary data payloads omitted for readability. Accepts feather file paths from the
-    'files' list returned by verify_processing_output_tool.
+    (head of the file) with binary data payloads omitted for readability. Accepts paths from the 'file' field of
+    entries in the 'files' list returned by verify_processing_output_tool.
 
     Args:
         feather_files: The list of absolute paths to feather files produced by the log processing pipeline.

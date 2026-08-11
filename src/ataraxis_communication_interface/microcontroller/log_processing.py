@@ -54,10 +54,12 @@ class ExtractedMessages:
     """The event code of each message."""
     dtypes: tuple[str | None, ...]
     """The numpy dtype string for the data payload of each message (e.g., ``'float32'``, ``'uint16'``), or None for
-    state-only messages that carry no data. Combined with the corresponding ``data_payloads`` entry, the stored dtype
+    state-only messages that carry no data and for data messages whose prototype code this library does not recognize.
+    Combined with the corresponding ``data_payloads`` entry, the stored dtype
     string allows reconstructing the original numpy array from the payload bytes without any library dependency."""
     data_payloads: tuple[bytes | None, ...]
-    """The serialized binary payload of each message, or None for state-only messages. Each entry is the raw byte
+    """The serialized binary payload of each message, or None for state-only messages and for data messages whose
+    prototype code this library does not recognize. Each entry is the raw byte
     representation of the numpy data array, decodable via the corresponding ``dtypes`` entry."""
 
     @property
@@ -103,9 +105,11 @@ class _ColumnAccumulator:
     events: list[int]
     """The event code for each message."""
     dtypes: list[str | None]
-    """The numpy dtype string for each message's data payload, or None for state-only messages."""
+    """The numpy dtype string for each message's data payload, or None for state-only messages and for data messages
+    whose prototype code this library does not recognize."""
     data_payloads: list[bytes | None]
-    """The serialized binary payload of each message, or None for state-only messages."""
+    """The serialized binary payload of each message, or None for state-only messages and for data messages whose
+    prototype code this library does not recognize."""
 
 
 type _BatchResult = tuple[
@@ -158,7 +162,8 @@ def extract_logged_microcontroller_data(
 
     Raises:
         ValueError: If the target path does not exist, does not have a .npz suffix, or does not point to a file. Also
-            raised if a data message carries a data payload of a different size than its prototype code declares.
+            raised if the archive carries no onset timestamp message, and if a data message carries a data payload of
+            a different size than its prototype code declares.
     """
     # Validates the archive path. LogArchiveReader checks existence, but not the .npz suffix or file type.
     if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():

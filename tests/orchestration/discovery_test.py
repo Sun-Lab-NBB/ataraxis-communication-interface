@@ -84,7 +84,8 @@ def _build_archive(directory, source_id, message_count=3):
 
 
 def _write_manifest_entry(log_directory, source_id, name=None):
-    """Appends a single-module controller entry for the target source to the manifest of the target directory."""
+    """Registers a single-module controller entry for the target source in the manifest of the target directory,
+    replacing any entry the manifest already holds for it."""
     log_directory.mkdir(parents=True, exist_ok=True)
     write_microcontroller_manifest(
         log_directory=log_directory,
@@ -119,7 +120,8 @@ def _write_config(config_path, source_ids):
 
 
 def _snapshot_tree(directory):
-    """Captures the path, size, and modification time of every filesystem entry under the target directory."""
+    """Captures the path, the directory flag, the size, and the modification time of every filesystem entry under
+    the target directory."""
     return {
         path: (path.is_dir(), path.stat().st_size, path.stat().st_mtime_ns) for path in sorted(directory.rglob("*"))
     }
