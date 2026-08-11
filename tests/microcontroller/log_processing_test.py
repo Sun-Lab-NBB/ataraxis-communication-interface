@@ -9,10 +9,10 @@ from numpy.typing import NDArray
 from tests.log_archives import (
     DEFAULT_ONSET_US,
     create_test_archive,
-    make_kernel_data_payload,
-    make_module_data_payload,
-    make_kernel_state_payload,
-    make_module_state_payload,
+    create_kernel_data_payload,
+    create_module_data_payload,
+    create_kernel_state_payload,
+    create_module_state_payload,
 )
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, PARALLEL_PROCESSING_THRESHOLD, LogArchiveReader
@@ -47,47 +47,6 @@ _MODULE_KEY: tuple[int, int] = (_MODULE_TYPE, _MODULE_ID)
 
 _UINT16_PROTOTYPE_CODE: int = 7
 """Stores the prototype code that declares a single two-byte unsigned integer data object."""
-
-
-def _build_archive(archive_path: Path, messages: list[tuple[int, NDArray[np.uint8]]]) -> None:
-    """Builds a synthetic log archive holding the requested messages."""
-    create_test_archive(archive_path=archive_path, source_id=_SOURCE_ID, messages=messages)
-
-
-def _module_state(elapsed_us: int, command: int, event: int) -> tuple[int, NDArray[np.uint8]]:
-    """Builds a timestamped MODULE_STATE message for the module every synthetic archive registers."""
-    return (
-        elapsed_us,
-        make_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=command, event=event),
-    )
-
-
-def _module_data(
-    elapsed_us: int, command: int, event: int, prototype_code: int, data_bytes: list[int]
-) -> tuple[int, NDArray[np.uint8]]:
-    """Builds a timestamped MODULE_DATA message for the module every synthetic archive registers."""
-    return (
-        elapsed_us,
-        make_module_data_payload(
-            module_type=_MODULE_TYPE,
-            module_id=_MODULE_ID,
-            command=command,
-            event=event,
-            prototype_code=prototype_code,
-            data_bytes=data_bytes,
-        ),
-    )
-
-
-def _accumulator(count: int) -> _ColumnAccumulator:
-    """Builds a column accumulator holding the requested number of synthetic state-only messages."""
-    return _ColumnAccumulator(
-        timestamps=[100 * (index + 1) for index in range(count)],
-        commands=[1] * count,
-        events=[10] * count,
-        dtypes=[None] * count,
-        data_payloads=[None] * count,
-    )
 
 
 def test_extracted_messages_count() -> None:
@@ -136,11 +95,11 @@ def test_extracted_module_data() -> None:
 
 def test_extracted_controller_data() -> None:
     """Verifies that ExtractedControllerData stores the module blocks and the kernel block of one extraction pass."""
-    kernel = _finalize_accumulator(accumulator=_accumulator(count=2))
+    kernel = _finalize_accumulator(accumulator=_build_accumulator(count=2))
     module_data = ExtractedModuleData(
         module_type=_MODULE_TYPE,
         module_id=_MODULE_ID,
-        messages=_finalize_accumulator(accumulator=_accumulator(count=1)),
+        messages=_finalize_accumulator(accumulator=_build_accumulator(count=1)),
     )
     controller_data = ExtractedControllerData(modules=(module_data,), kernel=kernel)
 
@@ -228,11 +187,11 @@ def test_finalize_accumulator_empty() -> None:
 
 def test_finalize_batch_skips_silent_modules() -> None:
     """Verifies that _finalize_batch reports only the modules that produced at least one matching message."""
-    module_accumulators = {_MODULE_KEY: _accumulator(count=2), (3, 4): _create_accumulator()}
+    module_accumulators = {_MODULE_KEY: _build_accumulator(count=2), (3, 4): _create_accumulator()}
 
     result = _finalize_batch(
         module_accumulators=module_accumulators,
-        kernel_accumulator=_accumulator(count=1),
+        kernel_accumulator=_build_accumulator(count=1),
         module_filters={_MODULE_KEY: frozenset({10}), (3, 4): frozenset({20})},
     )
 
@@ -258,8 +217,8 @@ def test_process_message_batch_unknown_prototype_codes(tmp_path: Path) -> None:
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_data(elapsed_us=1000, command=1, event=10, prototype_code=0, data_bytes=[1, 2]),
-            (2000, make_kernel_data_payload(command=3, event=5, prototype_code=0, data_bytes=[7])),
+            _build_module_data(elapsed_us=1000, command=1, event=10, prototype_code=0, data_bytes=[1, 2]),
+            (2000, create_kernel_data_payload(command=3, event=5, prototype_code=0, data_bytes=[7])),
         ],
     )
     reader = LogArchiveReader(archive_path=archive_path)
@@ -337,9 +296,9 @@ def test_extract_logged_microcontroller_data_module_only(tmp_path: Path) -> None
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=1000, command=1, event=10),
-            _module_state(elapsed_us=2000, command=1, event=10),
-            _module_data(
+            _build_module_state(elapsed_us=1000, command=1, event=10),
+            _build_module_state(elapsed_us=2000, command=1, event=10),
+            _build_module_data(
                 elapsed_us=3000,
                 command=2,
                 event=20,
@@ -348,9 +307,9 @@ def test_extract_logged_microcontroller_data_module_only(tmp_path: Path) -> None
             ),
             # An event code outside the module's filter, a message from an unrequested module, and a kernel message
             # that no filter admits. None of them are extracted.
-            _module_state(elapsed_us=4000, command=1, event=99),
-            (5000, make_module_state_payload(module_type=9, module_id=9, command=1, event=10)),
-            (6000, make_kernel_state_payload(command=1, event=5)),
+            _build_module_state(elapsed_us=4000, command=1, event=99),
+            (5000, create_module_state_payload(module_type=9, module_id=9, command=1, event=10)),
+            (6000, create_kernel_state_payload(command=1, event=5)),
         ],
     )
 
@@ -383,17 +342,17 @@ def test_extract_logged_microcontroller_data_kernel_only(tmp_path: Path) -> None
     _build_archive(
         archive_path=archive_path,
         messages=[
-            (1000, make_kernel_state_payload(command=1, event=5)),
-            (2000, make_kernel_state_payload(command=2, event=6)),
+            (1000, create_kernel_state_payload(command=1, event=5)),
+            (2000, create_kernel_state_payload(command=2, event=6)),
             (
                 3000,
-                make_kernel_data_payload(
+                create_kernel_data_payload(
                     command=3, event=5, prototype_code=_UINT16_PROTOTYPE_CODE, data_bytes=[172, 5]
                 ),
             ),
             # An unmatched kernel event and a module message, neither of which is extracted.
-            (4000, make_kernel_state_payload(command=1, event=99)),
-            _module_state(elapsed_us=5000, command=1, event=10),
+            (4000, create_kernel_state_payload(command=1, event=99)),
+            _build_module_state(elapsed_us=5000, command=1, event=10),
         ],
     )
 
@@ -422,10 +381,10 @@ def test_extract_logged_microcontroller_data_module_and_kernel(tmp_path: Path) -
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=1000, command=1, event=10),
-            (2000, make_kernel_state_payload(command=1, event=5)),
-            _module_state(elapsed_us=3000, command=2, event=10),
-            (4000, make_kernel_state_payload(command=2, event=5)),
+            _build_module_state(elapsed_us=1000, command=1, event=10),
+            (2000, create_kernel_state_payload(command=1, event=5)),
+            _build_module_state(elapsed_us=3000, command=2, event=10),
+            (4000, create_kernel_state_payload(command=2, event=5)),
         ],
     )
 
@@ -456,10 +415,10 @@ def test_extract_logged_microcontroller_data_isolates_the_per_module_event_codes
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=1000, command=1, event=10),
-            _module_state(elapsed_us=2000, command=1, event=20),
-            (3000, make_module_state_payload(module_type=3, module_id=4, command=1, event=10)),
-            (4000, make_module_state_payload(module_type=3, module_id=4, command=1, event=20)),
+            _build_module_state(elapsed_us=1000, command=1, event=10),
+            _build_module_state(elapsed_us=2000, command=1, event=20),
+            (3000, create_module_state_payload(module_type=3, module_id=4, command=1, event=10)),
+            (4000, create_module_state_payload(module_type=3, module_id=4, command=1, event=20)),
         ],
     )
 
@@ -483,8 +442,8 @@ def test_extract_logged_microcontroller_data_no_matching_messages(tmp_path: Path
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=1000, command=1, event=99),
-            (2000, make_kernel_state_payload(command=1, event=99)),
+            _build_module_state(elapsed_us=1000, command=1, event=99),
+            (2000, create_kernel_state_payload(command=1, event=99)),
         ],
     )
 
@@ -506,7 +465,7 @@ def test_extract_logged_microcontroller_data_mismatched_data_payload(tmp_path: P
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_data(
+            _build_module_data(
                 elapsed_us=1000,
                 command=1,
                 event=10,
@@ -538,7 +497,7 @@ def test_extract_logged_microcontroller_data_mismatched_kernel_payload(tmp_path:
         messages=[
             (
                 1000,
-                make_kernel_data_payload(
+                create_kernel_data_payload(
                     command=1, event=5, prototype_code=_UINT16_PROTOTYPE_CODE, data_bytes=[0, 0, 0, 0]
                 ),
             )
@@ -565,7 +524,7 @@ def test_extract_logged_microcontroller_data_matching_data_payload(tmp_path: Pat
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_data(
+            _build_module_data(
                 elapsed_us=1000,
                 command=1,
                 event=10,
@@ -595,11 +554,11 @@ def test_extract_logged_microcontroller_data_parallel_matches_sequential(tmp_pat
     """Verifies that parallel extraction of an above-threshold archive reproduces the sequential result exactly."""
     archive_path = tmp_path / f"{_SOURCE_ID}{LOG_ARCHIVE_SUFFIX}"
     messages: list[tuple[int, NDArray[np.uint8]]] = [
-        _module_state(elapsed_us=index * 10, command=1, event=10)
+        _build_module_state(elapsed_us=index * 10, command=1, event=10)
         for index in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     messages.extend(
-        (PARALLEL_PROCESSING_THRESHOLD * 10 + index, make_kernel_state_payload(command=2, event=5))
+        (PARALLEL_PROCESSING_THRESHOLD * 10 + index, create_kernel_state_payload(command=2, event=5))
         for index in range(1, 5)
     )
     _build_archive(archive_path=archive_path, messages=messages)
@@ -634,7 +593,7 @@ def test_extract_logged_microcontroller_data_parallel_with_progress(tmp_path: Pa
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=index * 10, command=1, event=10)
+            _build_module_state(elapsed_us=index * 10, command=1, event=10)
             for index in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
         ],
     )
@@ -659,7 +618,7 @@ def test_extract_logged_microcontroller_data_resolves_the_worker_count(
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=index * 10, command=1, event=10)
+            _build_module_state(elapsed_us=index * 10, command=1, event=10)
             for index in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
         ],
     )
@@ -692,7 +651,7 @@ def test_extract_logged_microcontroller_data_external_executor(tmp_path: Path) -
     _build_archive(
         archive_path=archive_path,
         messages=[
-            _module_state(elapsed_us=index * 10, command=1, event=10)
+            _build_module_state(elapsed_us=index * 10, command=1, event=10)
             for index in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
         ],
     )
@@ -715,3 +674,44 @@ def test_extract_logged_microcontroller_data_external_executor(tmp_path: Path) -
         assert executor.submit(abs, -5).result() == 5
     finally:
         executor.shutdown(wait=True)
+
+
+def _build_archive(archive_path: Path, messages: list[tuple[int, NDArray[np.uint8]]]) -> None:
+    """Builds a synthetic log archive holding the requested messages."""
+    create_test_archive(archive_path=archive_path, source_id=_SOURCE_ID, messages=messages)
+
+
+def _build_module_state(elapsed_us: int, command: int, event: int) -> tuple[int, NDArray[np.uint8]]:
+    """Builds a timestamped MODULE_STATE message for the module every synthetic archive registers."""
+    return (
+        elapsed_us,
+        create_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=command, event=event),
+    )
+
+
+def _build_module_data(
+    elapsed_us: int, command: int, event: int, prototype_code: int, data_bytes: list[int]
+) -> tuple[int, NDArray[np.uint8]]:
+    """Builds a timestamped MODULE_DATA message for the module every synthetic archive registers."""
+    return (
+        elapsed_us,
+        create_module_data_payload(
+            module_type=_MODULE_TYPE,
+            module_id=_MODULE_ID,
+            command=command,
+            event=event,
+            prototype_code=prototype_code,
+            data_bytes=data_bytes,
+        ),
+    )
+
+
+def _build_accumulator(count: int) -> _ColumnAccumulator:
+    """Builds a column accumulator holding the requested number of synthetic state-only messages."""
+    return _ColumnAccumulator(
+        timestamps=[100 * (index + 1) for index in range(count)],
+        commands=[1] * count,
+        events=[10] * count,
+        dtypes=[None] * count,
+        data_payloads=[None] * count,
+    )

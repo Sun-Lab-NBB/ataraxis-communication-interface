@@ -21,7 +21,7 @@ from ..microcontroller import ExtractionConfig, evaluate_port, create_extraction
 
 console.enable()
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 _WORKER_THREAD_CEILING: int = 1
@@ -29,7 +29,7 @@ _WORKER_THREAD_CEILING: int = 1
 on one serial port, so the backends it imports repay no pool wider than a single thread."""
 
 
-@click.group("axci", context_settings=CONTEXT_SETTINGS)
+@click.group("axci", context_settings=_CONTEXT_SETTINGS)
 def axci_cli() -> None:
     """Serves as the entry-point for interfacing with all interactive components of the
     ataraxis-communication-interface (AXCI) library.
@@ -44,7 +44,7 @@ def axci_cli() -> None:
     default=115200,
     show_default=True,
     help="The baudrate to use for communication during identification. Only used by microcontrollers that communicate "
-    "via the UART serial interface; ignored by microcontrollers that use the USB interface.",
+    "via the UART serial interface, and ignored by microcontrollers that use the USB interface.",
 )
 def identify(baudrate: int) -> None:
     """Discovers all connected Arduino or Teensy microcontrollers running the ataraxis-micro-controller library.
@@ -315,7 +315,7 @@ def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
 
     The MCP server exposes microcontroller discovery, MQTT connectivity checking, log archive assembly, recording
     discovery, microcontroller manifest management, extraction configuration management, log data processing, output
-    verification, output cleanup, and event querying through the MCP protocol, enabling AI agents to
+    verification, output cleanup, and event querying through the MCP protocol. The exposed tools enable AI agents to
     programmatically interact with the library.
     """
     # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes

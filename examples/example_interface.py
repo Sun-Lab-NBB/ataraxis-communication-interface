@@ -33,7 +33,8 @@ class TestModuleInterface(ModuleInterface):
 
     Attributes:
         _shared_memory: Shared memory array used to transfer data between the communication and main processes.
-        _previous_pin_state: Tracks the state of the digital output pin managed by the module.
+        _previous_pin_state: Determines whether the managed digital output pin was HIGH when the previous state
+            message arrived.
     """
 
     def __init__(self, module_type: np.uint8, module_id: np.uint8) -> None:
@@ -83,7 +84,7 @@ class TestModuleInterface(ModuleInterface):
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """Processes incoming module messages as they are received by the PC from the remote communication process."""
         # Event codes 52 and 53 are used to communicate the current state of the output pin managed by the example
-        # module. State messages transmit these event-codes, so there is no additional data to parse other than
+        # module. State messages transmit these event codes, so there is no additional data to parse other than
         # event codes.
         if message.event == 52 or message.event == 53:
             # Code 52 indicates that the pin outputs a HIGH signal, code 53 indicates the pin outputs a LOW signal.
@@ -152,7 +153,7 @@ class TestModuleInterface(ModuleInterface):
         """
         self.send_command(
             command=np.uint8(2),
-            noblock=np.bool_(False),  # The echo command has no time-delays, so is always blocking.
+            noblock=np.bool_(False),  # The echo command has no time delays, so it is always blocking.
             repetition_delay=repetition_delay,
         )
 

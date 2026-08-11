@@ -43,7 +43,7 @@ def prepare_log_processing_batch_tool(
     and initializes a ProcessingTracker with one data-extraction job per source ID for each log directory. The
     configuration path is validated up front and embedded in every job descriptor so that downstream execution
     tools receive a self-contained manifest. Idempotent: if a tracker already exists for a log directory, returns
-    the existing manifest with current job statuses instead of reinitializing. Requires prior discovery -- the
+    the existing manifest with current job statuses instead of reinitializing. Requires prior discovery, the
     caller must provide confirmed source IDs rather than relying on implicit archive or manifest discovery.
 
     Important:
@@ -324,10 +324,9 @@ def get_log_processing_status_tool() -> dict[str, Any]:
     if state is None:
         return {"active": False, "message": "No execution session exists."}
 
-    # Checks whether the background execution manager thread is still running.
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
 
-    # Reads status from tracker files for each job.
+    # The tracker on disk holds job status, since each worker records its outcome there rather than in the session.
     job_details: list[dict[str, Any]] = []
     succeeded_count = 0
     failed_count = 0
@@ -402,7 +401,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     # Captures the current timestamp for computing elapsed time on running jobs.
     current_us = int(get_timestamp(output_format=TimestampFormats.INTEGER, precision=TimestampPrecisions.MICROSECOND))
 
-    # Collects per-job timing entries and tracks the earliest start for session-level statistics.
+    # Tracks the earliest start across the jobs, since the session's elapsed time and throughput are measured from it.
     job_timing: list[dict[str, Any]] = []
     earliest_start: int | None = None
     completed_count = 0
@@ -411,7 +410,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
     for tracker_path, path_jobs in group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
-        except Exception:  # noqa: S112
+        except Exception:  # noqa: S112 - a tracker that cannot be read reports no timings, so the loop skips it.
             continue
 
         for job in path_jobs:
@@ -457,7 +456,6 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
 
             job_timing.append(entry)
 
-    # Computes session-level statistics.
     total_elapsed_seconds = 0.0
     if earliest_start is not None:
         total_elapsed_seconds = round(
@@ -523,7 +521,7 @@ def cancel_log_processing_tool() -> dict[str, Any]:
     for tracker_path, path_jobs in group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
-        except Exception:  # noqa: S112
+        except Exception:  # noqa: S112 - a tracker that cannot be read contributes no counts, so the loop skips it.
             continue
 
         for job in path_jobs:
@@ -560,9 +558,9 @@ def reset_log_processing_jobs_tool(
 
     Returns:
         A dictionary containing a 'reset' flag, the number of jobs reset, and updated job statuses. Returns an error
-        dictionary if the tracker file is missing or unreadable, and a 'reset' flag set to False with an explanatory
-        'message' when no job matches the requested source IDs or when the active execution session holds one of the
-        targeted jobs.
+        dictionary if the tracker file is missing or unreadable. Returns a 'reset' flag set to False with an
+        explanatory 'message' when no job matches the requested source IDs or when the active execution session holds
+        one of the targeted jobs.
     """
     path = Path(tracker_path)
 
@@ -634,7 +632,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
     if not root_path.is_dir():
         return {"error": f"Path is not a directory: {root_directory}"}
 
-    # Discovers all tracker files recursively and aggregates their job statuses.
+    # One tracker marks one processed directory, so this scan reports batch state without an active execution session.
     log_directory_statuses: list[dict[str, Any]] = []
     aggregate_succeeded = 0
     aggregate_failed = 0

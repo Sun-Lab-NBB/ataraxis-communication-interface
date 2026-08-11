@@ -169,8 +169,7 @@ class MicroControllerManifest(YamlConfig):
     DataLogger.
 
     Each entry in the ``controllers`` list corresponds to one MicroControllerInterface instance that logs data to the
-    same DataLogger output directory. The manifest file enables downstream tools to identify which log archives were
-    produced by ataraxis-communication-interface and to associate controller IDs with human-readable names.
+    same DataLogger output directory.
     """
 
     controllers: list[MicroControllerSourceData]
@@ -241,9 +240,7 @@ class ExtractionConfig(YamlConfig):
     """Defines the complete extraction configuration for microcontroller log processing.
 
     Specifies which controllers, modules, and events to extract from log archives. Processing requires a valid
-    configuration file with non-empty event codes for every module and kernel entry. Use the CLI
-    ``axci config create`` command or the ``create_extraction_config`` function to generate a precursor
-    configuration from an existing microcontroller manifest, then fill in the event codes before processing.
+    configuration file with non-empty event codes for every module and kernel entry.
     """
 
     controllers: list[ControllerExtractionConfig]

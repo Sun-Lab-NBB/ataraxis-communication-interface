@@ -60,14 +60,12 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
     """
     available_ports = list_available_ports()
 
-    # Filters out invalid ports (PID is None) — primarily for Linux systems.
+    # Filters out invalid ports (PID is None), primarily for Linux systems.
     valid_ports = [port for port in available_ports if port.pid is not None]
 
-    # If there are no valid candidates to evaluate, returns early.
     if not valid_ports:
         return "No valid serial ports detected."
 
-    # Prepares the parallel evaluation tasks.
     port_names = [port.device for port in valid_ports]
 
     # Uses ProcessPoolExecutor to evaluate all ports in parallel. The pool is sized to the smaller of the port count
@@ -85,9 +83,8 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
             initargs=(_WORKER_THREAD_CEILING,),
         ) as executor,
     ):
-        # Submits all port evaluation tasks.
         future_to_port = {
-            executor.submit(evaluate_port, port_name, baudrate): (port_name, port_info)
+            executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
         }
 
@@ -104,15 +101,12 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
             count += 1
 
             if error_message is not None:
-                # Reports the connection error for this port.
                 lines.append(
                     f"{count}: {port_info.device} -> {port_info.description} [Connection Failed: {error_message}]"
                 )
             elif controller_id == _UNIDENTIFIED_CONTROLLER_ID:
-                # Reports unrecognized ports that did not respond or lack a valid microcontroller.
                 lines.append(f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
             else:
-                # Reports identified microcontrollers with their controller ID.
                 lines.append(
                     f"{count}: {port_info.device} -> {port_info.description} [Microcontroller ID: {controller_id}]"
                 )
@@ -188,7 +182,6 @@ def assemble_log_archives_tool(
     if not directory_path.is_dir():
         return {"error": f"Not a directory: {log_directory}"}
 
-    # Consolidates raw .npy log entries into .npz archives grouped by source ID.
     try:
         assemble_log_archives(
             log_directory=directory_path,
@@ -199,7 +192,6 @@ def assemble_log_archives_tool(
     except Exception as error:
         return {"error": f"Archive assembly failed: {error}"}
 
-    # Scans for the archives present in the directory and extracts source IDs from filenames.
     source_ids = sorted(discover_log_archives(log_directory=directory_path))
     archives = [f"{source_id}{LOG_ARCHIVE_SUFFIX}" for source_id in source_ids]
 
@@ -240,7 +232,6 @@ def read_microcontroller_manifest_tool(manifest_path: str) -> dict[str, Any]:
     except Exception as error:
         return {"error": f"Unable to read manifest: {error}"}
 
-    # Serializes each controller and its modules into a dictionary representation.
     controllers: list[dict[str, Any]] = []
     for controller in manifest.controllers:
         module_entries = [
@@ -290,7 +281,6 @@ def write_microcontroller_manifest_tool(
     if not log_path.is_dir():
         return {"error": f"Path is not a directory: {log_directory}"}
 
-    # Converts the raw module dictionaries into typed ModuleSourceData instances.
     try:
         module_entries = tuple(
             ModuleSourceData(
@@ -308,7 +298,6 @@ def write_microcontroller_manifest_tool(
             ),
         }
 
-    # Writes or appends the controller entry to the manifest file.
     try:
         write_microcontroller_manifest(
             log_directory=log_path,
@@ -354,9 +343,9 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
     if not root_path.is_dir():
         return {"error": f"Path is not a directory: {root_directory}"}
 
-    # Discovers all microcontroller manifests and collects only sources whose log archives exist on disk.
+    # A manifest can register a controller whose archive was never written, so only sources with an archive are kept.
     confirmed_sources: list[tuple[Path, int, str, Path, list[dict[str, Any]]]] = []
-    log_dirs_with_archives: set[Path] = set()
+    log_directories_with_archives: set[Path] = set()
 
     try:
         manifest_paths = discover_marker_files(directory=root_path, marker_name=MICROCONTROLLER_MANIFEST_FILENAME)
@@ -364,14 +353,14 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
         return {"error": f"Unable to search '{root_directory}': {error}"}
 
     for manifest_path in manifest_paths:
-        log_dir = manifest_path.parent
+        log_directory = manifest_path.parent
 
         try:
             manifest = MicroControllerManifest.from_yaml(file_path=manifest_path)
             # Resolves every archive the logger wrote beside the manifest in one flat scan, instead of probing the
             # filesystem once per registered controller.
-            archives = discover_log_archives(log_directory=log_dir)
-        except Exception:  # noqa: S112
+            archives = discover_log_archives(log_directory=log_directory)
+        except Exception:  # noqa: S112 - a manifest that cannot be read contributes no sources, so the scan skips it.
             continue
 
         # Collapses a repeated controller id, since one controller addresses one archive and one tracker entry. A
@@ -390,8 +379,8 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
                 }
                 for source_module in controller.modules
             ]
-            confirmed_sources.append((log_dir, controller.id, controller.name, archive_path, module_entries))
-            log_dirs_with_archives.add(log_dir)
+            confirmed_sources.append((log_directory, controller.id, controller.name, archive_path, module_entries))
+            log_directories_with_archives.add(log_directory)
 
     if not confirmed_sources:
         return {
@@ -401,56 +390,54 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
             "total_log_directories": 0,
         }
 
-    # Resolves recording roots and builds the log-directory-to-root mapping.
-    log_dir_paths = sorted(log_dirs_with_archives)
-    log_dir_to_root = _resolve_log_dir_roots(log_dir_paths=log_dir_paths)
+    log_directory_paths = sorted(log_directories_with_archives)
+    log_directory_to_root = _resolve_log_directory_roots(log_directory_paths=log_directory_paths)
 
-    # Builds the flat list of resolved source entries.
     sources_output: list[dict[str, Any]] = []
-    for log_dir, source_id, name, archive_path, module_entries in confirmed_sources:
+    for log_directory, source_id, name, archive_path, module_entries in confirmed_sources:
         sources_output.append(
             {
-                "recording_root": str(log_dir_to_root[log_dir]),
+                "recording_root": str(log_directory_to_root[log_directory]),
                 "source_id": str(source_id),
                 "name": name,
                 "log_archive": str(archive_path),
-                "log_directory": str(log_dir),
+                "log_directory": str(log_directory),
                 "modules": module_entries,
             }
         )
 
     return {
         "sources": sources_output,
-        "log_directories": sorted(str(log_dir) for log_dir in log_dir_paths),
+        "log_directories": sorted(str(log_directory) for log_directory in log_directory_paths),
         "total_sources": len(sources_output),
-        "total_log_directories": len(log_dir_paths),
+        "total_log_directories": len(log_directory_paths),
     }
 
 
-def _resolve_log_dir_roots(log_dir_paths: list[Path]) -> dict[Path, Path]:
+def _resolve_log_directory_roots(log_directory_paths: list[Path]) -> dict[Path, Path]:
     """Resolves each log directory to its recording root.
 
     Uses unique path component detection to identify recording session boundaries. Falls back to using each
     log directory's parent when unique component detection fails (e.g., several directories sharing every component).
 
     Args:
-        log_dir_paths: The sorted list of log directory paths to resolve.
+        log_directory_paths: The sorted list of log directory paths to resolve.
 
     Returns:
         A mapping from each log directory to its recording root path.
     """
     try:
-        recording_roots = resolve_unique_roots(paths=log_dir_paths)
+        recording_roots = resolve_unique_roots(paths=log_directory_paths)
     except ValueError:
-        recording_roots = tuple(dict.fromkeys(log_dir.parent for log_dir in log_dir_paths))
+        recording_roots = tuple(dict.fromkeys(log_directory.parent for log_directory in log_directory_paths))
 
-    log_dir_to_root: dict[Path, Path] = {}
-    for log_dir in log_dir_paths:
+    log_directory_to_root: dict[Path, Path] = {}
+    for log_directory in log_directory_paths:
         for root in recording_roots:
-            if log_dir == root or root in log_dir.parents:
-                log_dir_to_root[log_dir] = root
+            if log_directory == root or root in log_directory.parents:
+                log_directory_to_root[log_directory] = root
                 break
         else:
-            log_dir_to_root[log_dir] = log_dir.parent
+            log_directory_to_root[log_directory] = log_directory.parent
 
-    return log_dir_to_root
+    return log_directory_to_root

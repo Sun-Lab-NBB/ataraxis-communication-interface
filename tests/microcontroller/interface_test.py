@@ -88,10 +88,11 @@ _IDENTIFICATION_TIMEOUT: int = 20
 _CYCLE_DELAY: int = 3
 """Stores the time, in milliseconds, the scripted terminator array spends on each communication cycle it grants."""
 
-_ARRAY_COUNTER = itertools.count()
+_ARRAY_COUNTER: itertools.count[int] = itertools.count()
 """Numbers the shared memory buffers the tests create, keeping every buffer name unique within the test process."""
 
 
+# Stays above the tests: line 505 parametrize argvalue runs at import, so a lower class raises NameError at collection.
 class _RecordingModule(ModuleInterface):
     """Records every remote asset and data processing call the communication cycle makes on the interface.
 
@@ -142,269 +143,6 @@ class _RecordingModule(ModuleInterface):
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """Records the command and event codes of the message routed to this interface."""
         self.processed.append((int(message.command), int(message.event)))
-
-
-class _FailingModule(_RecordingModule):
-    """Raises from the remote asset methods the communication cycle calls, reporting the requested failures.
-
-    Args:
-        module_type: The code that identifies the type of the interfaced module.
-        module_id: The code that identifies the specific interfaced module instance.
-        name: The human-readable name of the interfaced module.
-        fail_initialization: Determines whether initialize_remote_assets() raises.
-        fail_termination: Determines whether terminate_remote_assets() raises.
-
-    Attributes:
-        fail_initialization: Determines whether initialize_remote_assets() raises.
-        fail_termination: Determines whether terminate_remote_assets() raises.
-    """
-
-    def __init__(
-        self,
-        module_type: np.uint8 = _MODULE_TYPE,
-        module_id: np.uint8 = _MODULE_ID,
-        name: str = _MODULE_NAME,
-        *,
-        fail_initialization: bool = False,
-        fail_termination: bool = False,
-    ) -> None:
-        super().__init__(module_type=module_type, module_id=module_id, name=name)
-        self.fail_initialization = fail_initialization
-        self.fail_termination = fail_termination
-
-    def initialize_remote_assets(self) -> None:
-        """Raises if the interface is configured to fail its remote asset initialization."""
-        super().initialize_remote_assets()
-        if self.fail_initialization:
-            message = f"The {self.name} module interface failed to claim its remote assets."
-            raise RuntimeError(message)
-
-    def terminate_remote_assets(self) -> None:
-        """Raises if the interface is configured to fail its remote asset termination."""
-        super().terminate_remote_assets()
-        if self.fail_termination:
-            message = f"The {self.name} module interface failed to release its remote assets."
-            raise RuntimeError(message)
-
-
-class _RecordingSerialCommunication(SerialCommunication):
-    """Records every message transmitted through the instance while sending it through the real serial stack.
-
-    Notes:
-        The instance drives the mocked serial port the TransportLayer builds under test mode, so each recorded
-        message is also encoded and framed the way a transmission to a real microcontroller would be.
-
-    Attributes:
-        transmitted: Stores every message object handed to send_message(), in transmission order.
-    """
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(test_mode=True, **kwargs)
-        self.transmitted: list[Any] = []
-
-    def send_message(self, message: Any) -> None:
-        """Records the outgoing message before transmitting it."""
-        self.transmitted.append(message)
-        super().send_message(message=message)
-
-
-class _StagedCommunicationFactory:
-    """Builds the communication cycle's SerialCommunication instance with the microcontroller's responses staged.
-
-    Notes:
-        The factory replaces the module-level SerialCommunication name the communication cycle constructs its
-        instance from, and forwards every argument the cycle supplies. Only the mocked port and the recording of the
-        transmitted messages separate the constructed instance from the one a production runtime builds.
-
-    Args:
-        payloads: The message payloads the microcontroller answers with, in the order it sends them.
-
-    Attributes:
-        payloads: The message payloads the microcontroller answers with, in the order it sends them.
-        instance: Stores the constructed instance once the communication cycle asks for it.
-    """
-
-    def __init__(self, payloads: Sequence[NDArray[np.uint8]] = ()) -> None:
-        self.payloads = payloads
-        self.instance: _RecordingSerialCommunication | None = None
-
-    def __call__(self, **kwargs: Any) -> _RecordingSerialCommunication:
-        """Constructs the instance the communication cycle communicates through."""
-        self.instance = _RecordingSerialCommunication(**kwargs)
-        _stage_incoming_messages(communication=self.instance, payloads=self.payloads)
-        return self.instance
-
-
-class _ScriptedTerminatorArray:
-    """Stands in for the shared memory array the communication process reads its runtime flags from.
-
-    Notes:
-        Reading the shutdown flag reports a running runtime for the requested number of communication cycles and a
-        requested shutdown afterwards, which ends the cycle at a point each test chooses rather than leaving it to a
-        flag a concurrent thread writes.
-
-        Each granted cycle spends the configured delay before it reports, which advances the keepalive timer the
-        communication cycle reads by the same interval a cycle of a production runtime would.
-
-    Args:
-        cycles: The number of communication cycles to grant before reporting the shutdown request.
-        cycle_delay: The time, in milliseconds, each granted cycle takes.
-
-    Attributes:
-        connections: Counts the calls the communication cycle made to connect().
-        disconnections: Counts the calls the communication cycle made to disconnect().
-        initialized: Determines whether the verification stage reported a completed initialization.
-    """
-
-    def __init__(self, cycles: int = 0, cycle_delay: int = 0) -> None:
-        self._cycles = cycles
-        self._timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
-        self._cycle_delay = cycle_delay
-        self.connections = 0
-        self.disconnections = 0
-        self.initialized = False
-
-    def connect(self) -> None:
-        """Records that the communication cycle connected to the array."""
-        self.connections += 1
-
-    def disconnect(self) -> None:
-        """Records that the communication cycle disconnected from the array."""
-        self.disconnections += 1
-
-    def __getitem__(self, index: int) -> int:
-        """Returns the runtime flag stored under the requested index."""
-        if index != 0:
-            return int(self.initialized)
-        if self._cycles <= 0:
-            return 1
-        self._cycles -= 1
-        if self._cycle_delay:
-            self._timer.delay(delay=self._cycle_delay, allow_sleep=True, block=False)
-        return 0
-
-    def __setitem__(self, index: int, value: int) -> None:
-        """Records the completed initialization the communication cycle reports, and drops every other index."""
-        if index == 1:
-            self.initialized = bool(value)
-
-
-def _stage_incoming_messages(communication: SerialCommunication, payloads: Sequence[NDArray[np.uint8]]) -> None:
-    """Encodes each payload the way the microcontroller would and stages the result as data to receive."""
-    port = communication._transport_layer._port
-    for payload in payloads:
-        communication._transport_layer.write_data(data_object=payload)
-        communication._transport_layer.send_data()
-    port.rx_buffer = port.tx_buffer
-    port.tx_buffer = b""
-
-
-def _controller_identification(controller_id: int) -> NDArray[np.uint8]:
-    """Builds the payload of a ControllerIdentification message reporting the requested controller."""
-    return np.array([11, controller_id], dtype=np.uint8)
-
-
-def _module_identification(module_type: int, module_id: int) -> NDArray[np.uint8]:
-    """Builds the payload of a ModuleIdentification message reporting the requested hardware module."""
-    type_id = np.uint16((module_type << 8) | module_id)
-    return np.concatenate((np.array([12], dtype=np.uint8), np.frombuffer(type_id.tobytes(), dtype=np.uint8)))
-
-
-def _module_state(module_type: int, module_id: int, command: int, event: int) -> NDArray[np.uint8]:
-    """Builds the payload of a ModuleState message reporting the requested command and event."""
-    return np.array([8, module_type, module_id, command, event], dtype=np.uint8)
-
-
-def _module_data(module_type: int, module_id: int, command: int, event: int, value: int) -> NDArray[np.uint8]:
-    """Builds the payload of a ModuleData message reporting the requested command, event, and data object."""
-    return np.array([6, module_type, module_id, command, event, _ONE_UINT8_PROTOTYPE, value], dtype=np.uint8)
-
-
-def _kernel_state(command: int, event: int) -> NDArray[np.uint8]:
-    """Builds the payload of a KernelState message reporting the requested command and event."""
-    return np.array([9, command, event], dtype=np.uint8)
-
-
-def _reception_code(code: int) -> NDArray[np.uint8]:
-    """Builds the payload of a ReceptionCode message reporting the requested reception code."""
-    return np.array([10, code], dtype=np.uint8)
-
-
-def _run_cycle(
-    modules: tuple[ModuleInterface, ...],
-    terminator_array: Any,
-    input_queue: Any = None,
-    keepalive_interval: int = 0,
-) -> None:
-    """Runs the communication cycle against the supplied runtime assets."""
-    MicroControllerInterface._runtime_cycle(
-        controller_id=_CONTROLLER_ID,
-        controller_name=_CONTROLLER_NAME,
-        module_interfaces=modules,
-        input_queue=input_queue if input_queue is not None else Queue(),
-        logger_queue=MPQueue(),
-        terminator_array=terminator_array,
-        port="TEST",
-        baudrate=115200,
-        buffer_size=_BUFFER_SIZE,
-        keepalive_interval=keepalive_interval,
-    )
-
-
-def _verify_against(
-    payloads: Sequence[NDArray[np.uint8]],
-    modules: tuple[ModuleInterface, ...],
-    terminator_array: SharedMemoryArray,
-    logger_queue: MPQueue,  # type: ignore[type-arg]
-    controller_id: np.uint8 = _CONTROLLER_ID,
-) -> _RecordingSerialCommunication:
-    """Runs the configuration verification against a microcontroller staged to answer with the input payloads."""
-    communication = _RecordingSerialCommunication(
-        controller_id=controller_id,
-        microcontroller_serial_buffer_size=_BUFFER_SIZE,
-        port="TEST",
-        logger_queue=logger_queue,
-    )
-    _stage_incoming_messages(communication=communication, payloads=payloads)
-    MicroControllerInterface._verify_microcontroller_communication(
-        serial_communication=communication,
-        timeout_timer=PrecisionTimer(precision=TimerPrecisions.MILLISECOND),
-        controller_id=controller_id,
-        module_interfaces=modules,
-        terminator_array=terminator_array,
-    )
-    return communication
-
-
-def _prepare_shutdown(
-    controller: MicroControllerInterface,
-    terminator_array: SharedMemoryArray,
-    process: Process,
-    watchdog_thread: Thread | None = None,
-) -> None:
-    """Places the interface in the state the start() method leaves behind once the communication process is running."""
-    controller._terminator_array = terminator_array
-    controller._communication_process = process
-    controller._watchdog_thread = watchdog_thread
-    controller._started = True
-
-
-def _observe_shutdown_flag(process: Process, terminator_array: SharedMemoryArray) -> list[int]:
-    """Records the shutdown flag the communication process observes at the moment the interface waits on it.
-
-    Notes:
-        The teardown destroys the shared memory buffer before it returns, so the flag is unreadable by the time the
-        caller regains control. Reading it from the join the teardown performs captures both the value and its
-        ordering against the wait.
-    """
-    observed: list[int] = []
-
-    def join(timeout: float | None = None) -> None:
-        """Records the shutdown flag instead of waiting on a process that already terminated."""
-        observed.append(int(terminator_array[0]))
-
-    process.join = join  # type: ignore[method-assign]
-    return observed
 
 
 @pytest.fixture
@@ -960,8 +698,8 @@ def test_verify_microcontroller_communication_accepts_a_matching_configuration(
     """Verifies that a microcontroller reporting the expected identity and modules completes the verification."""
     communication = _verify_against(
         payloads=[
-            _controller_identification(controller_id=int(_CONTROLLER_ID)),
-            _module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
+            _build_controller_identification(controller_id=int(_CONTROLLER_ID)),
+            _build_module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
         ],
         modules=(_RecordingModule(),),
         terminator_array=terminator_array,
@@ -982,9 +720,9 @@ def test_verify_microcontroller_communication_accepts_extra_hardware_modules(
     """Verifies that a microcontroller managing more modules than the interfaces cover passes the verification."""
     _verify_against(
         payloads=[
-            _controller_identification(controller_id=int(_CONTROLLER_ID)),
-            _module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
-            _module_identification(module_type=7, module_id=9),
+            _build_controller_identification(controller_id=int(_CONTROLLER_ID)),
+            _build_module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
+            _build_module_identification(module_type=7, module_id=9),
         ],
         modules=(_RecordingModule(),),
         terminator_array=terminator_array,
@@ -1025,7 +763,7 @@ def test_verify_microcontroller_communication_mismatched_controller_id(
     )
     with pytest.raises(ValueError, match=error_format(message)):
         _verify_against(
-            payloads=[_controller_identification(controller_id=9)],
+            payloads=[_build_controller_identification(controller_id=9)],
             modules=(_RecordingModule(),),
             terminator_array=terminator_array,
             logger_queue=logger_queue,
@@ -1043,7 +781,7 @@ def test_verify_microcontroller_communication_unreported_modules(
     )
     with pytest.raises(RuntimeError, match=error_format(message)):
         _verify_against(
-            payloads=[_controller_identification(controller_id=int(_CONTROLLER_ID))],
+            payloads=[_build_controller_identification(controller_id=int(_CONTROLLER_ID))],
             modules=(_RecordingModule(),),
             terminator_array=terminator_array,
             logger_queue=logger_queue,
@@ -1063,8 +801,8 @@ def test_verify_microcontroller_communication_missing_hardware_modules(
     with pytest.raises(ValueError, match=error_format(message)):
         _verify_against(
             payloads=[
-                _controller_identification(controller_id=int(_CONTROLLER_ID)),
-                _module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
+                _build_controller_identification(controller_id=int(_CONTROLLER_ID)),
+                _build_module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
             ],
             modules=(_RecordingModule(), _RecordingModule(module_id=np.uint8(3), name="second_module")),
             terminator_array=terminator_array,
@@ -1085,9 +823,9 @@ def test_verify_microcontroller_communication_duplicate_hardware_modules(
     with pytest.raises(ValueError, match=error_format(message)):
         _verify_against(
             payloads=[
-                _controller_identification(controller_id=int(_CONTROLLER_ID)),
-                _module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
-                _module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
+                _build_controller_identification(controller_id=int(_CONTROLLER_ID)),
+                _build_module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
+                _build_module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
             ],
             modules=(_RecordingModule(),),
             terminator_array=terminator_array,
@@ -1109,8 +847,8 @@ def test_verify_microcontroller_communication_unmatched_module_interface(
     with pytest.raises(ValueError, match=error_format(message)):
         _verify_against(
             payloads=[
-                _controller_identification(controller_id=int(_CONTROLLER_ID)),
-                _module_identification(module_type=7, module_id=9),
+                _build_controller_identification(controller_id=int(_CONTROLLER_ID)),
+                _build_module_identification(module_type=7, module_id=9),
             ],
             modules=(_RecordingModule(),),
             terminator_array=terminator_array,
@@ -1125,8 +863,8 @@ def test_runtime_cycle_verifies_the_configuration_before_the_communication_loop(
     """Verifies that the communication cycle runs the configuration verification before it exchanges any data."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _controller_identification(controller_id=int(_CONTROLLER_ID)),
-            _module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
+            _build_controller_identification(controller_id=int(_CONTROLLER_ID)),
+            _build_module_identification(module_type=int(_MODULE_TYPE), module_id=int(_MODULE_ID)),
         ]
     )
     monkeypatch.setattr(interface, "SerialCommunication", factory)
@@ -1163,7 +901,7 @@ def test_runtime_cycle_transmits_the_queued_messages(monkeypatch: pytest.MonkeyP
 def test_runtime_cycle_records_the_keepalive_response(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that a reception code carrying the keepalive return code answers the outstanding keepalive."""
     factory = _StagedCommunicationFactory(
-        payloads=[_reception_code(code=interface._RuntimeParameters.KEEPALIVE_RETURN_CODE.value)]
+        payloads=[_build_reception_code(code=interface._RuntimeParameters.KEEPALIVE_RETURN_CODE.value)]
     )
     monkeypatch.setattr(interface, "SerialCommunication", factory)
     array = _ScriptedTerminatorArray(cycles=2, cycle_delay=_CYCLE_DELAY)
@@ -1204,7 +942,7 @@ def test_runtime_cycle_raises_for_kernel_faults(monkeypatch: pytest.MonkeyPatch)
     """Verifies that a Kernel message reporting a fault aborts the communication runtime."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _kernel_state(
+            _build_kernel_state(
                 command=KernelCommandCodes.RESET_CONTROLLER.value, event=KernelStatusCodes.COMMAND_NOT_RECOGNIZED.value
             )
         ]
@@ -1220,7 +958,7 @@ def test_runtime_cycle_ignores_ordinary_kernel_states(monkeypatch: pytest.Monkey
     """Verifies that a Kernel message reporting an ordinary state leaves the communication runtime running."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _kernel_state(
+            _build_kernel_state(
                 command=KernelCommandCodes.IDENTIFY_CONTROLLER.value, event=KernelStatusCodes.SETUP_COMPLETE.value
             )
         ]
@@ -1238,7 +976,7 @@ def test_runtime_cycle_raises_for_service_module_faults(monkeypatch: pytest.Monk
     """Verifies that a module message carrying a service fault code aborts the communication runtime."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _module_state(
+            _build_module_state(
                 module_type=int(_MODULE_TYPE),
                 module_id=int(_MODULE_ID),
                 command=1,
@@ -1257,7 +995,9 @@ def test_runtime_cycle_names_unregistered_senders_of_service_faults(monkeypatch:
     """Verifies that a service fault from a module no interface claims names the module as unregistered."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _module_state(module_type=7, module_id=9, command=1, event=ModuleStatusCodes.COMMAND_NOT_RECOGNIZED.value)
+            _build_module_state(
+                module_type=7, module_id=9, command=1, event=ModuleStatusCodes.COMMAND_NOT_RECOGNIZED.value
+            )
         ]
     )
     monkeypatch.setattr(interface, "SerialCommunication", factory)
@@ -1271,7 +1011,7 @@ def test_runtime_cycle_skips_modules_without_registered_codes(monkeypatch: pytes
     """Verifies that a custom event addressed to an interface registering no codes reaches no processing method."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _module_data(
+            _build_module_data(
                 module_type=int(_MODULE_TYPE),
                 module_id=int(_MODULE_ID),
                 command=1,
@@ -1293,7 +1033,7 @@ def test_runtime_cycle_ignores_unregistered_custom_codes(monkeypatch: pytest.Mon
     """Verifies that a custom event matching neither a data nor an error code reaches no processing method."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _module_data(
+            _build_module_data(
                 module_type=int(_MODULE_TYPE),
                 module_id=int(_MODULE_ID),
                 command=1,
@@ -1315,7 +1055,7 @@ def test_runtime_cycle_processes_registered_data_codes(monkeypatch: pytest.Monke
     """Verifies that a custom event matching a registered data code reaches the interface's processing method."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _module_data(
+            _build_module_data(
                 module_type=int(_MODULE_TYPE),
                 module_id=int(_MODULE_ID),
                 command=3,
@@ -1337,7 +1077,7 @@ def test_runtime_cycle_raises_for_registered_error_codes(monkeypatch: pytest.Mon
     """Verifies that a custom event matching a registered error code aborts the runtime with its explanation."""
     factory = _StagedCommunicationFactory(
         payloads=[
-            _module_data(
+            _build_module_data(
                 module_type=int(_MODULE_TYPE),
                 module_id=int(_MODULE_ID),
                 command=3,
@@ -1515,7 +1255,9 @@ def test_watchdog_waits_out_the_communication_process_startup(logger: DataLogger
 
 def test_evaluate_port_reports_the_microcontroller_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that evaluating a port connected to a microcontroller reports the identifier it answers with."""
-    factory = _StagedCommunicationFactory(payloads=[_controller_identification(controller_id=int(_CONTROLLER_ID))])
+    factory = _StagedCommunicationFactory(
+        payloads=[_build_controller_identification(controller_id=int(_CONTROLLER_ID))]
+    )
     monkeypatch.setattr(interface, "SerialCommunication", factory)
 
     assert evaluate_port(port="TEST") == (int(_CONTROLLER_ID), None)
@@ -1535,3 +1277,269 @@ def test_evaluate_port_reports_a_connection_failure() -> None:
 
     assert identifier == -1
     assert error is not None
+
+
+class _FailingModule(_RecordingModule):
+    """Raises from the remote asset methods the communication cycle calls, reporting the requested failures.
+
+    Args:
+        module_type: The code that identifies the type of the interfaced module.
+        module_id: The code that identifies the specific interfaced module instance.
+        name: The human-readable name of the interfaced module.
+        fail_initialization: Determines whether initialize_remote_assets() raises.
+        fail_termination: Determines whether terminate_remote_assets() raises.
+
+    Attributes:
+        fail_initialization: Determines whether initialize_remote_assets() raises.
+        fail_termination: Determines whether terminate_remote_assets() raises.
+    """
+
+    def __init__(
+        self,
+        module_type: np.uint8 = _MODULE_TYPE,
+        module_id: np.uint8 = _MODULE_ID,
+        name: str = _MODULE_NAME,
+        *,
+        fail_initialization: bool = False,
+        fail_termination: bool = False,
+    ) -> None:
+        super().__init__(module_type=module_type, module_id=module_id, name=name)
+        self.fail_initialization = fail_initialization
+        self.fail_termination = fail_termination
+
+    def initialize_remote_assets(self) -> None:
+        """Raises if the interface is configured to fail its remote asset initialization."""
+        super().initialize_remote_assets()
+        if self.fail_initialization:
+            message = f"The {self.name} module interface failed to claim its remote assets."
+            raise RuntimeError(message)
+
+    def terminate_remote_assets(self) -> None:
+        """Raises if the interface is configured to fail its remote asset termination."""
+        super().terminate_remote_assets()
+        if self.fail_termination:
+            message = f"The {self.name} module interface failed to release its remote assets."
+            raise RuntimeError(message)
+
+
+class _RecordingSerialCommunication(SerialCommunication):
+    """Records every message transmitted through the instance while sending it through the real serial stack.
+
+    Notes:
+        The instance drives the mocked serial port the TransportLayer builds under test mode, so each recorded
+        message is also encoded and framed the way a transmission to a real microcontroller would be.
+
+    Attributes:
+        transmitted: Stores every message object handed to send_message(), in transmission order.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(test_mode=True, **kwargs)
+        self.transmitted: list[Any] = []
+
+    def send_message(self, message: Any) -> None:
+        """Records the outgoing message before transmitting it."""
+        self.transmitted.append(message)
+        super().send_message(message=message)
+
+
+class _StagedCommunicationFactory:
+    """Builds the communication cycle's SerialCommunication instance with the microcontroller's responses staged.
+
+    Notes:
+        The factory replaces the module-level SerialCommunication name the communication cycle constructs its
+        instance from, and forwards every argument the cycle supplies. Only the mocked port and the recording of the
+        transmitted messages separate the constructed instance from the one a production runtime builds.
+
+    Args:
+        payloads: The message payloads the microcontroller answers with, in the order it sends them.
+
+    Attributes:
+        payloads: The message payloads the microcontroller answers with, in the order it sends them.
+        instance: Stores the constructed instance once the communication cycle asks for it.
+    """
+
+    def __init__(self, payloads: Sequence[NDArray[np.uint8]] = ()) -> None:
+        self.payloads = payloads
+        self.instance: _RecordingSerialCommunication | None = None
+
+    def __call__(self, **kwargs: Any) -> _RecordingSerialCommunication:
+        """Constructs the instance the communication cycle communicates through."""
+        self.instance = _RecordingSerialCommunication(**kwargs)
+        _stage_incoming_messages(communication=self.instance, payloads=self.payloads)
+        return self.instance
+
+
+class _ScriptedTerminatorArray:
+    """Stands in for the shared memory array the communication process reads its runtime flags from.
+
+    Notes:
+        Reading the shutdown flag reports a running runtime for the requested number of communication cycles and a
+        requested shutdown afterwards, which ends the cycle at a point each test chooses rather than leaving it to a
+        flag a concurrent thread writes.
+
+        Each granted cycle spends the configured delay before it reports, which advances the keepalive timer the
+        communication cycle reads by the same interval a cycle of a production runtime would.
+
+    Args:
+        cycles: The number of communication cycles to grant before reporting the shutdown request.
+        cycle_delay: The time, in milliseconds, each granted cycle takes.
+
+    Attributes:
+        _cycles: Counts the communication cycles still granted before the shutdown request is reported.
+        _timer: The timer that spends the configured delay on each granted communication cycle.
+        _cycle_delay: The time, in milliseconds, each granted cycle takes.
+        connections: Counts the calls the communication cycle made to connect().
+        disconnections: Counts the calls the communication cycle made to disconnect().
+        initialized: Determines whether the verification stage reported a completed initialization.
+    """
+
+    def __init__(self, cycles: int = 0, cycle_delay: int = 0) -> None:
+        self._cycles = cycles
+        self._timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        self._cycle_delay = cycle_delay
+        self.connections = 0
+        self.disconnections = 0
+        self.initialized = False
+
+    def __getitem__(self, index: int) -> int:
+        """Returns the runtime flag stored under the requested index."""
+        if index != 0:
+            return int(self.initialized)
+        if self._cycles <= 0:
+            return 1
+        self._cycles -= 1
+        if self._cycle_delay:
+            self._timer.delay(delay=self._cycle_delay, allow_sleep=True, block=False)
+        return 0
+
+    def __setitem__(self, index: int, value: int) -> None:
+        """Records the completed initialization the communication cycle reports, and drops every other index."""
+        if index == 1:
+            self.initialized = bool(value)
+
+    def connect(self) -> None:
+        """Records that the communication cycle connected to the array."""
+        self.connections += 1
+
+    def disconnect(self) -> None:
+        """Records that the communication cycle disconnected from the array."""
+        self.disconnections += 1
+
+
+def _stage_incoming_messages(communication: SerialCommunication, payloads: Sequence[NDArray[np.uint8]]) -> None:
+    """Encodes each payload the way the microcontroller would and stages the result as data to receive."""
+    port = communication._transport_layer._port
+    for payload in payloads:
+        communication._transport_layer.write_data(data_object=payload)
+        communication._transport_layer.send_data()
+    port.rx_buffer = port.tx_buffer
+    port.tx_buffer = b""
+
+
+def _build_controller_identification(controller_id: int) -> NDArray[np.uint8]:
+    """Builds the payload of a ControllerIdentification message reporting the requested controller."""
+    return np.array([11, controller_id], dtype=np.uint8)
+
+
+def _build_module_identification(module_type: int, module_id: int) -> NDArray[np.uint8]:
+    """Builds the payload of a ModuleIdentification message reporting the requested hardware module."""
+    type_id = np.uint16((module_type << 8) | module_id)
+    return np.concatenate((np.array([12], dtype=np.uint8), np.frombuffer(type_id.tobytes(), dtype=np.uint8)))
+
+
+def _build_module_state(module_type: int, module_id: int, command: int, event: int) -> NDArray[np.uint8]:
+    """Builds the payload of a ModuleState message reporting the requested command and event."""
+    return np.array([8, module_type, module_id, command, event], dtype=np.uint8)
+
+
+def _build_module_data(module_type: int, module_id: int, command: int, event: int, value: int) -> NDArray[np.uint8]:
+    """Builds the payload of a ModuleData message reporting the requested command, event, and data object."""
+    return np.array([6, module_type, module_id, command, event, _ONE_UINT8_PROTOTYPE, value], dtype=np.uint8)
+
+
+def _build_kernel_state(command: int, event: int) -> NDArray[np.uint8]:
+    """Builds the payload of a KernelState message reporting the requested command and event."""
+    return np.array([9, command, event], dtype=np.uint8)
+
+
+def _build_reception_code(code: int) -> NDArray[np.uint8]:
+    """Builds the payload of a ReceptionCode message reporting the requested reception code."""
+    return np.array([10, code], dtype=np.uint8)
+
+
+def _run_cycle(
+    modules: tuple[ModuleInterface, ...],
+    terminator_array: Any,
+    input_queue: Any = None,
+    keepalive_interval: int = 0,
+) -> None:
+    """Runs the communication cycle against the supplied runtime assets."""
+    MicroControllerInterface._runtime_cycle(
+        controller_id=_CONTROLLER_ID,
+        controller_name=_CONTROLLER_NAME,
+        module_interfaces=modules,
+        input_queue=input_queue if input_queue is not None else Queue(),
+        logger_queue=MPQueue(),
+        terminator_array=terminator_array,
+        port="TEST",
+        baudrate=115200,
+        buffer_size=_BUFFER_SIZE,
+        keepalive_interval=keepalive_interval,
+    )
+
+
+def _verify_against(
+    payloads: Sequence[NDArray[np.uint8]],
+    modules: tuple[ModuleInterface, ...],
+    terminator_array: SharedMemoryArray,
+    logger_queue: MPQueue,  # type: ignore[type-arg]
+    controller_id: np.uint8 = _CONTROLLER_ID,
+) -> _RecordingSerialCommunication:
+    """Runs the configuration verification against a microcontroller staged to answer with the input payloads."""
+    communication = _RecordingSerialCommunication(
+        controller_id=controller_id,
+        microcontroller_serial_buffer_size=_BUFFER_SIZE,
+        port="TEST",
+        logger_queue=logger_queue,
+    )
+    _stage_incoming_messages(communication=communication, payloads=payloads)
+    MicroControllerInterface._verify_microcontroller_communication(
+        serial_communication=communication,
+        timeout_timer=PrecisionTimer(precision=TimerPrecisions.MILLISECOND),
+        controller_id=controller_id,
+        module_interfaces=modules,
+        terminator_array=terminator_array,
+    )
+    return communication
+
+
+def _prepare_shutdown(
+    controller: MicroControllerInterface,
+    terminator_array: SharedMemoryArray,
+    process: Process,
+    watchdog_thread: Thread | None = None,
+) -> None:
+    """Places the interface in the state the start() method leaves behind once the communication process is running."""
+    controller._terminator_array = terminator_array
+    controller._communication_process = process
+    controller._watchdog_thread = watchdog_thread
+    controller._started = True
+
+
+def _observe_shutdown_flag(process: Process, terminator_array: SharedMemoryArray) -> list[int]:
+    """Records the shutdown flag the communication process observes at the moment the interface waits on it.
+
+    Notes:
+        The teardown destroys the shared memory buffer before it returns, so the flag is unreadable by the time the
+        caller regains control. Reading it from the join the teardown performs captures both the value and its
+        ordering against the wait.
+    """
+    observed: list[int] = []
+
+    def join(timeout: float | None = None) -> None:
+        """Records the shutdown flag instead of waiting on a process that already terminated."""
+        observed.append(int(terminator_array[0]))
+
+    process.join = join  # type: ignore[method-assign]
+    return observed

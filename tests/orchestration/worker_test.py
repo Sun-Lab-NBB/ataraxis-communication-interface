@@ -1,16 +1,21 @@
 """Contains tests for functions provided by the orchestration/worker.py module."""
 
-from concurrent.futures import ProcessPoolExecutor
+from typing import Any
+from pathlib import Path
+from collections.abc import Callable
+from concurrent.futures import Future, ProcessPoolExecutor
 
+import numpy as np
 import polars as pl
 import pytest
+from numpy.typing import NDArray
 from tests.log_archives import (
     create_test_archive,
     write_extraction_config,
-    make_kernel_data_payload,
-    make_module_data_payload,
-    make_kernel_state_payload,
-    make_module_state_payload,
+    create_kernel_data_payload,
+    create_module_data_payload,
+    create_kernel_state_payload,
+    create_module_state_payload,
 )
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import (
@@ -61,125 +66,8 @@ _KERNEL_EVENT_CODES: tuple[int, ...] = (5,)
 which the empty-filter tests override deliberately."""
 
 
-class _CountingExecutor(ProcessPoolExecutor):
-    """Wraps a real process pool with a counter that records how many batches were submitted to it."""
-
-    def __init__(self, max_workers):
-        super().__init__(max_workers=max_workers)
-        self.submissions = 0
-
-    def submit(self, fn, /, *args, **kwargs):
-        """Records the submission before handing the work to the underlying pool."""
-        self.submissions += 1
-        return super().submit(fn, *args, **kwargs)
-
-
-def _module_messages():
-    """Creates the module state and data messages the synthetic archives of this module hold."""
-    return [
-        (1000, make_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10)),
-        (
-            2000,
-            make_module_data_payload(
-                module_type=_MODULE_TYPE,
-                module_id=_MODULE_ID,
-                command=2,
-                event=20,
-                prototype_code=SerialPrototypes.ONE_UINT8,
-                data_bytes=[42],
-            ),
-        ),
-    ]
-
-
-def _kernel_messages():
-    """Creates the kernel state and data messages the synthetic archives exercising kernel extraction hold."""
-    return [
-        (3000, make_kernel_state_payload(command=1, event=5)),
-        (
-            4000,
-            make_kernel_data_payload(
-                command=2,
-                event=5,
-                prototype_code=SerialPrototypes.ONE_UINT8,
-                data_bytes=[7],
-            ),
-        ),
-    ]
-
-
-def _build_archive(log_directory, messages=None, source_id=_SOURCE_ID):
-    """Creates one synthetic log archive for the requested controller source and returns the path it was written to."""
-    log_directory.mkdir(parents=True, exist_ok=True)
-    archive_path = log_directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    create_test_archive(
-        archive_path=archive_path,
-        source_id=int(source_id),
-        messages=_module_messages() if messages is None else messages,
-    )
-    return archive_path
-
-
-def _write_config(config_path, source_id=_SOURCE_ID, event_codes=_MODULE_EVENT_CODES, kernel_event_codes=None):
-    """Writes the extraction configuration declaring one module, and optionally the kernel, for the target source."""
-    return write_extraction_config(
-        config_path=config_path,
-        source_id=int(source_id),
-        module_type=_MODULE_TYPE,
-        module_id=_MODULE_ID,
-        event_codes=event_codes,
-        kernel_event_codes=kernel_event_codes,
-    )
-
-
-def _write_module_free_config(config_path, source_id=_SOURCE_ID, kernel_event_codes=None):
-    """Writes an extraction configuration that declares no module, which the shared builder cannot express."""
-    config = ExtractionConfig(
-        controllers=[
-            ControllerExtractionConfig(
-                controller_id=int(source_id),
-                modules=(),
-                kernel=None if kernel_event_codes is None else KernelExtractionConfig(event_codes=kernel_event_codes),
-            )
-        ]
-    )
-    config.to_yaml(file_path=config_path)
-    return config_path
-
-
-def _initialize_tracker(tracker_path, source_id=_SOURCE_ID):
-    """Creates a processing tracker that already registers the extraction job of the target controller source."""
-    tracker_path.parent.mkdir(parents=True, exist_ok=True)
-    tracker = ProcessingTracker(file_path=tracker_path)
-    tracker.initialize_jobs(jobs=[(CONTROLLER_EXTRACTION_JOB_NAME, source_id)])
-    return tracker
-
-
-def _build_descriptor(log_directory, output_directory, config_path, source_id=_SOURCE_ID, core_weight=1):
-    """Builds the descriptor of the extraction job reading the target source's archive under the log directory."""
-    return JobDescriptor.for_archive(
-        archive_path=log_directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}",
-        output_directory=output_directory,
-        config_path=config_path,
-        tracker_path=resolve_tracker_path(output_directory=output_directory),
-        source_id=source_id,
-        log_directory=log_directory,
-        core_weight=core_weight,
-    )
-
-
-def _module_path(output_directory, source_id=_SOURCE_ID):
-    """Resolves the path of the module output file the shared synthetic module's messages are written to."""
-    return resolve_module_path(
-        output_directory=output_directory,
-        source_id=source_id,
-        module_type=_MODULE_TYPE,
-        module_id=_MODULE_ID,
-    )
-
-
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_writes_the_module_file_and_completes_the_job(tmp_path):
+def test_execute_job_writes_the_module_file_and_completes_the_job(tmp_path: Path) -> None:
     """Verifies that execute_job writes the module file at the resolved path and completes the tracked job."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
     config_path = _write_config(config_path=tmp_path / "config.yaml")
@@ -219,7 +107,7 @@ def test_execute_job_writes_the_module_file_and_completes_the_job(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_writes_the_kernel_file_when_only_the_kernel_is_configured(tmp_path):
+def test_execute_job_writes_the_kernel_file_when_only_the_kernel_is_configured(tmp_path: Path) -> None:
     """Verifies that execute_job writes the kernel file at the resolved path and no module file."""
     archive_path = _build_archive(log_directory=tmp_path / "logs", messages=_module_messages() + _kernel_messages())
     config_path = _write_module_free_config(
@@ -253,7 +141,7 @@ def test_execute_job_writes_the_kernel_file_when_only_the_kernel_is_configured(t
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_writes_both_files_when_both_targets_are_configured(tmp_path):
+def test_execute_job_writes_both_files_when_both_targets_are_configured(tmp_path: Path) -> None:
     """Verifies that execute_job writes one module file and the kernel file when the config declares both."""
     archive_path = _build_archive(log_directory=tmp_path / "logs", messages=_module_messages() + _kernel_messages())
     config_path = _write_config(config_path=tmp_path / "config.yaml", kernel_event_codes=_KERNEL_EVENT_CODES)
@@ -279,7 +167,7 @@ def test_execute_job_writes_both_files_when_both_targets_are_configured(tmp_path
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_writes_no_file_for_an_archive_without_messages(tmp_path):
+def test_execute_job_writes_no_file_for_an_archive_without_messages(tmp_path: Path) -> None:
     """Verifies that execute_job writes no output file when the archive holds no data message at all."""
     archive_path = _build_archive(log_directory=tmp_path / "logs", messages=[])
     config_path = _write_config(config_path=tmp_path / "config.yaml", kernel_event_codes=_KERNEL_EVENT_CODES)
@@ -305,7 +193,7 @@ def test_execute_job_writes_no_file_for_an_archive_without_messages(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_records_the_failure_message_on_the_tracker(tmp_path):
+def test_execute_job_records_the_failure_message_on_the_tracker(tmp_path: Path) -> None:
     """Verifies that a failing extraction marks the job failed with the exception's message and re-raises."""
     config_path = _write_config(config_path=tmp_path / "config.yaml")
 
@@ -340,7 +228,7 @@ def test_execute_job_records_the_failure_message_on_the_tracker(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_records_a_configuration_error_on_the_tracker(tmp_path):
+def test_execute_job_records_a_configuration_error_on_the_tracker(tmp_path: Path) -> None:
     """Verifies that a config declaring no entry for the job's source fails the job rather than escaping it."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
 
@@ -374,7 +262,7 @@ def test_execute_job_records_a_configuration_error_on_the_tracker(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_records_an_empty_module_filter_on_the_tracker(tmp_path):
+def test_execute_job_records_an_empty_module_filter_on_the_tracker(tmp_path: Path) -> None:
     """Verifies that a module declaring empty event codes fails the job with the message naming that module."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
     config_path = _write_config(config_path=tmp_path / "config.yaml", event_codes=())
@@ -404,7 +292,7 @@ def test_execute_job_records_an_empty_module_filter_on_the_tracker(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_records_an_empty_kernel_filter_on_the_tracker(tmp_path):
+def test_execute_job_records_an_empty_kernel_filter_on_the_tracker(tmp_path: Path) -> None:
     """Verifies that a configured kernel declaring empty event codes fails the job."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
     config_path = _write_config(config_path=tmp_path / "config.yaml", kernel_event_codes=())
@@ -432,7 +320,7 @@ def test_execute_job_records_an_empty_kernel_filter_on_the_tracker(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_records_a_targetless_configuration_on_the_tracker(tmp_path):
+def test_execute_job_records_a_targetless_configuration_on_the_tracker(tmp_path: Path) -> None:
     """Verifies that a controller entry declaring neither a module nor the kernel fails the job."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
     config_path = _write_module_free_config(config_path=tmp_path / "config.yaml")
@@ -461,7 +349,7 @@ def test_execute_job_records_a_targetless_configuration_on_the_tracker(tmp_path)
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_creates_the_output_directory(tmp_path):
+def test_execute_job_creates_the_output_directory(tmp_path: Path) -> None:
     """Verifies that execute_job publishes its output files into an output directory that does not exist yet."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
     config_path = _write_config(config_path=tmp_path / "config.yaml")
@@ -488,7 +376,7 @@ def test_execute_job_creates_the_output_directory(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_does_not_register_tracker_jobs(tmp_path):
+def test_execute_job_does_not_register_tracker_jobs(tmp_path: Path) -> None:
     """Verifies that execute_job never registers its job on the tracker it is handed, leaving it to its caller."""
     archive_path = _build_archive(log_directory=tmp_path / "logs")
     config_path = _write_config(config_path=tmp_path / "config.yaml")
@@ -524,10 +412,10 @@ def test_execute_job_does_not_register_tracker_jobs(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_reuses_the_provided_executor(tmp_path):
+def test_execute_job_reuses_the_provided_executor(tmp_path: Path) -> None:
     """Verifies that execute_job submits its batch work to the caller's executor and leaves that executor usable."""
     messages = [
-        (index * 10, make_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10))
+        (index * 10, create_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10))
         for index in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     archive_path = _build_archive(log_directory=tmp_path / "logs", messages=messages)
@@ -537,8 +425,7 @@ def test_execute_job_reuses_the_provided_executor(tmp_path):
     tracker = _initialize_tracker(tracker_path=output_directory / OutputLayout.TRACKER_FILENAME)
     job_id = generate_job_ids(source_ids=[_SOURCE_ID])[_SOURCE_ID]
 
-    executor = _CountingExecutor(max_workers=2)
-    try:
+    with _CountingExecutor(max_workers=2) as executor:
         execute_job(
             log_path=archive_path,
             output_directory=output_directory,
@@ -557,18 +444,16 @@ def test_execute_job_reuses_the_provided_executor(tmp_path):
         # The caller owns the pool, so the job must not shut it down. A pool closed by the job would instead raise
         # a RuntimeError when asked to accept more work.
         assert executor.submit(abs, -5).result() == 5
-    finally:
-        executor.shutdown(wait=True)
 
     assert len(pl.read_ipc(source=_module_path(output_directory=output_directory))) == PARALLEL_PROCESSING_THRESHOLD
     assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_execute_job_leaves_the_executor_untouched_when_running_serially(tmp_path):
+def test_execute_job_leaves_the_executor_untouched_when_running_serially(tmp_path: Path) -> None:
     """Verifies that a single-worker job processes its archive without submitting anything to the caller's pool."""
     messages = [
-        (index * 10, make_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10))
+        (index * 10, create_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10))
         for index in range(1, PARALLEL_PROCESSING_THRESHOLD + 1)
     ]
     archive_path = _build_archive(log_directory=tmp_path / "logs", messages=messages)
@@ -578,8 +463,7 @@ def test_execute_job_leaves_the_executor_untouched_when_running_serially(tmp_pat
     tracker = _initialize_tracker(tracker_path=output_directory / OutputLayout.TRACKER_FILENAME)
     job_id = generate_job_ids(source_ids=[_SOURCE_ID])[_SOURCE_ID]
 
-    executor = _CountingExecutor(max_workers=1)
-    try:
+    with _CountingExecutor(max_workers=1) as executor:
         execute_job(
             log_path=archive_path,
             output_directory=output_directory,
@@ -593,15 +477,13 @@ def test_execute_job_leaves_the_executor_untouched_when_running_serially(tmp_pat
         )
 
         assert executor.submissions == 0
-    finally:
-        executor.shutdown(wait=True)
 
     assert len(pl.read_ipc(source=_module_path(output_directory=output_directory))) == PARALLEL_PROCESSING_THRESHOLD
     assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_extraction_job_runs_the_job_from_its_descriptor(tmp_path):
+def test_run_extraction_job_runs_the_job_from_its_descriptor(tmp_path: Path) -> None:
     """Verifies that run_extraction_job runs the described job and records its outcome on the descriptor's tracker."""
     log_directory = tmp_path / "logs"
     _build_archive(log_directory=log_directory)
@@ -632,7 +514,7 @@ def test_run_extraction_job_runs_the_job_from_its_descriptor(tmp_path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_extraction_job_records_a_failure_on_the_descriptor_tracker(tmp_path):
+def test_run_extraction_job_records_a_failure_on_the_descriptor_tracker(tmp_path: Path) -> None:
     """Verifies that a job whose archive is absent fails on the tracker the descriptor names and re-raises."""
     log_directory = tmp_path / "logs"
     log_directory.mkdir()
@@ -657,7 +539,7 @@ def test_run_extraction_job_records_a_failure_on_the_descriptor_tracker(tmp_path
     assert tracker.get_job_info(job_id=job.job_id).error_message == str(error_info.value)
 
 
-def test_run_extraction_job_forwards_every_descriptor_field(tmp_path, monkeypatch):
+def test_run_extraction_job_forwards_every_descriptor_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that run_extraction_job derives every execute_job argument from the descriptor alone."""
     log_directory = tmp_path / "logs"
     _build_archive(log_directory=log_directory)
@@ -674,7 +556,7 @@ def test_run_extraction_job_forwards_every_descriptor_field(tmp_path, monkeypatc
 
     calls = []
 
-    def _record_call(**kwargs):
+    def _record_call(**kwargs: Any) -> None:
         """Records the arguments the runner derived from the descriptor instead of running the extraction."""
         calls.append(kwargs)
 
@@ -706,7 +588,7 @@ def test_run_extraction_job_forwards_every_descriptor_field(tmp_path, monkeypatc
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_extraction_job_runs_inside_a_process_pool(tmp_path):
+def test_run_extraction_job_runs_inside_a_process_pool(tmp_path: Path) -> None:
     """Verifies that the runner and its descriptor both pickle into a spawned worker and complete the job there."""
     log_directory = tmp_path / "logs"
     _build_archive(log_directory=log_directory)
@@ -716,11 +598,8 @@ def test_run_extraction_job_runs_inside_a_process_pool(tmp_path):
     job = _build_descriptor(log_directory=log_directory, output_directory=output_directory, config_path=config_path)
     _initialize_tracker(tracker_path=job.tracker_path)
 
-    executor = ProcessPoolExecutor(max_workers=1)
-    try:
+    with ProcessPoolExecutor(max_workers=1) as executor:
         assert executor.submit(run_extraction_job, job=job).result() is None
-    finally:
-        executor.shutdown(wait=True)
 
     feather_path = _module_path(output_directory=job.output_directory, source_id=job.source_id)
     assert pl.read_ipc(source=feather_path)[str(ExtractedDataColumns.EVENT)].to_list() == [10, 20]
@@ -729,7 +608,7 @@ def test_run_extraction_job_runs_inside_a_process_pool(tmp_path):
     )
 
 
-def test_resolve_controller_config_returns_the_requested_entry(tmp_path):
+def test_resolve_controller_config_returns_the_requested_entry(tmp_path: Path) -> None:
     """Verifies that resolve_controller_config returns the entry the config declares for the requested controller."""
     config_path = _write_config(config_path=tmp_path / "config.yaml", kernel_event_codes=_KERNEL_EVENT_CODES)
 
@@ -743,7 +622,7 @@ def test_resolve_controller_config_returns_the_requested_entry(tmp_path):
     assert tuple(controller_config.kernel.event_codes) == _KERNEL_EVENT_CODES
 
 
-def test_resolve_controller_config_unconfigured_controller(tmp_path):
+def test_resolve_controller_config_unconfigured_controller(tmp_path: Path) -> None:
     """Verifies that resolve_controller_config raises ValueError naming every controller the config declares."""
     config_path = tmp_path / "config.yaml"
     ExtractionConfig(
@@ -766,10 +645,142 @@ def test_resolve_controller_config_unconfigured_controller(tmp_path):
         resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
 
 
-def test_resolve_controller_config_missing_config_file(tmp_path):
+def test_resolve_controller_config_missing_config_file(tmp_path: Path) -> None:
     """Verifies that resolve_controller_config raises FileNotFoundError when the configuration file is absent."""
     config_path = tmp_path / "missing_config.yaml"
     assert not config_path.exists()
 
     with pytest.raises(FileNotFoundError):
         resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
+
+
+class _CountingExecutor(ProcessPoolExecutor):
+    """Wraps a real process pool with a counter that records how many batches were submitted to it.
+
+    Attributes:
+        submissions: Counts the batches submitted to the wrapped pool since this executor was built.
+    """
+
+    def __init__(self, max_workers: int) -> None:
+        super().__init__(max_workers=max_workers)
+        self.submissions = 0
+
+    def submit(self, function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
+        """Records the submission before handing the work to the underlying pool."""
+        self.submissions += 1
+        return super().submit(function, *args, **kwargs)
+
+
+def _module_messages() -> list[tuple[int, NDArray[np.uint8]]]:
+    """Creates the module state and data messages the synthetic archives of this module hold."""
+    return [
+        (1000, create_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10)),
+        (
+            2000,
+            create_module_data_payload(
+                module_type=_MODULE_TYPE,
+                module_id=_MODULE_ID,
+                command=2,
+                event=20,
+                prototype_code=SerialPrototypes.ONE_UINT8,
+                data_bytes=[42],
+            ),
+        ),
+    ]
+
+
+def _kernel_messages() -> list[tuple[int, NDArray[np.uint8]]]:
+    """Creates the kernel state and data messages the synthetic archives exercising kernel extraction hold."""
+    return [
+        (3000, create_kernel_state_payload(command=1, event=5)),
+        (
+            4000,
+            create_kernel_data_payload(
+                command=2,
+                event=5,
+                prototype_code=SerialPrototypes.ONE_UINT8,
+                data_bytes=[7],
+            ),
+        ),
+    ]
+
+
+def _build_archive(
+    log_directory: Path, messages: list[tuple[int, NDArray[np.uint8]]] | None = None, source_id: str = _SOURCE_ID
+) -> Path:
+    """Creates one synthetic log archive for the requested controller source and returns the path it was written to."""
+    log_directory.mkdir(parents=True, exist_ok=True)
+    archive_path = log_directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
+    create_test_archive(
+        archive_path=archive_path,
+        source_id=int(source_id),
+        messages=_module_messages() if messages is None else messages,
+    )
+    return archive_path
+
+
+def _write_config(
+    config_path: Path,
+    source_id: str = _SOURCE_ID,
+    event_codes: tuple[int, ...] = _MODULE_EVENT_CODES,
+    kernel_event_codes: tuple[int, ...] | None = None,
+) -> Path:
+    """Writes the extraction configuration declaring one module, and optionally the kernel, for the target source."""
+    return write_extraction_config(
+        config_path=config_path,
+        source_id=int(source_id),
+        module_type=_MODULE_TYPE,
+        module_id=_MODULE_ID,
+        event_codes=event_codes,
+        kernel_event_codes=kernel_event_codes,
+    )
+
+
+def _write_module_free_config(
+    config_path: Path, source_id: str = _SOURCE_ID, kernel_event_codes: tuple[int, ...] | None = None
+) -> Path:
+    """Writes an extraction configuration that declares no module, which the shared builder cannot express."""
+    config = ExtractionConfig(
+        controllers=[
+            ControllerExtractionConfig(
+                controller_id=int(source_id),
+                modules=(),
+                kernel=None if kernel_event_codes is None else KernelExtractionConfig(event_codes=kernel_event_codes),
+            )
+        ]
+    )
+    config.to_yaml(file_path=config_path)
+    return config_path
+
+
+def _initialize_tracker(tracker_path: Path, source_id: str = _SOURCE_ID) -> ProcessingTracker:
+    """Creates a processing tracker that already registers the extraction job of the target controller source."""
+    tracker_path.parent.mkdir(parents=True, exist_ok=True)
+    tracker = ProcessingTracker(file_path=tracker_path)
+    tracker.initialize_jobs(jobs=[(CONTROLLER_EXTRACTION_JOB_NAME, source_id)])
+    return tracker
+
+
+def _build_descriptor(
+    log_directory: Path, output_directory: Path, config_path: Path, source_id: str = _SOURCE_ID, core_weight: int = 1
+) -> JobDescriptor:
+    """Builds the descriptor of the extraction job reading the target source's archive under the log directory."""
+    return JobDescriptor.for_archive(
+        archive_path=log_directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}",
+        output_directory=output_directory,
+        config_path=config_path,
+        tracker_path=resolve_tracker_path(output_directory=output_directory),
+        source_id=source_id,
+        log_directory=log_directory,
+        core_weight=core_weight,
+    )
+
+
+def _module_path(output_directory: Path, source_id: str = _SOURCE_ID) -> Path:
+    """Resolves the path of the module output file the shared synthetic module's messages are written to."""
+    return resolve_module_path(
+        output_directory=output_directory,
+        source_id=source_id,
+        module_type=_MODULE_TYPE,
+        module_id=_MODULE_ID,
+    )

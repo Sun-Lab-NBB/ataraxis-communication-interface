@@ -1,9 +1,4 @@
-"""Provides the sequential processing pipeline that runs the microcontroller data extraction jobs of one recording.
-
-Notes:
-    This module serves the command-line interface and any external driver that dispatches one job by its identifier.
-    It imports no batch engine. Batch orchestration across many recordings belongs to the MCP server.
-"""
+"""Provides the sequential processing pipeline that runs the microcontroller data extraction jobs of one recording."""
 
 from __future__ import annotations
 
@@ -42,6 +37,10 @@ def run_log_processing_pipeline(
     In external mode (job_id is provided), resolves and executes only the single archive matching the requested ID.
 
     Notes:
+        Serves the command-line interface and any external driver that dispatches one job by its identifier. The module
+        defining this pipeline imports no batch engine, and batch orchestration across many recordings belongs to the
+        MCP server.
+
         The tracker is aligned against the full job universe the microcontroller manifest defines in both modes, which
         lets independent external jobs share one tracker without resetting each other's state. That is what supports
         running every controller of one recording in parallel under an external scheduler.

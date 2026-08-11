@@ -21,29 +21,6 @@ from ataraxis_communication_interface.microcontroller.log_processing import (
 )
 
 
-def _table(rows: list[tuple[int, int, int, str | None, bytes | None]]) -> pl.DataFrame:
-    """Builds an extracted message table from the requested (timestamp, command, event, dtype, data) rows."""
-    return pl.DataFrame(
-        {
-            ExtractedDataColumns.TIMESTAMP: pl.Series(
-                name=ExtractedDataColumns.TIMESTAMP, values=[row[0] for row in rows], dtype=pl.UInt64
-            ),
-            ExtractedDataColumns.COMMAND: pl.Series(
-                name=ExtractedDataColumns.COMMAND, values=[row[1] for row in rows], dtype=pl.UInt8
-            ),
-            ExtractedDataColumns.EVENT: pl.Series(
-                name=ExtractedDataColumns.EVENT, values=[row[2] for row in rows], dtype=pl.UInt8
-            ),
-            ExtractedDataColumns.DTYPE: pl.Series(
-                name=ExtractedDataColumns.DTYPE, values=[row[3] for row in rows], dtype=pl.String
-            ),
-            ExtractedDataColumns.DATA: pl.Series(
-                name=ExtractedDataColumns.DATA, values=[row[4] for row in rows], dtype=pl.Binary
-            ),
-        }
-    )
-
-
 def test_extracted_data_columns() -> None:
     """Verifies that the column enumeration names the extracted message table columns in storage order."""
     assert tuple(ExtractedDataColumns) == ("timestamp_us", "command", "event", "dtype", "data")
@@ -55,7 +32,7 @@ def test_extracted_data_columns() -> None:
 
 def test_partition_events() -> None:
     """Verifies that partition_events splits an extracted table into one sub-table per event code."""
-    table = _table(
+    table = _build_message_table(
         [
             (100, 1, 10, None, None),
             (200, 1, 20, None, None),
@@ -73,12 +50,14 @@ def test_partition_events() -> None:
 
 def test_partition_events_empty_table() -> None:
     """Verifies that partition_events returns no partitions for a table holding no messages."""
-    assert partition_events(module_dataframe=_table([])) == {}
+    assert partition_events(module_dataframe=_build_message_table([])) == {}
 
 
 def test_get_event_timestamps() -> None:
     """Verifies that get_event_timestamps returns the arrival timestamps of the requested event code."""
-    partition = partition_events(module_dataframe=_table([(100, 1, 10, None, None), (300, 1, 10, None, None)]))
+    partition = partition_events(
+        module_dataframe=_build_message_table([(100, 1, 10, None, None), (300, 1, 10, None, None)])
+    )
 
     timestamps = get_event_timestamps(partition=partition, event_code=10)
 
@@ -88,7 +67,7 @@ def test_get_event_timestamps() -> None:
 
 def test_get_event_timestamps_absent_code() -> None:
     """Verifies that get_event_timestamps returns an empty array for an event code the partition does not hold."""
-    partition = partition_events(module_dataframe=_table([(100, 1, 10, None, None)]))
+    partition = partition_events(module_dataframe=_build_message_table([(100, 1, 10, None, None)]))
 
     timestamps = get_event_timestamps(partition=partition, event_code=99)
 
@@ -99,7 +78,9 @@ def test_get_event_timestamps_absent_code() -> None:
 def test_get_event_data() -> None:
     """Verifies that get_event_data decodes an event stream's payloads through the dtype the table records."""
     payloads = [np.uint16(value).tobytes() for value in (172, 5, 61_000)]
-    table = _table([(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(payloads)])
+    table = _build_message_table(
+        [(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(payloads)]
+    )
 
     timestamps, values = get_event_data(
         partition=partition_events(module_dataframe=table), event_code=20, values_dtype=np.uint32
@@ -113,7 +94,7 @@ def test_get_event_data() -> None:
 
 def test_get_event_data_absent_code() -> None:
     """Verifies that get_event_data returns empty arrays for an event code the partition does not hold."""
-    table = _table([(100, 1, 20, "uint16", np.uint16(7).tobytes())])
+    table = _build_message_table([(100, 1, 20, "uint16", np.uint16(7).tobytes())])
 
     timestamps, values = get_event_data(
         partition=partition_events(module_dataframe=table), event_code=99, values_dtype=np.float32
@@ -128,7 +109,9 @@ def test_get_event_data_absent_code() -> None:
 def test_get_event_data_array_prototype() -> None:
     """Verifies that get_event_data returns one row of values per message for an array prototype event code."""
     payloads = [np.array(values, dtype=np.uint16).tobytes() for values in ((1, 2), (3, 4), (5, 6))]
-    table = _table([(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(payloads)])
+    table = _build_message_table(
+        [(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(payloads)]
+    )
 
     timestamps, values = get_event_data(
         partition=partition_events(module_dataframe=table), event_code=20, values_dtype=np.uint32
@@ -142,7 +125,7 @@ def test_get_event_data_array_prototype() -> None:
     # A scalar prototype has its trailing value axis squeezed, so the same three messages carrying one value each
     # still decode into a 1-D array holding one value per timestamp.
     scalar_payloads = [np.uint16(value).tobytes() for value in (1, 3, 5)]
-    scalar_table = _table(
+    scalar_table = _build_message_table(
         [(100 * (index + 1), 1, 20, "uint16", payload) for index, payload in enumerate(scalar_payloads)]
     )
 
@@ -197,7 +180,7 @@ def test_get_event_data_null_payload_inside_decodable_stream() -> None:
 
 def test_get_event_data_non_uniform_dtype() -> None:
     """Verifies that get_event_data refuses to decode an event stream storing data under more than one dtype."""
-    table = _table(
+    table = _build_message_table(
         [
             (100, 1, 20, "uint16", np.uint16(172).tobytes()),
             (200, 1, 20, "uint32", np.uint32(5).tobytes()),
@@ -218,7 +201,7 @@ def test_get_event_data_indivisible_value_count() -> None:
     """Verifies that get_event_data refuses to pair a value count that is not a whole multiple of the message count."""
     # The extracted schema stores the dtype string but not the element count, so a stream whose messages share a dtype
     # while carrying different element counts is caught by the value count alone.
-    table = _table(
+    table = _build_message_table(
         [
             (100, 1, 20, "uint16", np.uint16(172).tobytes()),
             (200, 1, 20, "uint16", np.array((5, 61_000), dtype=np.uint16).tobytes()),
@@ -269,3 +252,26 @@ def test_build_message_dataframe_empty() -> None:
 
     assert dataframe.shape == (0, 5)
     assert dataframe.columns == ["timestamp_us", "command", "event", "dtype", "data"]
+
+
+def _build_message_table(rows: list[tuple[int, int, int, str | None, bytes | None]]) -> pl.DataFrame:
+    """Builds an extracted message table from the requested (timestamp, command, event, dtype, data) rows."""
+    return pl.DataFrame(
+        {
+            ExtractedDataColumns.TIMESTAMP: pl.Series(
+                name=ExtractedDataColumns.TIMESTAMP, values=[row[0] for row in rows], dtype=pl.UInt64
+            ),
+            ExtractedDataColumns.COMMAND: pl.Series(
+                name=ExtractedDataColumns.COMMAND, values=[row[1] for row in rows], dtype=pl.UInt8
+            ),
+            ExtractedDataColumns.EVENT: pl.Series(
+                name=ExtractedDataColumns.EVENT, values=[row[2] for row in rows], dtype=pl.UInt8
+            ),
+            ExtractedDataColumns.DTYPE: pl.Series(
+                name=ExtractedDataColumns.DTYPE, values=[row[3] for row in rows], dtype=pl.String
+            ),
+            ExtractedDataColumns.DATA: pl.Series(
+                name=ExtractedDataColumns.DATA, values=[row[4] for row in rows], dtype=pl.Binary
+            ),
+        }
+    )

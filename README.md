@@ -16,13 +16,13 @@ ___
 
 ## Detailed Description
 
-The library allows interfacing with custom hardware modules controlled by Arduino or Teensy microcontrollers
-running the companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller). To do so,
-the library defines a shared API that can be integrated into user-defined interfaces by subclassing the (base)
-ModuleInterface class. It also provides the MicroControllerInterface class that manages the microcontroller-PC
-communication and the MQTTCommunication class that allows exchanging data between local and remote clients over the
-MQTT (TCP) protocol. This library is part of the
-[Ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) framework for AI-assisted scientific hardware control.
+The library allows interfacing with custom hardware modules controlled by Arduino or Teensy microcontrollers running the
+companion [microcontroller library](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller). To do so, the library
+defines a shared API that can be integrated into user-defined interfaces by subclassing the (base) ModuleInterface
+class. It also provides the MicroControllerInterface class that manages the microcontroller-PC communication and the
+MQTTCommunication class that allows exchanging data between local and remote clients over the MQTT (TCP) protocol. This
+library is part of the [Ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) framework for AI-assisted scientific hardware
+control.
 
 ___
 
@@ -78,9 +78,8 @@ ___
 - **MQTT broker**, if the library is intended to be used for sending and receiving data over the MQTT protocol. The
   library was tested with a locally running [mosquitto MQTT broker](https://mosquitto.org/) version **2.1.2**.
 
-For users, all other library dependencies are installed automatically by all supported installation methods.
-For developers, see the [Developers](#developers) section for information on installing additional
-development dependencies.
+For users, all other library dependencies are installed automatically by all supported installation methods. For
+developers, see the [Developers](#developers) section for information on installing additional development dependencies.
 
 ___
 
@@ -88,32 +87,29 @@ ___
 
 ### Source
 
-***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active
-project developer.
+***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
-1. Download this repository to the local machine using the preferred method, such as git-cloning.
-   Use one of the [stable releases](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags) that
-   include precompiled binary and source code distribution (sdist) wheels.
-2. If the downloaded distribution is stored as a compressed archive, unpack it using the
-   appropriate decompression tool.
+1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the
+   [stable releases](https://github.com/Sun-Lab-NBB/ataraxis-communication-interface/tags) that include precompiled
+   binary and source code distribution (sdist) wheels.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
 4. Run `pip install .` to install the project and its dependencies.
 
 ### pip
 
-Use the following command to install the library and all of its dependencies via
-[pip](https://pip.pypa.io/en/stable/): `pip install ataraxis-communication-interface`
+Use the following command to install the library and all of its dependencies via [pip](https://pip.pypa.io/en/stable/):
+`pip install ataraxis-communication-interface`
 
 ___
 
 ## Usage
 
 ### Quickstart
-This section demonstrates how to use custom hardware module interfaces compatible with this library. See
-[this section](#implementing-custom-module-interfaces) for instructions on how to implement module interface classes.
-The example below should be run together with the companion
-[microcontroller module](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart) example.
-See the [example_runtime.py](./examples/example_runtime.py) for the .py implementation of this example.
+See the [Implementing Custom Module Interfaces](#implementing-custom-module-interfaces) section for instructions on how
+to implement module interface classes. The example below should be run together with the companion
+[microcontroller module](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart) example. See the
+[example_runtime.py](./examples/example_runtime.py) for the .py implementation of this example.
 ```python
 import tempfile
 from pathlib import Path
@@ -123,9 +119,10 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger, assemble_log_archives
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 
-# Imports the TestModuleInterface class from the companion example file (examples/example_interface.py).
-# Run this script from the 'examples' directory or adjust the import path accordingly.
-from examples.example_interface import TestModuleInterface
+# Imports the TestModuleInterface class from the companion example file (examples/example_interface.py). Installing
+# this library exposes that file as the 'ataraxis_communication_interface_examples' package. To run the example from a
+# cloned repository instead, use 'from example_interface import TestModuleInterface' from inside the examples directory.
+from ataraxis_communication_interface_examples.example_interface import TestModuleInterface
 
 from ataraxis_communication_interface import (
     MICROCONTROLLER_MANIFEST_FILENAME,
@@ -331,10 +328,9 @@ if __name__ == "__main__":
 ```
 
 ### User-Defined Variables
-This library is designed to flexibly support many different use patterns. To do so, it intentionally avoids hardcoding
-certain metadata variables that allow the PC interface to individuate and address the managed microcontroller and
-specific hardware module instances. **Each end user has to manually define these values both for the microcontroller
-and the PC.**
+This library does not hardcode the metadata variables that allow the PC interface to individuate and address the managed
+microcontroller and specific hardware module instances. **Each end user has to manually define these values both for the
+microcontroller and the PC.**
 
 Two of these variables, the `module_type` and the `module_id` are used by the (base) **ModuleInterface** class. The
 remaining `controller_id` variable is used by the **MicroControllerInterface** class. See the
@@ -380,16 +376,16 @@ by the PC is serialized and saved as an uncompressed **.npy** file.
 
 The same DataLogger instance as used by the MicroControllerInterface instances may be shared by multiple other Ataraxis
 assets that generate log entries, such as [VideoSystem](https://github.com/Sun-Lab-NBB/ataraxis-video-system) classes.
-To support using the same logger instance for multiple concurrently active sources,
-**each source has to use a unique identifier value (controller id) when sending data to the logger instance**.
+To support using the same logger instance for multiple concurrently active sources, **each source has to use a unique
+identifier value (controller id) when sending data to the logger instance**.
 
 Each MicroControllerInterface instance automatically writes a `microcontroller_manifest.yaml` file into the DataLogger
 output directory during initialization. The manifest associates the controller_id with the human-readable `name`
 provided to the MicroControllerInterface constructor, along with the list of module sources. When multiple
 MicroControllerInterface instances share the same DataLogger, each instance registers its entry in the same manifest
-file, replacing the entry any earlier instance registered under the same controller_id.
-The manifest is required by the [log processing](#log-processing) pipeline to validate which `.npz` archives were
-produced by ataraxis-communication-interface and to resolve source IDs for processing.
+file, replacing the entry any earlier instance registered under the same controller_id. The manifest is required by the
+[log processing](#log-processing) pipeline to validate which `.npz` archives were produced by
+ataraxis-communication-interface and to resolve source IDs for processing.
 
 ***Note,*** currently, only the MicroControllerInterface supports logging data to disk.
 
@@ -427,8 +423,8 @@ log archives generated by the MicroControllerInterface instance at runtime.
 This library includes a log data processing pipeline for extracting hardware module and kernel event data from the
 `.npz` log archives generated by MicroControllerInterface instances at runtime. The pipeline reads archives produced by
 the [DataLogger](https://github.com/Sun-Lab-NBB/ataraxis-data-structures#datalogger), extracts messages matching the
-event codes specified in an extraction configuration, and writes the results as
-[Polars](https://pola.rs/) DataFrames in Apache Feather (IPC) format.
+event codes specified in an extraction configuration, and writes the results as [Polars](https://pola.rs/) DataFrames in
+Apache Feather (IPC) format.
 
 The pipeline uses the [microcontroller manifest](#data-logging) to validate that `.npz` archives were produced by
 ataraxis-communication-interface. A `microcontroller_manifest.yaml` file must be present in the log directory for
@@ -439,23 +435,19 @@ One recording writes one MicroControllerInterface set to one DataLogger, so exac
 invocation. A log directory tree holding several manifests, or archives written by several DataLogger instances,
 spans several recordings and is rejected with a diagnostic naming the topology it detected.
 
-Processing is split across two entry points that share their job resolution but not their execution. The `axci
-process` CLI command and the `run_log_processing_pipeline()` function target a single recording and run its archives
-one at a time in the calling process, or run the single job a caller names by its canonical identifier. The
-[MCP server](#mcp-server) log processing tools orchestrate batches spanning many recordings, admitting jobs against a
-core budget and a memory budget and running them in one shared process pool. Both write a YAML-based processing
-tracker that manages job lifecycle (scheduled, running, succeeded, or failed), and both write every output file into
-a `microcontroller_data/` subdirectory under the specified output directory.
+Processing is split across two entry points that share their job resolution but not their execution. The `axci process`
+CLI command and the `run_log_processing_pipeline()` function target a single recording and run its archives one at a
+time in the calling process, or run the single job a caller names by its canonical identifier. The
+[MCP server](#mcp-server) log processing tools handle archive discovery, batch preparation, and status monitoring for
+batches spanning many recordings, admitting jobs against a core budget and a memory budget and running them in one
+shared process pool. Both write a YAML-based processing tracker that manages job lifecycle (scheduled, running,
+succeeded, or failed), and both write every output file into a `microcontroller_data/` subdirectory under the specified
+output directory.
 
 Each job targets exactly one log archive. A caller that weighs jobs against a budget sizes each one from its own
-archive, so a batch mixing a long recording with a short one gives each the width its own archive earns rather than
-one width chosen for the whole run. The job resolution and the sizing model are exported as callable functions, so an
-external scheduler derives the same figures this library dispatches with instead of re-deriving them.
-
-For single-directory processing, use the `axci process` CLI command or the `run_log_processing_pipeline()` function
-directly. For multi-directory batch workflows, use the [MCP server](#mcp-server) log processing tools, which handle
-archive discovery, batch preparation, concurrent execution against a core and a memory budget, and status monitoring
-across multiple recording directories.
+archive. A batch mixing a long recording with a short one therefore gives each the width its own archive earns rather
+than one width chosen for the whole run. The job resolution and the sizing model are exported as callable functions, so
+an external scheduler derives the same figures this library dispatches with instead of re-deriving them.
 
 ### Custom Module Interfaces
 For this library, an interface is a class that contains the logic for sending the command and parameter data to the
@@ -652,27 +644,27 @@ axci mcp
 
 #### Available Tools
 
-| Tool                                  | Description                                                                   |
-|---------------------------------------|-------------------------------------------------------------------------------|
-| `list_microcontrollers_tool`          | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs |
-| `check_mqtt_broker_tool`              | Checks whether an MQTT broker is reachable at the specified host and port     |
-| `assemble_log_archives_tool`          | Consolidates raw .npy log entries into .npz archives by source ID             |
-| `read_microcontroller_manifest_tool`  | Reads a microcontroller manifest file and returns its contents                |
-| `write_microcontroller_manifest_tool` | Writes or updates a microcontroller manifest file in a log directory          |
-| `discover_microcontroller_data_tool`  | Discovers confirmed microcontroller recordings under a root directory         |
-| `read_extraction_config_tool`         | Reads an extraction configuration from a YAML file and returns its contents   |
-| `write_extraction_config_tool`        | Writes an extraction configuration to a YAML file from structured data        |
-| `validate_extraction_config_tool`     | Validates an extraction config against a manifest for completeness            |
-| `prepare_log_processing_batch_tool`   | Prepares a batch of log processing jobs across multiple directories           |
-| `execute_log_processing_jobs_tool`    | Executes prepared log processing jobs against a core and a memory budget      |
-| `get_log_processing_status_tool`      | Returns the current status of the active log processing session               |
-| `get_log_processing_timing_tool`      | Returns timing information for all jobs in the active session                 |
-| `cancel_log_processing_tool`          | Cancels the active log processing execution session                           |
-| `reset_log_processing_jobs_tool`      | Resets the named source IDs' jobs, or all jobs, in a tracker for re-execution |
-| `get_batch_status_overview_tool`      | Summarizes processing status for all log directories under a root directory   |
-| `verify_processing_output_tool`       | Verifies completeness and schema correctness of processed output              |
-| `query_extracted_events_tool`         | Queries and samples extracted event data from feather output files            |
-| `clean_log_processing_output_tool`    | Deletes processed output directories for clean re-processing                  |
+| Tool                                  | Description                                                                  |
+|---------------------------------------|------------------------------------------------------------------------------|
+| `list_microcontrollers_tool`          | Discovers serial ports connected to Ataraxis microcontrollers and returns IDs|
+| `check_mqtt_broker_tool`              | Checks whether an MQTT broker is reachable at the specified host and port    |
+| `assemble_log_archives_tool`          | Consolidates raw .npy log entries into .npz archives by source ID            |
+| `read_microcontroller_manifest_tool`  | Reads a microcontroller manifest file and returns its contents               |
+| `write_microcontroller_manifest_tool` | Writes or updates a microcontroller manifest file in a log directory         |
+| `discover_microcontroller_data_tool`  | Discovers confirmed microcontroller recordings under a root directory        |
+| `read_extraction_config_tool`         | Reads an extraction configuration from a YAML file and returns its contents  |
+| `write_extraction_config_tool`        | Writes an extraction configuration to a YAML file from structured data       |
+| `validate_extraction_config_tool`     | Validates an extraction config against a manifest for completeness           |
+| `prepare_log_processing_batch_tool`   | Prepares a batch of log processing jobs across multiple directories          |
+| `execute_log_processing_jobs_tool`    | Executes prepared log processing jobs against a core and a memory budget     |
+| `get_log_processing_status_tool`      | Returns the current status of the active log processing session              |
+| `get_log_processing_timing_tool`      | Returns timing information for all jobs in the active session                |
+| `cancel_log_processing_tool`          | Cancels the active log processing execution session                          |
+| `reset_log_processing_jobs_tool`      | Resets the named source IDs' jobs, or all jobs, in a tracker for re-execution|
+| `get_batch_status_overview_tool`      | Summarizes processing status for all log directories under a root directory  |
+| `verify_processing_output_tool`       | Verifies completeness and schema correctness of processed output             |
+| `query_extracted_events_tool`         | Queries and samples extracted event data from feather output files           |
+| `clean_log_processing_output_tool`    | Deletes processed output directories for clean re-processing                 |
 
 #### Client Registration
 
@@ -686,40 +678,37 @@ ___
 
 ## API Documentation
 
-See the [API documentation](https://ataraxis-communication-interface-api.netlify.app/) for the
-detailed description of the methods and classes exposed by components of this library.
+See the [API documentation](https://ataraxis-communication-interface-api.netlify.app/) for the detailed description of
+the methods and classes exposed by components of this library.
 
 ___
 
 ## Developers
 
-This section provides installation, dependency, and build-system instructions for the developers
-that want to modify the source code of this library.
+This section provides installation, dependency, and build-system instructions for the developers that want to modify the
+source code of this library.
 
 ### Installing the Project
 
-***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all
-Ataraxis framework automation pipelines require that mamba is installed through the
-[miniforge3](https://github.com/conda-forge/miniforge) installer.
+***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all Ataraxis framework
+automation pipelines require that mamba is installed through the [miniforge3](https://github.com/conda-forge/miniforge)
+installer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning.
-2. If the downloaded distribution is stored as a compressed archive, unpack it using the
-   appropriate decompression tool.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
 4. Install the core Ataraxis framework development dependencies into the ***base*** mamba environment via the
    `mamba install tox uv tox-uv` command.
-5. Use the `tox -e create` command to create the project-specific development environment followed
-   by `tox -e install` command to install the project into that environment as a library.
+5. Use the `tox -e create` command to create the project-specific development environment followed by `tox -e install`
+   command to install the project into that environment as a library.
 
 ### Additional Dependencies
 
-In addition to installing the project and all user dependencies, install the following
-dependencies:
+In addition to installing the project and all user dependencies, install the following dependencies:
 
-1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by
-   the developed project. Currently, this library supports the three latest stable versions. It is
-   recommended to use a tool like [pyenv](https://github.com/pyenv/pyenv) to install and manage
-   the required versions.
+1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by the developed project.
+   Currently, this library supports the three latest stable versions. It is recommended to use a tool like
+   [pyenv](https://github.com/pyenv/pyenv) to install and manage the required versions.
 
 ### Development Automation
 
@@ -745,37 +734,28 @@ This project uses `tox` for development automation. The following tox environmen
 
 Run any environment using `tox -e ENVIRONMENT`. For example, `tox -e lint`.
 
-***Note,*** all pull requests for this project have to successfully complete the `tox` task before
-being merged. To expedite the task's runtime, use the `tox --parallel` command to run some tasks
-in parallel.
+***Note,*** all pull requests for this project have to successfully complete the `tox` task before being merged. To
+expedite the task's runtime, use the `tox --parallel` command to run some tasks in parallel.
 
 ### AI-Assisted Development
 
 Claude Code skills and other AI development assets for this project are distributed through the
 [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace across three plugins:
 
-- **communication** plugin: Provides MCP server registration, communication-specific skills for microcontroller setup,
-  pipeline orchestration, log processing, and extraction configuration management. Install this plugin to register the
-  `axci mcp` server with compatible MCP clients and make all communication workflow skills available.
-- **microcontroller** plugin: Provides firmware-side skills for implementing custom hardware Module subclasses in the
-  companion [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library. The
-  `/firmware-module` skill complements the communication plugin's `/microcontroller-interface` skill, covering
-  stage-based command execution, parameter structures, event codes, and main.cpp integration with Kernel and
-  Communication.
-- **automation** plugin: Provides shared development skills that enforce Ataraxis framework coding conventions
-  (Python style, README style, commit messages, pyproject.toml, tox configuration) and general-purpose codebase
-  exploration tools.
+- **communication** plugin: Carries the `axci mcp` server registration and the communication workflow skills.
+- **microcontroller** plugin: Carries the firmware-side skills for the companion
+  [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library.
+- **automation** plugin: Carries the shared development skills that enforce Ataraxis framework conventions.
 
 Install all three plugins from the marketplace to make all associated skills and development tools available to
 compatible AI coding agents.
 
 ### Automation Troubleshooting
 
-Many packages used in `tox` automation pipelines (uv, mypy, ruff) and `tox` itself may experience
-runtime failures. In most cases, this is related to their caching behavior. If an unintelligible
-error is encountered with any of the automation components, deleting the corresponding cache
-directories (`.tox`, `.ruff_cache`, `.mypy_cache`, etc.) manually or via a CLI command typically
-resolves the issue.
+Many packages used in `tox` automation pipelines (uv, mypy, ruff) and `tox` itself may experience runtime failures. In
+most cases, this is related to their caching behavior. If an unintelligible error is encountered with any of the
+automation components, deleting the corresponding cache directories (`.tox`, `.ruff_cache`, `.mypy_cache`, etc.)
+manually or via a CLI command typically resolves the issue.
 
 ___
 

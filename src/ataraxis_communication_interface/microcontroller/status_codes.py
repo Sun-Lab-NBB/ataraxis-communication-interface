@@ -176,95 +176,6 @@ class TransportStatusCodes(IntEnum):
     """The communication interface accepted only a part of the packet."""
 
 
-_KERNEL_ERROR_DESCRIPTIONS: dict[int, str] = {
-    KernelStatusCodes.STANDBY: "Reserved placeholder code that the Kernel never transmits.",
-    KernelStatusCodes.MODULE_SETUP_ERROR: (
-        "A hardware module failed its setup sequence. The controller runs no commands until its firmware is "
-        "re-uploaded."
-    ),
-    KernelStatusCodes.RECEPTION_ERROR: "Reception failed.",
-    KernelStatusCodes.TRANSMISSION_ERROR: "Transmission failed.",
-    KernelStatusCodes.INVALID_MESSAGE_PROTOCOL: (
-        "The received message declared a protocol code the microcontroller does not accept."
-    ),
-    KernelStatusCodes.MODULE_PARAMETERS_ERROR: ("The addressed hardware module rejected the PC-sent parameter block."),
-    KernelStatusCodes.COMMAND_NOT_RECOGNIZED: "The Kernel does not implement the received command code.",
-    KernelStatusCodes.TARGET_MODULE_NOT_FOUND: "No hardware module matches the addressed type and id codes.",
-    KernelStatusCodes.KEEPALIVE_TIMEOUT: (
-        "No keepalive command arrived within the timeout window. The Kernel performed an emergency reset, returning "
-        "all managed hardware to its default state."
-    ),
-}
-"""Maps each Kernel status code that reports a fault to the condition it reports. Membership in this table defines
-which Kernel codes interrupt the runtime, so the codes the Kernel uses to report ordinary progress are absent."""
-
-_MODULE_ERROR_DESCRIPTIONS: dict[int, str] = {
-    ModuleStatusCodes.STANDBY: "Reserved placeholder code that the base Module class never transmits.",
-    ModuleStatusCodes.TRANSMISSION_ERROR: "Transmission failed.",
-    ModuleStatusCodes.COMMAND_NOT_RECOGNIZED: "The module does not implement the received command code.",
-}
-"""Maps each service status code that reports a fault to the condition it reports. Membership in this table defines
-which service codes interrupt the runtime, so the code that reports command completion is absent."""
-
-_KERNEL_STATUS_VALUES: frozenset[int] = frozenset(code.value for code in KernelStatusCodes)
-"""The value of every status code the Kernel defines. Every received Kernel message tests its event code against this
-set, which resolves through one hash probe, because testing against the enumeration itself walks a list of values
-behind a metaclass call."""
-
-_MODULE_STATUS_VALUES: frozenset[int] = frozenset(code.value for code in ModuleStatusCodes)
-"""The value of every service status code the base Module class defines. Serves the same per-message membership test
-for module messages that the Kernel set above serves for Kernel messages."""
-
-_COMMUNICATION_STATUS_MEANINGS: dict[int, str] = {
-    CommunicationStatusCodes.STANDBY: "no operation completed since the last reset",
-    CommunicationStatusCodes.RECEPTION_ERROR: "could not read a complete message from the serial stream",
-    CommunicationStatusCodes.PARSING_ERROR: "message payload did not match the layout its protocol code declares",
-    CommunicationStatusCodes.PACKING_ERROR: "outgoing message did not fit the transmission payload",
-    CommunicationStatusCodes.MESSAGE_SENT: "last recorded operation was a completed transmission",
-    CommunicationStatusCodes.MESSAGE_RECEIVED: "last recorded operation was a completed reception",
-    CommunicationStatusCodes.INVALID_PROTOCOL: "protocol code not valid for the message's direction",
-    CommunicationStatusCodes.NO_BYTES_TO_RECEIVE: "no complete message in the serial stream",
-    CommunicationStatusCodes.PARAMETER_MISMATCH: (
-        "received parameter block size differs from the module's parameter structure size"
-    ),
-    CommunicationStatusCodes.PARAMETERS_EXTRACTED: "last recorded operation was a completed parameter extraction",
-    CommunicationStatusCodes.EXTRACTION_FORBIDDEN: (
-        "parameter extraction attempted on a message carrying no parameter block"
-    ),
-    CommunicationStatusCodes.TRANSMISSION_ERROR: "serial interface accepted only part of the outgoing message",
-}
-"""Maps each Communication class status code to the condition it reports."""
-
-_TRANSPORT_STATUS_MEANINGS: dict[int, str] = {
-    TransportStatusCodes.STANDBY: "no operation completed since the last reset",
-    TransportStatusCodes.DECODING_FAILED: "COBS decoding failed, packet bytes likely corrupted in transit",
-    TransportStatusCodes.PACKET_SENT: "last recorded operation was a transmitted packet",
-    TransportStatusCodes.PAYLOAD_SIZE_BYTE_NOT_FOUND: "packet start byte found, payload size byte never arrived",
-    TransportStatusCodes.INVALID_PAYLOAD_SIZE: "declared payload size outside the accepted range",
-    TransportStatusCodes.PACKET_TIMEOUT_ERROR: "packet bytes stopped arriving before the packet completed",
-    TransportStatusCodes.NO_BYTES_TO_PARSE: "no packet start byte in the reception buffer",
-    TransportStatusCodes.PACKET_PARSED: "last recorded operation was a parsed packet",
-    TransportStatusCodes.CRC_CHECK_FAILED: "CRC mismatch, packet bytes likely corrupted in transit",
-    TransportStatusCodes.PACKET_RECEIVED: "last recorded operation was a received packet",
-    TransportStatusCodes.WRITE_OBJECT_BUFFER_ERROR: "transmission buffer payload region too small for the object",
-    TransportStatusCodes.OBJECT_WRITTEN_TO_BUFFER: "last recorded operation was a completed buffer write",
-    TransportStatusCodes.READ_OBJECT_BUFFER_ERROR: (
-        "reception buffer payload region holds fewer bytes than the object requires"
-    ),
-    TransportStatusCodes.OBJECT_READ_FROM_BUFFER: "last recorded operation was a completed buffer read",
-    TransportStatusCodes.DELIMITER_NOT_FOUND_ERROR: (
-        "payload delimiter byte absent, packet bytes likely corrupted in transit"
-    ),
-    TransportStatusCodes.DELIMITER_FOUND_TOO_EARLY_ERROR: (
-        "payload delimiter byte appeared early, packet bytes likely corrupted in transit"
-    ),
-    TransportStatusCodes.POSTAMBLE_TIMEOUT_ERROR: "CRC postamble did not arrive within the reception timeout",
-    TransportStatusCodes.EMPTY_PAYLOAD_ERROR: "send attempted with an empty staged payload",
-    TransportStatusCodes.PACKET_PARTIALLY_SENT: "serial interface accepted only part of the outgoing packet",
-}
-"""Maps each microcontroller-side TransportLayer status code to the condition it reports."""
-
-
 def describe_kernel_event(
     message: KernelData | KernelState,
     controller_id: np.uint8,
@@ -374,6 +285,95 @@ def describe_custom_module_error(
     context = f"{source} error code {message.event} during command {message.command}."
     payload = f"Data object: {message.data_object}." if isinstance(message, ModuleData) else ""
     return _join_sentences(context, description, payload)
+
+
+_KERNEL_ERROR_DESCRIPTIONS: dict[int, str] = {
+    KernelStatusCodes.STANDBY: "Reserved placeholder code that the Kernel never transmits.",
+    KernelStatusCodes.MODULE_SETUP_ERROR: (
+        "A hardware module failed its setup sequence. The controller runs no commands until its firmware is "
+        "re-uploaded."
+    ),
+    KernelStatusCodes.RECEPTION_ERROR: "Reception failed.",
+    KernelStatusCodes.TRANSMISSION_ERROR: "Transmission failed.",
+    KernelStatusCodes.INVALID_MESSAGE_PROTOCOL: (
+        "The received message declared a protocol code the microcontroller does not accept."
+    ),
+    KernelStatusCodes.MODULE_PARAMETERS_ERROR: ("The addressed hardware module rejected the PC-sent parameter block."),
+    KernelStatusCodes.COMMAND_NOT_RECOGNIZED: "The Kernel does not implement the received command code.",
+    KernelStatusCodes.TARGET_MODULE_NOT_FOUND: "No hardware module matches the addressed type and id codes.",
+    KernelStatusCodes.KEEPALIVE_TIMEOUT: (
+        "No keepalive command arrived within the timeout window. The Kernel performed an emergency reset, returning "
+        "all managed hardware to its default state."
+    ),
+}
+"""Maps each Kernel status code that reports a fault to the condition it reports. Membership in this table defines
+which Kernel codes interrupt the runtime, so the codes the Kernel uses to report ordinary progress are absent."""
+
+_MODULE_ERROR_DESCRIPTIONS: dict[int, str] = {
+    ModuleStatusCodes.STANDBY: "Reserved placeholder code that the base Module class never transmits.",
+    ModuleStatusCodes.TRANSMISSION_ERROR: "Transmission failed.",
+    ModuleStatusCodes.COMMAND_NOT_RECOGNIZED: "The module does not implement the received command code.",
+}
+"""Maps each service status code that reports a fault to the condition it reports. Membership in this table defines
+which service codes interrupt the runtime, so the code that reports command completion is absent."""
+
+_KERNEL_STATUS_VALUES: frozenset[int] = frozenset(code.value for code in KernelStatusCodes)
+"""The value of every status code the Kernel defines. Every received Kernel message tests its event code against this
+set, which resolves through one hash probe, because testing against the enumeration itself walks a list of values
+behind a metaclass call."""
+
+_MODULE_STATUS_VALUES: frozenset[int] = frozenset(code.value for code in ModuleStatusCodes)
+"""The value of every service status code the base Module class defines. Serves the same per-message membership test
+for module messages that the Kernel set above serves for Kernel messages."""
+
+_COMMUNICATION_STATUS_MEANINGS: dict[int, str] = {
+    CommunicationStatusCodes.STANDBY: "no operation completed since the last reset",
+    CommunicationStatusCodes.RECEPTION_ERROR: "could not read a complete message from the serial stream",
+    CommunicationStatusCodes.PARSING_ERROR: "message payload did not match the layout its protocol code declares",
+    CommunicationStatusCodes.PACKING_ERROR: "outgoing message did not fit the transmission payload",
+    CommunicationStatusCodes.MESSAGE_SENT: "last recorded operation was a completed transmission",
+    CommunicationStatusCodes.MESSAGE_RECEIVED: "last recorded operation was a completed reception",
+    CommunicationStatusCodes.INVALID_PROTOCOL: "protocol code not valid for the message's direction",
+    CommunicationStatusCodes.NO_BYTES_TO_RECEIVE: "no complete message in the serial stream",
+    CommunicationStatusCodes.PARAMETER_MISMATCH: (
+        "received parameter block size differs from the module's parameter structure size"
+    ),
+    CommunicationStatusCodes.PARAMETERS_EXTRACTED: "last recorded operation was a completed parameter extraction",
+    CommunicationStatusCodes.EXTRACTION_FORBIDDEN: (
+        "parameter extraction attempted on a message carrying no parameter block"
+    ),
+    CommunicationStatusCodes.TRANSMISSION_ERROR: "serial interface accepted only part of the outgoing message",
+}
+"""Maps each Communication class status code to the condition it reports."""
+
+_TRANSPORT_STATUS_MEANINGS: dict[int, str] = {
+    TransportStatusCodes.STANDBY: "no operation completed since the last reset",
+    TransportStatusCodes.DECODING_FAILED: "COBS decoding failed, packet bytes likely corrupted in transit",
+    TransportStatusCodes.PACKET_SENT: "last recorded operation was a transmitted packet",
+    TransportStatusCodes.PAYLOAD_SIZE_BYTE_NOT_FOUND: "packet start byte found, payload size byte never arrived",
+    TransportStatusCodes.INVALID_PAYLOAD_SIZE: "declared payload size outside the accepted range",
+    TransportStatusCodes.PACKET_TIMEOUT_ERROR: "packet bytes stopped arriving before the packet completed",
+    TransportStatusCodes.NO_BYTES_TO_PARSE: "no packet start byte in the reception buffer",
+    TransportStatusCodes.PACKET_PARSED: "last recorded operation was a parsed packet",
+    TransportStatusCodes.CRC_CHECK_FAILED: "CRC mismatch, packet bytes likely corrupted in transit",
+    TransportStatusCodes.PACKET_RECEIVED: "last recorded operation was a received packet",
+    TransportStatusCodes.WRITE_OBJECT_BUFFER_ERROR: "transmission buffer payload region too small for the object",
+    TransportStatusCodes.OBJECT_WRITTEN_TO_BUFFER: "last recorded operation was a completed buffer write",
+    TransportStatusCodes.READ_OBJECT_BUFFER_ERROR: (
+        "reception buffer payload region holds fewer bytes than the object requires"
+    ),
+    TransportStatusCodes.OBJECT_READ_FROM_BUFFER: "last recorded operation was a completed buffer read",
+    TransportStatusCodes.DELIMITER_NOT_FOUND_ERROR: (
+        "payload delimiter byte absent, packet bytes likely corrupted in transit"
+    ),
+    TransportStatusCodes.DELIMITER_FOUND_TOO_EARLY_ERROR: (
+        "payload delimiter byte appeared early, packet bytes likely corrupted in transit"
+    ),
+    TransportStatusCodes.POSTAMBLE_TIMEOUT_ERROR: "CRC postamble did not arrive within the reception timeout",
+    TransportStatusCodes.EMPTY_PAYLOAD_ERROR: "send attempted with an empty staged payload",
+    TransportStatusCodes.PACKET_PARTIALLY_SENT: "serial interface accepted only part of the outgoing packet",
+}
+"""Maps each microcontroller-side TransportLayer status code to the condition it reports."""
 
 
 def _format_code(code: int, code_type: type[IntEnum]) -> str:

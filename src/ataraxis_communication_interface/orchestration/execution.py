@@ -1,9 +1,5 @@
 """Provides the batch execution engine that admits sized extraction jobs against a core and a memory budget and runs
 each one in a worker of a single shared process pool.
-
-Notes:
-    This module serves the MCP server and any external scheduler that drives a batch. The command-line pipeline
-    processes one recording sequentially and never reaches it.
 """
 
 from __future__ import annotations
@@ -64,18 +60,6 @@ broke is the only job a break can be attributed to, so only such a job spends th
 
 
 @dataclass(slots=True)
-class _ActiveJob:
-    """Tracks one job executing in a worker of the shared job pool."""
-
-    job: JobDescriptor
-    """The descriptor the pool was handed."""
-    sizing: JobSizing
-    """The resource figures this job was admitted at."""
-    future: Future[None]
-    """The future the pool returned, which carries the job body's outcome."""
-
-
-@dataclass(slots=True)
 class JobExecutionState:
     """Tracks runtime state for one batch execution session budgeted by both cores and memory.
 
@@ -114,11 +98,23 @@ class JobExecutionState:
     is charged, since a break fails every in-flight job whatever caused it."""
 
 
+@dataclass(slots=True)
+class _ActiveJob:
+    """Tracks one job executing in a worker of the shared job pool."""
+
+    job: JobDescriptor
+    """The descriptor the pool was handed."""
+    sizing: JobSizing
+    """The resource figures this job was admitted at."""
+    future: Future[None]
+    """The future the pool returned, which carries the job body's outcome."""
+
+
 _execution_lock: Lock = Lock()
 """Serializes the check-and-reserve that admits one batch execution session at a time. The test of the reference below
-and its replacement sit on opposite sides of a bytecode boundary, so two callers finding the slot free would otherwise
-both publish a session, and the second would strand the first session's worker pool beyond the reach of every
-cancellation tool."""
+and its replacement sit on opposite sides of a bytecode boundary. Two callers finding the slot free would otherwise both
+publish a session, and the second would strand the first session's worker pool beyond the reach of every cancellation
+tool."""
 
 _execution_state: JobExecutionState | None = None
 """Stores the active execution state for batch log processing jobs, or None when no session exists."""
@@ -146,8 +142,8 @@ def start_execution_session(state: JobExecutionState) -> bool:
 
     Notes:
         The incumbent test, the publication, and the thread start all happen under one lock. A thread reports itself
-        alive only once it has started, so a state published before its thread runs reads as a finished session, and
-        splitting these steps lets two callers each start a manager and double-commit the host's cores and memory.
+        alive only once it has started, so a state published before its thread runs reads as a finished session.
+        Splitting these steps lets two callers each start a manager and double-commit the host's cores and memory.
 
         A session whose manager thread has ended is replaced, so a completed or an abandoned batch does not block
         every later batch.
@@ -177,6 +173,9 @@ def job_execution_manager(state: JobExecutionState) -> None:
     """Dispatches queued jobs into one shared process pool under the batch's core and memory budgets.
 
     Notes:
+        Serves the MCP server and any external scheduler that drives a batch. The command-line pipeline processes one
+        recording sequentially and never reaches it.
+
         Runs as a daemon thread for the lifetime of one execution session. Creates the pool once and keeps it, so a
         job body starts in a worker that is already alive. Each body opens its own extraction pool at the width its
         job was admitted at.
@@ -337,14 +336,14 @@ def _pin_pool_worker(thread_count: int, barrier: Barrier) -> None:
         Pins from both sides. The inherited environment reaches the backends that size their pool while importing,
         and this call reaches the ones that read their width when first asked to do work.
 
-        A pool spawns a worker only when work arrives and reuses an idle worker over spawning a new one, so holding
-        every worker at the barrier is what forces one spawn per slot while the parent's pin is still in force.
+        A pool spawns a worker only when work arrives and reuses an idle worker over spawning a new one. Holding every
+        worker at the barrier is therefore what forces one spawn per slot while the parent's pin is still in force.
 
     Args:
         thread_count: The threads this worker's numeric backends may open.
         barrier: The barrier every worker and the creating parent meet on.
     """
-    initialize_worker_threads(thread_count)
+    initialize_worker_threads(thread_count=thread_count)
     barrier.wait(timeout=_POOL_WARMUP_TIMEOUT_SECONDS)
 
 
@@ -427,7 +426,7 @@ def _admit_pending_jobs(state: JobExecutionState, executor: ProcessPoolExecutor)
 
     for index, (job, sizing) in enumerate(admitted):
         try:
-            future = executor.submit(run_extraction_job, job)
+            future = executor.submit(run_extraction_job, job=job)
         except BrokenProcessPool:
             state.pool_broken = True
             deferred.extend(admitted[index:])
@@ -549,6 +548,12 @@ def _job_is_unrecorded(job: JobDescriptor) -> bool:
         A scheduled entry is excluded. A job that reached a worker leaves a running entry behind, so a finished job
         reading scheduled was reset by an operator asking for a re-run, and recording an outcome over it would
         discard that re-run.
+
+    Args:
+        job: The job whose tracker entry is inspected.
+
+    Returns:
+        True when the entry reads running, and False when it reads any other status or cannot be read at all.
     """
     try:
         snapshot = ProcessingTracker(file_path=job.tracker_path).snapshot()
@@ -576,12 +581,21 @@ def _reconcile_unrecorded_job(job: JobDescriptor) -> None:
 
 
 def _reset_job(job: JobDescriptor) -> None:
-    """Returns one job's tracker entry to the scheduled state so a requeued job starts from a clean record."""
+    """Returns one job's tracker entry to the scheduled state so a requeued job starts from a clean record.
+
+    Args:
+        job: The job whose tracker entry is returned to the scheduled state.
+    """
     with contextlib.suppress(Exception):
         ProcessingTracker(file_path=job.tracker_path).reset_jobs(job_ids=[job.job_id])
 
 
 def _fail_job(job: JobDescriptor, error_message: str) -> None:
-    """Records one job's terminal failure, absorbing a tracker that cannot be written."""
+    """Records one job's terminal failure, absorbing a tracker that cannot be written.
+
+    Args:
+        job: The job whose terminal failure is recorded.
+        error_message: The explanation recorded against the failed job.
+    """
     with contextlib.suppress(Exception):
         ProcessingTracker(file_path=job.tracker_path).fail_job(job_id=job.job_id, error_message=error_message)

@@ -167,7 +167,9 @@ class JobDescriptor:
                 f"its values cannot be read as the type its field declares: {error}."
             )
             console.error(message=message, error=ValueError)
-            raise  # pragma: no cover - console.error always raises, this satisfies the linter's return analysis.
+
+            # Satisfies ruff RET503. console.error() is NoReturn, so this line never executes.
+            raise  # pragma: no cover
 
     @property
     def dispatch_key(self) -> tuple[str, str]:

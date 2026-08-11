@@ -32,11 +32,12 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
             subdirectory with processed output.
 
     Returns:
-        A dictionary containing a 'verified' flag, the 'output_directory' and 'data_path', per-file results in 'files'
-        (each with path, filename, type, and schema validity, carrying row count and column names when the file was
-        read, an 'error' instead when it was not, and 'missing_columns' and 'extra_columns' when the schema
-        mismatches), tracker status in 'tracker', and a 'total_files' count. Returns an error dictionary if the
-        output directory is missing, is not a directory, or holds no ``microcontroller_data/`` subdirectory.
+        A dictionary containing a 'verified' flag, the 'output_directory' and 'data_path', per-file results in
+        'files', tracker status in 'tracker', and a 'total_files' count. Each 'files' entry carries the path,
+        filename, type, and schema validity, with the row count and column names when the file was read, an 'error'
+        instead when it was not, and 'missing_columns' and 'extra_columns' when the schema mismatches. Returns an
+        error dictionary if the output directory is missing, is not a directory, or holds no
+        ``microcontroller_data/`` subdirectory.
     """
     output_path = Path(output_directory)
 
@@ -65,7 +66,6 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
     for feather_file in feather_files:
         entry: dict[str, Any] = {"file": str(feather_file), "filename": feather_file.name}
 
-        # Classifies each output file as module or kernel from its filename infix.
         name = feather_file.stem
         if OutputLayout.KERNEL_INFIX in name:
             entry["type"] = "kernel"
@@ -105,7 +105,6 @@ def verify_processing_output_tool(output_directory: str) -> dict[str, Any]:
 
         file_results.append(entry)
 
-    # Reads tracker status if available.
     tracker_path = data_path / OutputLayout.TRACKER_FILENAME
     tracker_info: dict[str, Any] = {}
     if tracker_path.exists():
@@ -177,10 +176,10 @@ def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str,
             subdirectories to delete.
 
     Returns:
-        A dictionary containing a 'results' list with per-directory outcomes (each with 'output_directory' and a
-        'cleaned' flag, carrying 'data_path' on a successful deletion, both 'data_path' and 'error' on a failed
-        deletion, 'error' alone for a path that does not resolve to a directory, and 'message' when there is nothing
-        to clean), a 'total_cleaned' count, and a 'total_directories' count.
+        A dictionary containing a 'results' list with per-directory outcomes, a 'total_cleaned' count, and a
+        'total_directories' count. Each 'results' entry carries 'output_directory' and a 'cleaned' flag. A successful
+        deletion adds 'data_path', a failed deletion adds both 'data_path' and 'error', a path that does not resolve
+        to a directory adds 'error' alone, and a directory with nothing to clean adds 'message'.
     """
     results = [_clean_single_output(output_directory=directory) for directory in output_directories]
     total_cleaned = sum(1 for result in results if result.get("cleaned", False))
@@ -195,9 +194,9 @@ def _clean_single_output(output_directory: str) -> dict[str, Any]:
         output_directory: The absolute path to the output directory.
 
     Returns:
-        A dictionary containing 'output_directory' and a 'cleaned' flag, carrying 'data_path' on a successful
-        deletion, both 'data_path' and 'error' on a failed deletion, 'error' alone for a path that does not resolve
-        to a directory, and 'message' when there is nothing to clean.
+        A dictionary containing 'output_directory' and a 'cleaned' flag. A successful deletion adds 'data_path', a
+        failed deletion adds both 'data_path' and 'error', a path that does not resolve to a directory adds 'error'
+        alone, and a directory with nothing to clean adds 'message'.
     """
     output_path = Path(output_directory)
 
@@ -278,15 +277,16 @@ def _analyze_single_event_feather(
             "sample_rows": [],
         }
 
-    # Extracts the timestamp column and computes basic recording statistics.
     timestamps = dataframe[ExtractedDataColumns.TIMESTAMP].to_numpy()
     first_timestamp_us = int(timestamps[0])
     last_timestamp_us = int(timestamps[-1])
     duration_us = last_timestamp_us - first_timestamp_us
     duration_seconds = (
         round(
-            convert_time(time=duration_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.SECOND, as_float=True),
-            6,
+            number=convert_time(
+                time=duration_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.SECOND, as_float=True
+            ),
+            ndigits=6,
         )
         if duration_us > 0
         else 0.0
@@ -319,21 +319,23 @@ def _analyze_single_event_feather(
     inter_event_timing: dict[str, Any] = {}
     if total_rows >= _MINIMUM_ROWS_FOR_INTERVALS:
         intervals_us = np.diff(timestamps).astype(np.int64)
-        mean_us = round(float(np.mean(intervals_us)), 2)
-        median_us = round(float(np.median(intervals_us)), 2)
-        std_us = round(float(np.std(intervals_us)), 2)
+        mean_us = round(number=float(np.mean(intervals_us)), ndigits=2)
+        median_us = round(number=float(np.median(intervals_us)), ndigits=2)
+        std_us = round(number=float(np.std(intervals_us)), ndigits=2)
         min_us = int(np.min(intervals_us))
         max_us = int(np.max(intervals_us))
 
         mean_ms = round(
-            convert_time(time=mean_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.MILLISECOND, as_float=True),
-            4,
+            number=convert_time(
+                time=mean_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.MILLISECOND, as_float=True
+            ),
+            ndigits=4,
         )
         median_ms = round(
-            convert_time(
+            number=convert_time(
                 time=median_us, from_units=TimeUnits.MICROSECOND, to_units=TimeUnits.MILLISECOND, as_float=True
             ),
-            4,
+            ndigits=4,
         )
 
         inter_event_timing = {
@@ -349,9 +351,9 @@ def _analyze_single_event_feather(
     # Builds sample rows with binary data omitted for readability.
     sample_rows: list[dict[str, Any]] = []
     sample_count = min(max_sample_rows, total_rows)
-    sample_df = pl.scan_ipc(source=file_path).head(sample_count).collect()
+    sample_dataframe = pl.scan_ipc(source=file_path).head(sample_count).collect()
 
-    for row in sample_df.iter_rows(named=True):
+    for row in sample_dataframe.iter_rows(named=True):
         sample_entry: dict[str, Any] = {ExtractedDataColumns.TIMESTAMP: int(row[ExtractedDataColumns.TIMESTAMP])}
 
         if ExtractedDataColumns.COMMAND in row:

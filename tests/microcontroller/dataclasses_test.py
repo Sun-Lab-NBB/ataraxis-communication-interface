@@ -1,4 +1,4 @@
-"""Contains tests for the classes and functions defined in the dataclasses module."""
+"""Contains tests for the classes and functions provided by the dataclasses.py module."""
 
 from typing import Any
 from pathlib import Path
@@ -26,17 +26,6 @@ from ataraxis_communication_interface.microcontroller.dataclasses import (
 
 _CONCURRENCY_TIMEOUT: int = 30
 """Stores the time, in seconds, the concurrency tests wait for a helper process or a lock before giving up."""
-
-
-def _register_controller(log_directory: Path, controller_id: int, barrier: Any) -> None:
-    """Registers one controller in the shared manifest once every sibling worker has reached the barrier."""
-    barrier.wait(timeout=_CONCURRENCY_TIMEOUT)
-    write_microcontroller_manifest(
-        log_directory=log_directory,
-        controller_id=controller_id,
-        controller_name=f"controller_{controller_id}",
-        modules=(ModuleSourceData(module_type=1, module_id=1, name="encoder"),),
-    )
 
 
 def test_constants() -> None:
@@ -464,3 +453,14 @@ def test_create_extraction_config_empty_manifest(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match=error_format(message)):
         create_extraction_config(manifest_path=manifest_path)
+
+
+def _register_controller(log_directory: Path, controller_id: int, barrier: Any) -> None:
+    """Registers one controller in the shared manifest once every sibling worker has reached the barrier."""
+    barrier.wait(timeout=_CONCURRENCY_TIMEOUT)
+    write_microcontroller_manifest(
+        log_directory=log_directory,
+        controller_id=controller_id,
+        controller_name=f"controller_{controller_id}",
+        modules=(ModuleSourceData(module_type=1, module_id=1, name="encoder"),),
+    )

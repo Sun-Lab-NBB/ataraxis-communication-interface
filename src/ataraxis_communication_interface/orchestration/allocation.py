@@ -1,8 +1,5 @@
 """Provides the declared core allocation of the microcontroller data extraction stage, the archive-derived footprint
 model that sizes each job's cores and memory from the input it will read, and the batch-wide budget resolvers.
-
-Notes:
-    This module imports nothing from its own package, so a scheduler consuming the sizing model takes it alone.
 """
 
 from __future__ import annotations
@@ -44,9 +41,9 @@ batch that overcommits its host swaps or is killed outright, so estimates round 
 
 Notes:
     This term and the other memory model constants in this module are empirically derived. A scheduler plans a batch
-    that mixes this stage with the stages the platform's other estimators cover, so the figures have to be read on
-    one scale, and a value that drifts makes this stage's jobs admit against a different standard than everything
-    queued beside them.
+    that mixes this stage with the stages the platform's other estimators cover, so the figures have to be read on one
+    scale. A value that drifts makes this stage's jobs admit against a different standard than everything queued beside
+    them.
 """
 
 SPAWNED_CHILD_MEMORY_MB: int = 200
@@ -177,8 +174,8 @@ def estimate_archive_job_memory_mb(archive_path: Path, cores: int) -> tuple[int,
     """Estimates the memory one extraction job holds, from the archive path alone.
 
     Notes:
-        Reads the archive's size without opening it, costing one stat call. The caller supplies the core count, so a
-        scheduler holding a fixed per-stage width sizes a job at the width it dispatches.
+        Reads the archive's size without opening it, costing one stat call. The module defining this estimator imports
+        nothing from its own package, so a scheduler consuming the sizing model takes it alone.
 
     Args:
         archive_path: The path to the .npz log archive the job reads.

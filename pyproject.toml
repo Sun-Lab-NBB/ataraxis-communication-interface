@@ -45,7 +45,7 @@ dependencies = [
     # Ataraxis Libraries
     "ataraxis-time>=7,<8",
     "ataraxis-base-utilities>=7,<8",
-    "ataraxis-data-structures>=7.1,<8",  # 7.1 first exports atomic_write and index_marker_files
+    "ataraxis-data-structures>=7.1,<8",     # 7.1 first exports atomic_write and index_marker_files
     "ataraxis-transport-layer-pc>=5.1,<6",  # 5.1 first exposes the reception_payload accessor
 
     # Data Processing
@@ -67,6 +67,7 @@ dependencies = [
     "mcp>=2,<3",
 ]
 
+# Lists the repository and documentation links published with the package.
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/ataraxis-communication-interface"
 Documentation = "https://ataraxis-communication-interface-api.netlify.app/"
@@ -93,11 +94,16 @@ dev = [
 
 # Specifies files that should not be included in the source-code distribution.
 [tool.hatch.build.targets.sdist]
-exclude = [".github", "recipe"]
+exclude = [".codegraph", ".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
 packages = ["src/ataraxis_communication_interface", "examples"]
+
+# Renames the 'examples' directory to a distribution-qualified package inside the wheel. A bare 'examples' package
+# installs into a namespace directory that every distribution shipping the same directory name would share.
+[tool.hatch.build.targets.wheel.sources]
+"examples" = "ataraxis_communication_interface_examples"
 
 # Ruff Configuration.
 [tool.ruff]
@@ -106,8 +112,9 @@ indent-width = 4
 target-version = "py312"  # Targets the lowest supported version of python
 src = ["src"]
 
-# Excludes 'service' .py files, such as the sphinx configuration file, from linting.
-extend-exclude = ["conf.py"]
+# Excludes 'service' .py files, such as the sphinx configuration file, and the 'examples' directory from linting. The
+# examples are teaching material rather than library code, so readability governs them instead of the lint corpus.
+extend-exclude = ["conf.py", "examples"]
 
 # Checks for all potential violations and uses the exclusions below to target-disable specific ones.
 lint.select = ["ALL"]
@@ -176,6 +183,7 @@ convention = "google"
     "PT022",   # The yield keeps the DataLogger alive, as its finalizer destroys the queue the fixture returns
 ]
 
+# Configures how imports are sorted and grouped.
 [tool.ruff.lint.isort]
 case-sensitive = true
 combine-as-imports = true          # Combines multiple "as" imports for the same package

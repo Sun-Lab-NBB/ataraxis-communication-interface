@@ -10,7 +10,7 @@ from dataclasses import field, dataclass
 import numpy as np
 from ataraxis_base_utilities import console
 
-from .protocols import SerialProtocols
+from .protocols import PrototypeType, SerialProtocols
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -32,7 +32,7 @@ _ZERO_SHORT: np.uint16 = np.uint16(0)
 _ZERO_LONG: np.uint32 = np.uint32(0)
 """Default zero value for uint32 fields used across message dataclasses."""
 
-_TRUE: np.bool_ = np.bool_(True)  # noqa: FBT003
+_TRUE: np.bool_ = np.bool_(True)  # noqa: FBT003 - the positional argument is a numpy scalar value, not a flag.
 """Default boolean true value for noblock fields used across command dataclasses."""
 
 
@@ -227,7 +227,6 @@ class ModuleParameters:
             console.error(message=message, error=ValueError)
         object.__setattr__(self, "parameters_size", parameters_size)
 
-        # Pre-allocates the full array with the exact size (header and parameters object).
         packed_data = np.empty(4 + parameters_size, dtype=np.uint8)
 
         packed_data[0:4] = [
@@ -260,13 +259,13 @@ class ModuleData:
     """Communicates that the Module has encountered a notable event and includes an additional data object.
 
     Notes:
-        Event codes are unique within each module -- the same code always carries the same semantic meaning
-        regardless of the command that was executing when the message was sent.
+        Event codes are unique within each module. The same code always carries the same semantic meaning regardless of
+        the command that was executing when the message was sent.
     """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=5, dtype=np.uint8))
     """The parsed message header data."""
-    data_object: np.number[Any] | NDArray[Any] = _ZERO_BYTE
+    data_object: PrototypeType = _ZERO_BYTE
     """The parsed data object transmitted with the message."""
 
     def __repr__(self) -> str:
@@ -321,13 +320,13 @@ class KernelData:
     """Communicates that the Kernel has encountered a notable event and includes an additional data object.
 
     Notes:
-        Event codes are unique within the kernel -- the same code always carries the same semantic meaning
-        regardless of the command that was executing when the message was sent.
+        Event codes are unique within the kernel. The same code always carries the same semantic meaning regardless of
+        the command that was executing when the message was sent.
     """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=3, dtype=np.uint8))
     """The parsed message header data."""
-    data_object: np.number[Any] | NDArray[Any] = _ZERO_BYTE
+    data_object: PrototypeType = _ZERO_BYTE
     """The parsed data object transmitted with the message."""
 
     def __repr__(self) -> str:
@@ -358,8 +357,8 @@ class ModuleState:
     """Communicates that the Module has encountered a notable event.
 
     Notes:
-        Event codes are unique within each module -- the same code always carries the same semantic meaning
-        regardless of the command that was executing when the message was sent.
+        Event codes are unique within each module. The same code always carries the same semantic meaning regardless of
+        the command that was executing when the message was sent.
     """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=4, dtype=np.uint8))
@@ -411,8 +410,8 @@ class KernelState:
     """Communicates that the Kernel has encountered a notable event.
 
     Notes:
-        Event codes are unique within the kernel -- the same code always carries the same semantic meaning
-        regardless of the command that was executing when the message was sent.
+        Event codes are unique within the kernel. The same code always carries the same semantic meaning regardless of
+        the command that was executing when the message was sent.
     """
 
     message: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=2, dtype=np.uint8))
@@ -478,8 +477,7 @@ class ModuleIdentification:
     """Identifies a hardware module instance by communicating its combined type and id code.
 
     Notes:
-        Unlike the other reception message classes, this class stores only the combined module_type_id value and does
-        not retain a parsed message header buffer.
+        The entire message payload is the combined type and ID value, so the class stores that value directly.
     """
 
     module_type_id: np.uint16 = _ZERO_SHORT

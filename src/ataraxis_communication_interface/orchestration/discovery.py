@@ -242,9 +242,8 @@ def prepare_jobs(
         lives in the returned set rather than on disk.
 
         Reads no archive. Every job carries the core ceiling as its width, and the extraction reads an archive below
-        the parallel processing threshold sequentially whatever width it is given, so a caller that only runs jobs
-        pays nothing to prepare them. A caller that weighs jobs against a budget sizes each one through size_job,
-        which narrows the width to the workers the archive repays.
+        the parallel processing threshold sequentially whatever width it is given, so a caller that only runs jobs pays
+        nothing to prepare them.
 
         A tree holding no manifest prepares no job whatever the configuration declares, matching the empty universe
         the resolution reports for it.
@@ -271,8 +270,8 @@ def prepare_jobs(
     Raises:
         FileNotFoundError: If the log directory or the configuration file does not exist, or if a requested source's
             archive is absent under strict sourcing.
-        ValueError: If the tree holds more than one manifest, if a manifest registers no sources, if the
-            configuration declares no controllers, if a job identifier matches no configured controller, if a
+        ValueError: If the tree holds more than one manifest, if a manifest registers no sources, if the configuration
+            declares no controllers, or if a job identifier matches no configured controller. Also raised if a
             requested source is absent from the microcontroller manifest or from the extraction configuration under
             strict sourcing, or if the resolved archives span several directories.
         OSError: If any directory beneath the log directory cannot be read.
@@ -438,12 +437,7 @@ def size_job(job: JobDescriptor, core_ceiling: int = -1) -> tuple[JobDescriptor,
     """Sizes one prepared job from the archive it reads.
 
     Notes:
-        Reads the archive's zip directory and its file metadata alone, decoding no message. A caller that admits
-        jobs against a core and a memory budget runs this over the set it prepared, while a caller that only runs
-        jobs in turn has nothing to weigh and skips it.
-
-        Resolves both the width and the memory this stage demands, so a scheduler dispatching this stage asks for
-        the figures rather than composing them from the model itself.
+        Reads the archive's zip directory and its file metadata alone, decoding no message.
 
     Args:
         job: The prepared job to size.

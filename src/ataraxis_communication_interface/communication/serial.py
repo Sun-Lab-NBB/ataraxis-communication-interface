@@ -65,7 +65,7 @@ class SerialCommunication:
 
     Notes:
         This class is explicitly designed to be used by other library assets and should not be used directly by end
-        users. An instance of this class is initialized and managed by the MicroControllerInterface class.
+        users.
 
     Args:
         controller_id: The identifier code of the microcontroller to communicate with.
@@ -74,7 +74,7 @@ class SerialCommunication:
             manufacturer (UART / USB controller specification). Must be at least 9 bytes. The value bounds the size of
             the payloads the PC transmits, while reception is bounded by the 254-byte ceiling the COBS encoding
             imposes.
-        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'.
+        port: The name of the serial port to connect to, e.g., 'COM3' or '/dev/ttyUSB0'.
         logger_queue: The multiprocessing Queue object exposed by the DataLogger instance used to pipe the data to be
             logged to the logger process.
         baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
@@ -103,7 +103,7 @@ class SerialCommunication:
         controller_id: np.uint8,
         microcontroller_serial_buffer_size: int,
         port: str,
-        logger_queue: MPQueue,  # type: ignore[type-arg]
+        logger_queue: MPQueue,  # type: ignore[type-arg]  # multiprocessing.Queue is not subscriptable at runtime.
         baudrate: int = 115200,
         *,
         test_mode: bool = False,
@@ -121,7 +121,6 @@ class SerialCommunication:
             test_mode=test_mode,
         )
 
-        # Pre-initializes the structures used to store the received message data.
         self._module_data = ModuleData()
         self._kernel_data = KernelData()
         self._module_state = ModuleState()
@@ -130,14 +129,15 @@ class SerialCommunication:
         self._module_identification = ModuleIdentification()
         self._reception_code = ReceptionCode()
 
-        # Initializes the trackers used to timestamp the data sent to the logger via the logger_queue.
         self._timestamp_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MICROSECOND)
         self._source_id: np.uint8 = controller_id  # uint8 type is used to enforce byte-range
-        self._logger_queue: MPQueue = logger_queue  # type: ignore[type-arg]
+        self._logger_queue: MPQueue = logger_queue  # type: ignore[type-arg]  # MPQueue is not subscriptable.
 
         # Constructs a timezone-aware stamp using the UTC time. This creates a reference point for all later delta time
         # readouts.
-        onset: NDArray[np.uint8] = get_timestamp(output_format=TimestampFormats.BYTES)  # type: ignore[assignment]
+        onset: NDArray[np.uint8] = get_timestamp(  # type: ignore[assignment]  # BYTES narrows the returned union
+            output_format=TimestampFormats.BYTES
+        )
         # Immediately resets the timer to make it as close as possible to the onset time.
         self._timestamp_timer.reset()
 
@@ -164,7 +164,10 @@ class SerialCommunication:
         """
         self._transport_layer.write_data(data_object=message.packed_data)
         self._transport_layer.send_data()
-        self._log_data(timestamp=self._timestamp_timer.elapsed, data=message.packed_data)  # type: ignore[arg-type]
+        self._log_data(
+            timestamp=self._timestamp_timer.elapsed,
+            data=message.packed_data,  # type: ignore[arg-type]  # __post_init__ always sets the packed data.
+        )
 
     def receive_message(
         self,
@@ -195,60 +198,51 @@ class SerialCommunication:
                 data message uses an unsupported data object prototype code.
 
         """
-        # Attempts to receive the data message. If there is no data to receive, returns None. This is a non-error,
-        # no-message return case.
+        # Receiving no data is a non-error, no-message return case.
         if not self._transport_layer.receive_data():
             return None
 
-        # Timestamps and logs the serialized message data to disk before further processing.
         self._log_data(timestamp=self._timestamp_timer.elapsed, data=self._transport_layer.reception_payload)
 
         # Reads the message protocol code, expected to be found as the first value of every incoming payload. This
         # code determines how to parse the message's payload.
         protocol = self._transport_layer.read_data(data_object=_PROTOCOL_CODE_PROTOTYPE)
 
-        # Uses the extracted protocol code to determine the type of the received message and process the received data.
         if protocol == _PROTOCOL_MODULE_DATA:
-            # Parses the static header data from the extracted message.
             self._module_data.message = self._transport_layer.read_data(data_object=self._module_data.message)
 
             # Resolves the prototype code and uses it to retrieve the prototype object from the SerialPrototypes
             # lookup table.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._module_data.prototype_code)
 
-            # If prototype retrieval fails, raises ValueError.
             if prototype is None:
                 message = (
-                    f"Invalid prototype code {self._module_data.prototype_code} encountered when extracting the data "
-                    f"object from the received ModuleData message sent by module {self._module_data.module_id} of type "
-                    f"{self._module_data.module_type}. All messages must use one of the valid prototype "
-                    f"codes available from the SerialPrototypes enumeration."
+                    f"Unable to extract the data object from the received ModuleData message sent by module "
+                    f"{self._module_data.module_id} of type {self._module_data.module_type}. The message must "
+                    f"use one of the prototype codes available from the SerialPrototypes enumeration, but got "
+                    f"{self._module_data.prototype_code}."
                 )
                 console.error(message=message, error=ValueError)
 
-            # Uses the retrieved prototype to parse the data object.
             self._module_data.data_object = self._transport_layer.read_data(data_object=prototype)
 
             return self._module_data
 
         if protocol == _PROTOCOL_KERNEL_DATA:
-            # Parses the static header data from the extracted message.
             self._kernel_data.message = self._transport_layer.read_data(data_object=self._kernel_data.message)
 
             # Resolves the prototype code and uses it to retrieve the prototype object from the SerialPrototypes
             # lookup table.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._kernel_data.prototype_code)
 
-            # If the prototype retrieval fails, raises ValueError.
             if prototype is None:
                 message = (
-                    f"Invalid prototype code {self._kernel_data.prototype_code} encountered when extracting the data "
-                    f"object from the received KernelData message. All messages must use one of the valid prototype "
-                    f"codes available from the SerialPrototypes enumeration."
+                    f"Unable to extract the data object from the received KernelData message. The message must use "
+                    f"one of the prototype codes available from the SerialPrototypes enumeration, but got "
+                    f"{self._kernel_data.prototype_code}."
                 )
                 console.error(message=message, error=ValueError)
 
-            # Uses the retrieved prototype to parse the data object.
             self._kernel_data.data_object = self._transport_layer.read_data(data_object=prototype)
 
             return self._kernel_data
@@ -272,19 +266,16 @@ class SerialCommunication:
             return self._controller_identification
 
         if protocol == _PROTOCOL_MODULE_IDENTIFICATION:
-            # Since the entire message payload is the uint16 type-id value, read the value directly into the
+            # Since the entire message payload is the uint16 type-id value, reads the value directly into the
             # module_type_id attribute.
             self._module_identification.module_type_id = self._transport_layer.read_data(
                 data_object=self._module_identification.module_type_id
             )
             return self._module_identification
 
-        # If the protocol code is not resolved by any conditional above, it is not valid. Terminates runtime with a
-        # ValueError.
         message = (
-            f"Invalid protocol code {protocol} encountered when attempting to parse a message received from the "
-            f"microcontroller. All incoming messages have to use one of the valid incoming message protocol codes "
-            f"available from the SerialProtocols enumeration."
+            f"Unable to parse the message received from the microcontroller. The message must use one of the incoming "
+            f"message protocol codes available from the SerialProtocols enumeration, but got {protocol}."
         )
         console.error(message=message, error=ValueError)
         # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
@@ -298,6 +289,5 @@ class SerialCommunication:
                 microseconds relative to the 'onset' timestamp at the time of data acquisition.
             data: The serialized message payload to be logged.
         """
-        # Packages the data to be logged into the appropriate tuple format (with ID variables).
         package = LogPackage(source_id=self._source_id, acquisition_time=np.uint64(timestamp), serialized_data=data)
         self._logger_queue.put(package)

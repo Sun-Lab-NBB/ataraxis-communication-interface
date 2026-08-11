@@ -15,5 +15,7 @@ offered by this library. See the project GitHub repository for installation inst
 `ataraxis-communication-interface GitHub repository <https://github.com/Sun-Lab-NBB/ataraxis-communication-interface>`_.
 
 .. _`Ataraxis`: https://github.com/Sun-Lab-NBB/ataraxis
-.. _`ataraxis-communication-interface GitHub repository`: https://github.com/Sun-Lab-NBB/ataraxis-communication-interface
+.. _`ataraxis-micro-controller`: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller
+.. _`ataraxis-communication-interface GitHub repository`:
+   https://github.com/Sun-Lab-NBB/ataraxis-communication-interface
 .. _`Sun (NeuroAI) lab`: https://neuroai.github.io/sunlab/

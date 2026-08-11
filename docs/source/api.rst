@@ -42,6 +42,7 @@ Orchestration
 
 CLI
 ===
+
 .. click:: ataraxis_communication_interface.interfaces.cli:axci_cli
    :prog: axci
    :nested: full

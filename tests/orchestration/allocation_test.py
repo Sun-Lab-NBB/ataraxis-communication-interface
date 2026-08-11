@@ -1,14 +1,15 @@
 """Contains tests for the classes and functions provided by the orchestration/allocation.py module."""
 
 import os
+from pathlib import Path
 
 import pytest
 from tests.log_archives import (
     create_test_archive,
-    make_kernel_data_payload,
-    make_module_data_payload,
-    make_kernel_state_payload,
-    make_module_state_payload,
+    create_kernel_data_payload,
+    create_module_data_payload,
+    create_kernel_state_payload,
+    create_module_state_payload,
 )
 from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, PARALLEL_PROCESSING_THRESHOLD
 
@@ -46,67 +47,7 @@ _UNMODELED_MEMORY_MB: int = _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
 """Stores the memory floor every consumer plans around when an archive yields no footprint."""
 
 
-def _modeled_footprint(message_count: int, archive_bytes: int) -> ArchiveFootprint:
-    """Builds a modeled footprint carrying the requested message count and on-disk size."""
-    return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes, modeled=True)
-
-
-def _expected_memory_mb(archive_bytes: int, cores: int) -> int:
-    """Recomputes the modeled memory estimate for an archive of the requested size at the requested core count."""
-    per_reader = _bytes_to_megabytes(byte_count=archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
-
-    # A single-core job takes the sequential path, which opens no extraction pool and holds the body's reader alone.
-    if cores == 1:
-        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
-
-    # Every pool child holds a spawned child's baseline and a reader of its own, and the job body holds one of each.
-    readers = cores + 1
-    return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
-
-
-def _write_archive(archive_path, source_id: int = 1) -> None:
-    """Writes a small readable log archive holding four module messages and two kernel messages."""
-    create_test_archive(
-        archive_path=archive_path,
-        source_id=source_id,
-        onset_us=1_000_000,
-        messages=[
-            (1000, make_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
-            (2000, make_module_state_payload(module_type=1, module_id=2, command=1, event=11)),
-            (
-                3000,
-                make_module_data_payload(
-                    module_type=1,
-                    module_id=2,
-                    command=2,
-                    event=20,
-                    prototype_code=SerialPrototypes.ONE_UINT8,
-                    data_bytes=[42],
-                ),
-            ),
-            (
-                4000,
-                make_module_data_payload(
-                    module_type=1,
-                    module_id=2,
-                    command=2,
-                    event=21,
-                    prototype_code=SerialPrototypes.ONE_UINT8,
-                    data_bytes=[43],
-                ),
-            ),
-            (5000, make_kernel_state_payload(command=3, event=30)),
-            (
-                6000,
-                make_kernel_data_payload(
-                    command=4, event=40, prototype_code=SerialPrototypes.ONE_UINT8, data_bytes=[7]
-                ),
-            ),
-        ],
-    )
-
-
-def test_archive_footprint_fields():
+def test_archive_footprint_fields() -> None:
     """Verifies that ArchiveFootprint stores the message count, the archive size, and the modeled flag."""
     footprint = ArchiveFootprint(message_count=1500, archive_bytes=4096, modeled=True)
 
@@ -119,7 +60,7 @@ def test_archive_footprint_fields():
         footprint.message_count = 10
 
 
-def test_resolve_archive_footprint_models_real_archive(tmp_path):
+def test_resolve_archive_footprint_models_real_archive(tmp_path: Path) -> None:
     """Verifies that resolve_archive_footprint models a readable log archive from its directory and file size."""
     archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
     _write_archive(archive_path=archive_path)
@@ -133,7 +74,7 @@ def test_resolve_archive_footprint_models_real_archive(tmp_path):
     assert footprint.archive_bytes > 0
 
 
-def test_resolve_archive_footprint_skips_message_count(tmp_path):
+def test_resolve_archive_footprint_skips_message_count(tmp_path: Path) -> None:
     """Verifies that resolve_archive_footprint reports a stat-only footprint when the message count is not requested."""
     archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
     _write_archive(archive_path=archive_path)
@@ -149,7 +90,7 @@ def test_resolve_archive_footprint_skips_message_count(tmp_path):
 
 
 @pytest.mark.parametrize("read_message_count", [True, False])
-def test_resolve_archive_footprint_falls_back_for_missing_archive(tmp_path, read_message_count):
+def test_resolve_archive_footprint_falls_back_for_missing_archive(tmp_path: Path, *, read_message_count: bool) -> None:
     """Verifies that resolve_archive_footprint returns an unmodeled footprint for an archive that does not exist."""
     footprint = resolve_archive_footprint(
         archive_path=tmp_path / f"1{LOG_ARCHIVE_SUFFIX}", read_message_count=read_message_count
@@ -162,7 +103,7 @@ def test_resolve_archive_footprint_falls_back_for_missing_archive(tmp_path, read
     assert footprint.archive_bytes == 0
 
 
-def test_resolve_archive_footprint_falls_back_for_corrupt_archive(tmp_path):
+def test_resolve_archive_footprint_falls_back_for_corrupt_archive(tmp_path: Path) -> None:
     """Verifies that resolve_archive_footprint returns an unmodeled footprint for an archive it cannot decode."""
     archive_path = tmp_path / f"2{LOG_ARCHIVE_SUFFIX}"
     archive_path.write_text("This is not a valid numpy archive.")
@@ -172,7 +113,7 @@ def test_resolve_archive_footprint_falls_back_for_corrupt_archive(tmp_path):
     assert footprint == _UNMODELED_FOOTPRINT
 
 
-def test_resolve_archive_footprint_models_corrupt_archive_without_message_count(tmp_path):
+def test_resolve_archive_footprint_models_corrupt_archive_without_message_count(tmp_path: Path) -> None:
     """Verifies that resolve_archive_footprint models a corrupt archive from its size when it does not open it."""
     archive_path = tmp_path / f"2{LOG_ARCHIVE_SUFFIX}"
     archive_path.write_text("This is not a valid numpy archive.")
@@ -187,14 +128,14 @@ def test_resolve_archive_footprint_models_corrupt_archive_without_message_count(
 
 
 @pytest.mark.parametrize("message_count", [0, 1, PARALLEL_PROCESSING_THRESHOLD - 1])
-def test_resolve_job_workers_below_threshold(message_count):
+def test_resolve_job_workers_below_threshold(message_count: int) -> None:
     """Verifies that resolve_job_workers gives a single core to an archive below the parallel processing threshold."""
     footprint = _modeled_footprint(message_count=message_count, archive_bytes=1024)
 
     assert resolve_job_workers(footprint=footprint, ceiling=CONTROLLER_EXTRACTION_JOB_CORES * 4) == 1
 
 
-def test_resolve_job_workers_caps_at_repaid_workers():
+def test_resolve_job_workers_caps_at_repaid_workers() -> None:
     """Verifies that resolve_job_workers holds a mid-size archive to the workers its message count repays."""
     footprint = _modeled_footprint(message_count=PARALLEL_PROCESSING_THRESHOLD * 3, archive_bytes=64 * _MEGABYTE)
 
@@ -206,7 +147,7 @@ def test_resolve_job_workers_caps_at_repaid_workers():
     assert workers < CONTROLLER_EXTRACTION_JOB_CORES
 
 
-def test_resolve_job_workers_caps_at_declared_width():
+def test_resolve_job_workers_caps_at_declared_width() -> None:
     """Verifies that resolve_job_workers holds a large archive to the declared core allocation of the stage."""
     footprint = _modeled_footprint(message_count=PARALLEL_PROCESSING_THRESHOLD * 100, archive_bytes=512 * _MEGABYTE)
 
@@ -215,7 +156,7 @@ def test_resolve_job_workers_caps_at_declared_width():
     assert workers == CONTROLLER_EXTRACTION_JOB_CORES
 
 
-def test_resolve_job_workers_caps_at_ceiling():
+def test_resolve_job_workers_caps_at_ceiling() -> None:
     """Verifies that resolve_job_workers never returns more cores than the ceiling that sized the job."""
     footprint = _modeled_footprint(message_count=PARALLEL_PROCESSING_THRESHOLD * 100, archive_bytes=512 * _MEGABYTE)
 
@@ -229,7 +170,7 @@ def test_resolve_job_workers_caps_at_ceiling():
         assert workers < CONTROLLER_EXTRACTION_JOB_CORES
 
 
-def test_resolve_job_workers_floors_at_one():
+def test_resolve_job_workers_floors_at_one() -> None:
     """Verifies that resolve_job_workers returns at least one core when the ceiling is non-positive."""
     footprint = _modeled_footprint(message_count=PARALLEL_PROCESSING_THRESHOLD * 100, archive_bytes=512 * _MEGABYTE)
 
@@ -237,7 +178,7 @@ def test_resolve_job_workers_floors_at_one():
     assert resolve_job_workers(footprint=footprint, ceiling=-5) == 1
 
 
-def test_estimate_job_memory_mb_unmodeled_footprint():
+def test_estimate_job_memory_mb_unmodeled_footprint() -> None:
     """Verifies that estimate_job_memory_mb falls back to the spawned child baseline for an unmodeled footprint."""
     # The core count does not enter the estimate, since an unmodeled footprint carries no archive to split.
     for cores in (1, 4, CONTROLLER_EXTRACTION_JOB_CORES):
@@ -248,7 +189,7 @@ def test_estimate_job_memory_mb_unmodeled_footprint():
         assert estimate % _MEGABYTES_PER_GIGABYTE == 0
 
 
-def test_estimate_job_memory_mb_charges_one_body_and_one_reader_serially():
+def test_estimate_job_memory_mb_charges_one_body_and_one_reader_serially() -> None:
     """Verifies that estimate_job_memory_mb charges a single-core job for one spawned child and one reader."""
     footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
 
@@ -263,7 +204,7 @@ def test_estimate_job_memory_mb_charges_one_body_and_one_reader_serially():
     assert estimate == 1024
 
 
-def test_estimate_job_memory_mb_charges_every_reader_in_parallel():
+def test_estimate_job_memory_mb_charges_every_reader_in_parallel() -> None:
     """Verifies that estimate_job_memory_mb charges a multi-core job for the job body and every pool child."""
     footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
     cores = 4
@@ -279,7 +220,7 @@ def test_estimate_job_memory_mb_charges_every_reader_in_parallel():
     assert estimate == 3072
 
 
-def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path():
+def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path() -> None:
     """Verifies that estimate_job_memory_mb charges a two-core job more than the sequential path it leaves behind."""
     footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
 
@@ -292,7 +233,7 @@ def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path():
     assert parallel_estimate == 2048
 
 
-def test_estimate_job_memory_mb_scales_with_cores():
+def test_estimate_job_memory_mb_scales_with_cores() -> None:
     """Verifies that estimate_job_memory_mb grows with the cores a job holds, as every core opens its own reader."""
     footprint = _modeled_footprint(message_count=1_000_000, archive_bytes=512 * _MEGABYTE)
     core_counts = (1, 2, 4, CONTROLLER_EXTRACTION_JOB_CORES)
@@ -301,12 +242,14 @@ def test_estimate_job_memory_mb_scales_with_cores():
 
     assert estimates == sorted(estimates)
     assert estimates[0] < estimates[-1]
-    assert estimates == [_expected_memory_mb(archive_bytes=footprint.archive_bytes, cores=c) for c in core_counts]
+    assert estimates == [
+        _expected_memory_mb(archive_bytes=footprint.archive_bytes, cores=cores) for cores in core_counts
+    ]
     assert estimates == [3072, 8192, 13312, 23552]
     assert all(estimate % _MEGABYTES_PER_GIGABYTE == 0 for estimate in estimates)
 
 
-def test_estimate_job_memory_mb_scales_with_archive_bytes():
+def test_estimate_job_memory_mb_scales_with_archive_bytes() -> None:
     """Verifies that estimate_job_memory_mb grows with the size of the archive the job reads."""
     archive_sizes = (1024, 64 * _MEGABYTE, 512 * _MEGABYTE)
 
@@ -322,7 +265,7 @@ def test_estimate_job_memory_mb_scales_with_archive_bytes():
     assert all(estimate % _MEGABYTES_PER_GIGABYTE == 0 for estimate in estimates)
 
 
-def test_estimate_archive_job_memory_mb_models_real_archive(tmp_path):
+def test_estimate_archive_job_memory_mb_models_real_archive(tmp_path: Path) -> None:
     """Verifies that estimate_archive_job_memory_mb sizes a job from the archive on disk without opening it."""
     archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
     _write_archive(archive_path=archive_path)
@@ -339,7 +282,7 @@ def test_estimate_archive_job_memory_mb_models_real_archive(tmp_path):
     assert memory_mb > _UNMODELED_MEMORY_MB
 
 
-def test_estimate_archive_job_memory_mb_scales_with_cores(tmp_path):
+def test_estimate_archive_job_memory_mb_scales_with_cores(tmp_path: Path) -> None:
     """Verifies that estimate_archive_job_memory_mb charges more memory as the caller widens the job."""
     archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
     _write_archive(archive_path=archive_path)
@@ -354,7 +297,7 @@ def test_estimate_archive_job_memory_mb_scales_with_cores(tmp_path):
     assert all(estimate % _MEGABYTES_PER_GIGABYTE == 0 for estimate in estimates)
 
 
-def test_estimate_archive_job_memory_mb_falls_back_for_missing_archive(tmp_path):
+def test_estimate_archive_job_memory_mb_falls_back_for_missing_archive(tmp_path: Path) -> None:
     """Verifies that estimate_archive_job_memory_mb reports the baseline floor for an archive that does not exist."""
     memory_mb, modeled = estimate_archive_job_memory_mb(archive_path=tmp_path / f"1{LOG_ARCHIVE_SUFFIX}", cores=4)
 
@@ -364,7 +307,7 @@ def test_estimate_archive_job_memory_mb_falls_back_for_missing_archive(tmp_path)
     assert memory_mb == _MEGABYTES_PER_GIGABYTE
 
 
-def test_estimate_archive_job_memory_mb_models_undecodable_archive(tmp_path):
+def test_estimate_archive_job_memory_mb_models_undecodable_archive(tmp_path: Path) -> None:
     """Verifies that estimate_archive_job_memory_mb sizes a present but undecodable archive from its size."""
     archive_path = tmp_path / f"2{LOG_ARCHIVE_SUFFIX}"
     archive_path.write_bytes(b"0" * (4 * _MEGABYTE))
@@ -377,7 +320,7 @@ def test_estimate_archive_job_memory_mb_models_undecodable_archive(tmp_path):
     assert memory_mb == _expected_memory_mb(archive_bytes=4 * _MEGABYTE, cores=2)
 
 
-def test_resolve_host_memory_mb():
+def test_resolve_host_memory_mb() -> None:
     """Verifies that resolve_host_memory_mb reports a positive physical memory figure for the host."""
     host_memory_mb = resolve_host_memory_mb()
 
@@ -385,7 +328,7 @@ def test_resolve_host_memory_mb():
     assert host_memory_mb > 0
 
 
-def test_resolve_core_budget_honors_positive_request():
+def test_resolve_core_budget_honors_positive_request() -> None:
     """Verifies that resolve_core_budget honors a positive core request up to the logical core count of the host."""
     available_cores = os.cpu_count() or 1
 
@@ -397,7 +340,7 @@ def test_resolve_core_budget_honors_positive_request():
 
 
 @pytest.mark.parametrize("requested_budget", [0, -1, -100])
-def test_resolve_core_budget_auto_resolves(requested_budget):
+def test_resolve_core_budget_auto_resolves(requested_budget: int) -> None:
     """Verifies that resolve_core_budget auto-resolves a non-positive request to at least one core."""
     available_cores = os.cpu_count() or 1
 
@@ -409,13 +352,13 @@ def test_resolve_core_budget_auto_resolves(requested_budget):
 
 
 @pytest.mark.parametrize("requested_budget_mb", [1, 1024, 4096, 1_000_000])
-def test_resolve_memory_budget_mb_honors_positive_request(requested_budget_mb):
+def test_resolve_memory_budget_mb_honors_positive_request(requested_budget_mb: int) -> None:
     """Verifies that resolve_memory_budget_mb returns a positive memory request verbatim."""
     assert resolve_memory_budget_mb(requested_budget_mb=requested_budget_mb) == requested_budget_mb
 
 
 @pytest.mark.parametrize("requested_budget_mb", [0, -1, -4096])
-def test_resolve_memory_budget_mb_auto_resolves(requested_budget_mb):
+def test_resolve_memory_budget_mb_auto_resolves(requested_budget_mb: int) -> None:
     """Verifies that resolve_memory_budget_mb auto-resolves a non-positive request to a share of the host memory."""
     host_memory_mb = resolve_host_memory_mb()
 
@@ -427,18 +370,18 @@ def test_resolve_memory_budget_mb_auto_resolves(requested_budget_mb):
     assert budget_mb <= max(_MINIMUM_MEMORY_BUDGET_MB, host_memory_mb)
 
 
-def test_resolve_pool_size_binds_on_job_count():
+def test_resolve_pool_size_binds_on_job_count() -> None:
     """Verifies that resolve_pool_size opens no more job slots than the batch holds jobs."""
     # Both budgets are set well above what three jobs can claim, leaving the job count as the binding term.
     assert resolve_pool_size(job_count=3, core_budget=64, memory_budget_mb=100_000) == 3
 
 
-def test_resolve_pool_size_binds_on_core_budget():
+def test_resolve_pool_size_binds_on_core_budget() -> None:
     """Verifies that resolve_pool_size opens no more job slots than the core budget can hold running jobs."""
     assert resolve_pool_size(job_count=100, core_budget=6, memory_budget_mb=100_000) == 6
 
 
-def test_resolve_pool_size_binds_on_affordable_bodies():
+def test_resolve_pool_size_binds_on_affordable_bodies() -> None:
     """Verifies that resolve_pool_size holds the slot count to the warmed job bodies half the memory budget holds."""
     memory_budget_mb = 1024
     affordable_bodies = (memory_budget_mb // _POOL_MEMORY_RESERVATION_DIVISOR) // SPAWNED_CHILD_MEMORY_MB
@@ -450,7 +393,7 @@ def test_resolve_pool_size_binds_on_affordable_bodies():
     assert pool_size == 2
 
 
-def test_resolve_pool_size_scales_with_memory_budget():
+def test_resolve_pool_size_scales_with_memory_budget() -> None:
     """Verifies that resolve_pool_size opens more job slots as the memory budget grows."""
     pool_sizes = [
         resolve_pool_size(job_count=100, core_budget=64, memory_budget_mb=budget_mb)
@@ -474,7 +417,7 @@ def test_resolve_pool_size_scales_with_memory_budget():
         (0, 0, 0),
     ],
 )
-def test_resolve_pool_size_floors_at_one(job_count, core_budget, memory_budget_mb):
+def test_resolve_pool_size_floors_at_one(job_count: int, core_budget: int, memory_budget_mb: int) -> None:
     """Verifies that resolve_pool_size always opens at least one job slot, whatever the batch can afford."""
     # A pool with no slots can never dispatch, so the floor holds even when no term supports a single body.
     assert resolve_pool_size(job_count=job_count, core_budget=core_budget, memory_budget_mb=memory_budget_mb) == 1
@@ -490,14 +433,14 @@ def test_resolve_pool_size_floors_at_one(job_count, core_budget, memory_budget_m
         (64 * _MEGABYTE, 65),
     ],
 )
-def test_bytes_to_megabytes_rounds_up(byte_count, expected):
+def test_bytes_to_megabytes_rounds_up(byte_count: float, expected: int) -> None:
     """Verifies that _bytes_to_megabytes converts a positive byte count into whole megabytes with one of headroom."""
     assert _bytes_to_megabytes(byte_count=byte_count) == expected
     assert _BYTES_PER_MEGABYTE == _MEGABYTE
 
 
 @pytest.mark.parametrize("byte_count", [0, 0.0, -1, -_MEGABYTE, -0.5])
-def test_bytes_to_megabytes_non_positive_byte_count(byte_count):
+def test_bytes_to_megabytes_non_positive_byte_count(byte_count: float) -> None:
     """Verifies that _bytes_to_megabytes converts a zero or negative byte count to zero megabytes."""
     assert _bytes_to_megabytes(byte_count=byte_count) == 0
 
@@ -512,10 +455,70 @@ def test_bytes_to_megabytes_non_positive_byte_count(byte_count):
         (2048, 3072),
     ],
 )
-def test_apply_tolerance(memory_mb, expected):
+def test_apply_tolerance(memory_mb: int, expected: int) -> None:
     """Verifies that _apply_tolerance carries the estimate margin and rounds the figure up to a whole gigabyte."""
     reportable = _apply_tolerance(memory_mb=memory_mb)
 
     assert reportable == expected
     assert reportable % _MEGABYTES_PER_GIGABYTE == 0
     assert reportable >= memory_mb
+
+
+def _modeled_footprint(message_count: int, archive_bytes: int) -> ArchiveFootprint:
+    """Builds a modeled footprint carrying the requested message count and on-disk size."""
+    return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes, modeled=True)
+
+
+def _expected_memory_mb(archive_bytes: int, cores: int) -> int:
+    """Recomputes the modeled memory estimate for an archive of the requested size at the requested core count."""
+    per_reader = _bytes_to_megabytes(byte_count=archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
+
+    # A single-core job takes the sequential path, which opens no extraction pool and holds the body's reader alone.
+    if cores == 1:
+        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
+
+    # Every pool child holds a spawned child's baseline and a reader of its own, and the job body holds one of each.
+    readers = cores + 1
+    return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
+
+
+def _write_archive(archive_path: Path, source_id: int = 1) -> None:
+    """Writes a small readable log archive holding four module messages and two kernel messages."""
+    create_test_archive(
+        archive_path=archive_path,
+        source_id=source_id,
+        onset_us=1_000_000,
+        messages=[
+            (1000, create_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
+            (2000, create_module_state_payload(module_type=1, module_id=2, command=1, event=11)),
+            (
+                3000,
+                create_module_data_payload(
+                    module_type=1,
+                    module_id=2,
+                    command=2,
+                    event=20,
+                    prototype_code=SerialPrototypes.ONE_UINT8,
+                    data_bytes=[42],
+                ),
+            ),
+            (
+                4000,
+                create_module_data_payload(
+                    module_type=1,
+                    module_id=2,
+                    command=2,
+                    event=21,
+                    prototype_code=SerialPrototypes.ONE_UINT8,
+                    data_bytes=[43],
+                ),
+            ),
+            (5000, create_kernel_state_payload(command=3, event=30)),
+            (
+                6000,
+                create_kernel_data_payload(
+                    command=4, event=40, prototype_code=SerialPrototypes.ONE_UINT8, data_bytes=[7]
+                ),
+            ),
+        ],
+    )
