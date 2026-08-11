@@ -1,9 +1,9 @@
 """Provides a Model Context Protocol (MCP) server for agentic interaction with the library.
 
-Exposes microcontroller discovery, MQTT broker connectivity checking, log archive assembly, microcontroller manifest
-management, extraction configuration management, microcontroller data log processing, output verification, output
-cleanup, and extracted event querying through the MCP protocol, enabling AI agents to programmatically interact with
-the library's core features.
+Exposes microcontroller discovery, MQTT broker connectivity checking, log archive assembly, recording discovery,
+microcontroller manifest management, extraction configuration management, microcontroller data log processing, output
+verification, output cleanup, and extracted event querying through the MCP protocol. The exposed tools enable AI agents
+to programmatically interact with the library's core features.
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ from __future__ import annotations
 from typing import Literal
 
 from . import (
-    config_tools,  # noqa: F401
-    output_tools,  # noqa: F401
-    discovery_tools,  # noqa: F401
-    processing_tools,  # noqa: F401
+    config_tools,  # noqa: F401 - imported for the @mcp.tool() registrations the module performs on import.
+    output_tools,  # noqa: F401 - imported for the @mcp.tool() registrations the module performs on import.
+    discovery_tools,  # noqa: F401 - imported for the @mcp.tool() registrations the module performs on import.
+    processing_tools,  # noqa: F401 - imported for the @mcp.tool() registrations the module performs on import.
 )
 from .mcp_instance import mcp
 

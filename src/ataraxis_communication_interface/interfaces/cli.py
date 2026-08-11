@@ -21,7 +21,7 @@ from ..microcontroller import ExtractionConfig, evaluate_port, create_extraction
 
 console.enable()
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 _WORKER_THREAD_CEILING: int = 1
@@ -29,7 +29,7 @@ _WORKER_THREAD_CEILING: int = 1
 on one serial port, so the backends it imports repay no pool wider than a single thread."""
 
 
-@click.group("axci", context_settings=CONTEXT_SETTINGS)
+@click.group("axci", context_settings=_CONTEXT_SETTINGS)
 def axci_cli() -> None:
     """Serves as the entry-point for interfacing with all interactive components of the
     ataraxis-communication-interface (AXCI) library.
@@ -44,7 +44,7 @@ def axci_cli() -> None:
     default=115200,
     show_default=True,
     help="The baudrate to use for communication during identification. Only used by microcontrollers that communicate "
-    "via the UART serial interface; ignored by microcontrollers that use the USB interface.",
+    "via the UART serial interface, and ignored by microcontrollers that use the USB interface.",
 )
 def identify(baudrate: int) -> None:
     """Discovers all connected Arduino or Teensy microcontrollers running the ataraxis-micro-controller library.
@@ -174,7 +174,8 @@ def config_create(manifest_path: Path, output_path: Path) -> None:
 
     Writes the configuration to the requested output path with all controllers and modules populated from the
     manifest, but with empty event codes that must be filled in before processing. Edit the generated file to
-    specify the event codes for each module and kernel entry.
+    specify the event codes for each module entry. Kernel extraction is left unconfigured, so a user who wants
+    kernel messages adds a kernel entry with its own event codes.
     """
     config = create_extraction_config(manifest_path=manifest_path)
     config.to_yaml(file_path=output_path)
@@ -259,8 +260,9 @@ def config_show(config_path: Path) -> None:
     type=int,
     default=-1,
     show_default=True,
-    help="The number of worker processes to use. Set to -1 (default) to use every available CPU core minus the "
-    "cores reserved for the host system.",
+    help="The ceiling on the worker processes any single job receives. Set to -1 (default) to resolve the ceiling "
+    "from every available CPU core minus the cores reserved for the host system. The resolved ceiling is capped at "
+    "the declared per-job allocation of 8 cores.",
 )
 @click.option(
     "-p",
@@ -311,9 +313,9 @@ def process(
 def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic interaction with the library.
 
-    The MCP server exposes microcontroller discovery, MQTT connectivity checking, log archive assembly,
-    microcontroller manifest management, extraction configuration management, log data processing, output
-    verification, output cleanup, and event querying through the MCP protocol, enabling AI agents to
+    The MCP server exposes microcontroller discovery, MQTT connectivity checking, log archive assembly, recording
+    discovery, microcontroller manifest management, extraction configuration management, log data processing, output
+    verification, output cleanup, and event querying through the MCP protocol. The exposed tools enable AI agents to
     programmatically interact with the library.
     """
     # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes

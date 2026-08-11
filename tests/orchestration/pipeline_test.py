@@ -1,16 +1,19 @@
 """Contains tests for the sequential processing pipeline provided by the orchestration/pipeline.py module."""
 
+from typing import Any, NoReturn
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
+from numpy.typing import NDArray
 from tests.log_archives import (
     create_test_archive,
     write_extraction_config,
-    make_kernel_data_payload,
-    make_module_data_payload,
-    make_kernel_state_payload,
-    make_module_state_payload,
+    create_kernel_data_payload,
+    create_module_data_payload,
+    create_kernel_state_payload,
+    create_module_state_payload,
 )
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, ProcessingStatus, ProcessingTracker
@@ -36,134 +39,26 @@ from ataraxis_communication_interface.orchestration.jobs import (
 from ataraxis_communication_interface.orchestration.pipeline import run_log_processing_pipeline
 from ataraxis_communication_interface.orchestration.allocation import resolve_core_budget
 
-_MODULE_TYPE = 1
-"""The type (family) code of the hardware module every synthetic log archive built in this module logs messages for."""
+_MODULE_TYPE: int = 1
+"""Stores the type (family) code of the hardware module every synthetic log archive built in this module logs
+messages for."""
 
-_MODULE_ID = 2
-"""The identifier code of the hardware module every synthetic log archive built in this module logs messages for."""
+_MODULE_ID: int = 2
+"""Stores the identifier code of the hardware module every synthetic log archive built in this module logs
+messages for."""
 
-_MODULE_EVENT_CODES = (10, 20)
-"""The module event codes every extraction configuration built in this module requests."""
+_MODULE_EVENT_CODES: tuple[int, ...] = (10, 20)
+"""Stores the module event codes every extraction configuration built in this module requests."""
 
-_KERNEL_EVENT_CODES = (5,)
-"""The kernel event codes every extraction configuration exercising kernel extraction requests."""
+_KERNEL_EVENT_CODES: tuple[int, ...] = (5,)
+"""Stores the kernel event codes every extraction configuration exercising kernel extraction requests."""
 
-_MESSAGE_COUNT = 2
-"""The messages each of the module and the kernel filters extracts from every synthetic log archive."""
-
-
-def _archive_path(log_directory, source_id):
-    """Resolves the path of the synthetic log archive of the target controller source."""
-    return log_directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-
-
-def _controller_messages():
-    """Creates the module and the kernel messages every synthetic log archive built in this module holds."""
-    return [
-        (1000, make_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10)),
-        (
-            2000,
-            make_module_data_payload(
-                module_type=_MODULE_TYPE,
-                module_id=_MODULE_ID,
-                command=2,
-                event=20,
-                prototype_code=SerialPrototypes.ONE_UINT8,
-                data_bytes=[42],
-            ),
-        ),
-        (3000, make_kernel_state_payload(command=1, event=5)),
-        (
-            4000,
-            make_kernel_data_payload(
-                command=2,
-                event=5,
-                prototype_code=SerialPrototypes.ONE_UINT8,
-                data_bytes=[7],
-            ),
-        ),
-    ]
-
-
-def _write_manifest_entry(log_directory, source_id):
-    """Appends the manifest entry of one single-module controller source to the target log directory's manifest."""
-    write_microcontroller_manifest(
-        log_directory=log_directory,
-        controller_id=source_id,
-        controller_name=f"controller_{source_id}",
-        modules=(ModuleSourceData(module_type=_MODULE_TYPE, module_id=_MODULE_ID, name="test_module"),),
-    )
-
-
-def _build_controller_logs(log_directory, source_ids):
-    """Creates one synthetic log archive and one manifest entry for each of the requested controller sources."""
-    log_directory.mkdir(parents=True, exist_ok=True)
-    for source_id in source_ids:
-        create_test_archive(
-            archive_path=_archive_path(log_directory=log_directory, source_id=source_id),
-            source_id=source_id,
-            messages=_controller_messages(),
-        )
-        _write_manifest_entry(log_directory=log_directory, source_id=source_id)
-
-
-def _write_config(config_path, source_ids, kernel_event_codes=None):
-    """Writes the extraction configuration declaring the shared module and kernel filters of each controller."""
-    config = ExtractionConfig(
-        controllers=[
-            ControllerExtractionConfig(
-                controller_id=source_id,
-                modules=(
-                    ModuleExtractionConfig(
-                        module_type=_MODULE_TYPE, module_id=_MODULE_ID, event_codes=_MODULE_EVENT_CODES
-                    ),
-                ),
-                kernel=None if kernel_event_codes is None else KernelExtractionConfig(event_codes=kernel_event_codes),
-            )
-            for source_id in source_ids
-        ]
-    )
-    config.to_yaml(file_path=config_path)
-    return config_path
-
-
-def _module_path(output_directory, source_id):
-    """Resolves the module output file the pipeline writes for the target controller source."""
-    return resolve_module_path(
-        output_directory=resolve_output_directory(output_directory=output_directory),
-        source_id=source_id,
-        module_type=_MODULE_TYPE,
-        module_id=_MODULE_ID,
-    )
-
-
-def _kernel_path(output_directory, source_id):
-    """Resolves the kernel output file the pipeline writes for the target controller source."""
-    return resolve_kernel_path(
-        output_directory=resolve_output_directory(output_directory=output_directory), source_id=source_id
-    )
-
-
-def _open_tracker(output_directory):
-    """Opens the processing tracker the pipeline aligned under the target output directory."""
-    return ProcessingTracker(
-        file_path=resolve_tracker_path(output_directory=resolve_output_directory(output_directory=output_directory))
-    )
-
-
-def _record_dispatches(monkeypatch):
-    """Replaces the single-job runner the pipeline dispatches with a recorder and returns the recorded calls."""
-    calls = []
-
-    def _record(**arguments):
-        calls.append(arguments)
-
-    monkeypatch.setattr(pipeline, "execute_job", _record)
-    return calls
+_MESSAGE_COUNT: int = 2
+"""Stores the number of messages each of the module and the kernel filters extracts from every synthetic archive."""
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_local_mode_all_sources(tmp_path: Path):
+def test_run_log_processing_pipeline_local_mode_all_sources(tmp_path: Path) -> None:
     """Verifies that local mode processes every controller the extraction configuration declares."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -197,7 +92,7 @@ def test_run_log_processing_pipeline_local_mode_all_sources(tmp_path: Path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_local_mode_subset(tmp_path: Path):
+def test_run_log_processing_pipeline_local_mode_subset(tmp_path: Path) -> None:
     """Verifies that local mode processes only the explicitly requested subset of the configured controllers."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -227,7 +122,7 @@ def test_run_log_processing_pipeline_local_mode_subset(tmp_path: Path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_local_mode_empty_source_ids(tmp_path: Path):
+def test_run_log_processing_pipeline_local_mode_empty_source_ids(tmp_path: Path) -> None:
     """Verifies that an empty source ID sequence resolves through the config and processes every controller."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -252,7 +147,7 @@ def test_run_log_processing_pipeline_local_mode_empty_source_ids(tmp_path: Path)
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_local_mode_configured_controllers_only(tmp_path: Path):
+def test_run_log_processing_pipeline_local_mode_configured_controllers_only(tmp_path: Path) -> None:
     """Verifies that the extraction configuration bounds the work while the manifest still bounds the tracker."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -277,7 +172,7 @@ def test_run_log_processing_pipeline_local_mode_configured_controllers_only(tmp_
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_external_mode(tmp_path: Path):
+def test_run_log_processing_pipeline_external_mode(tmp_path: Path) -> None:
     """Verifies that external mode executes only the single job the requested canonical job ID names."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -303,7 +198,7 @@ def test_run_log_processing_pipeline_external_mode(tmp_path: Path):
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_external_jobs_share_tracker(tmp_path: Path):
+def test_run_log_processing_pipeline_external_jobs_share_tracker(tmp_path: Path) -> None:
     """Verifies that two independent external jobs sharing one tracker both succeed without resetting each other."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -332,7 +227,7 @@ def test_run_log_processing_pipeline_external_jobs_share_tracker(tmp_path: Path)
 
 
 @pytest.mark.xdist_group(name="orchestration")
-def test_run_log_processing_pipeline_unknown_job_id(tmp_path: Path):
+def test_run_log_processing_pipeline_unknown_job_id(tmp_path: Path) -> None:
     """Verifies that external mode raises ValueError when the requested job ID names no configured controller."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
@@ -354,7 +249,7 @@ def test_run_log_processing_pipeline_unknown_job_id(tmp_path: Path):
         )
 
 
-def test_run_log_processing_pipeline_missing_config(tmp_path: Path):
+def test_run_log_processing_pipeline_missing_config(tmp_path: Path) -> None:
     """Verifies that the pipeline reports the missing configuration file it requires before it resolves any job."""
     log_directory = tmp_path / "logs"
     _build_controller_logs(log_directory=log_directory, source_ids=(1,))
@@ -374,7 +269,7 @@ def test_run_log_processing_pipeline_missing_config(tmp_path: Path):
     assert not (tmp_path / "output").exists()
 
 
-def test_run_log_processing_pipeline_missing_log_directory(tmp_path: Path):
+def test_run_log_processing_pipeline_missing_log_directory(tmp_path: Path) -> None:
     """Verifies that the pipeline reports the missing tree when the log directory does not exist."""
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
 
@@ -395,7 +290,7 @@ def test_run_log_processing_pipeline_missing_log_directory(tmp_path: Path):
     assert not (tmp_path / "output").exists()
 
 
-def test_run_log_processing_pipeline_resolves_no_job(tmp_path: Path):
+def test_run_log_processing_pipeline_resolves_no_job(tmp_path: Path) -> None:
     """Verifies that the pipeline fails loudly when the recording resolves no extraction job to run."""
     log_directory = tmp_path / "logs"
     log_directory.mkdir()
@@ -420,7 +315,9 @@ def test_run_log_processing_pipeline_resolves_no_job(tmp_path: Path):
         )
 
 
-def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(tmp_path: Path, monkeypatch):
+def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verifies that the pipeline dispatches its jobs without opening or sizing a single log archive."""
     log_directory = tmp_path / "logs"
     log_directory.mkdir(parents=True)
@@ -431,7 +328,7 @@ def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(tmp_path: 
         _write_manifest_entry(log_directory=log_directory, source_id=source_id)
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 2))
 
-    def _forbidden_footprint(**arguments):
+    def _forbidden_footprint(**arguments: Any) -> NoReturn:
         message = f"The pipeline sized a job from its archive: {arguments}."
         raise AssertionError(message)
 
@@ -466,3 +363,115 @@ def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(tmp_path: 
 
     # The preparation still materializes the output layout and registers both jobs on the shared tracker.
     assert sorted(_open_tracker(output_directory=output_directory).snapshot()) == sorted(job_ids.values())
+
+
+def _archive_path(log_directory: Path, source_id: int) -> Path:
+    """Resolves the path of the synthetic log archive of the target controller source."""
+    return log_directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
+
+
+def _controller_messages() -> list[tuple[int, NDArray[np.uint8]]]:
+    """Creates the module and the kernel messages every synthetic log archive built in this module holds."""
+    return [
+        (1000, create_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=1, event=10)),
+        (
+            2000,
+            create_module_data_payload(
+                module_type=_MODULE_TYPE,
+                module_id=_MODULE_ID,
+                command=2,
+                event=20,
+                prototype_code=SerialPrototypes.ONE_UINT8,
+                data_bytes=[42],
+            ),
+        ),
+        (3000, create_kernel_state_payload(command=1, event=5)),
+        (
+            4000,
+            create_kernel_data_payload(
+                command=2,
+                event=5,
+                prototype_code=SerialPrototypes.ONE_UINT8,
+                data_bytes=[7],
+            ),
+        ),
+    ]
+
+
+def _write_manifest_entry(log_directory: Path, source_id: int) -> None:
+    """Appends the manifest entry of one single-module controller source to the target log directory's manifest."""
+    write_microcontroller_manifest(
+        log_directory=log_directory,
+        controller_id=source_id,
+        controller_name=f"controller_{source_id}",
+        modules=(ModuleSourceData(module_type=_MODULE_TYPE, module_id=_MODULE_ID, name="test_module"),),
+    )
+
+
+def _build_controller_logs(log_directory: Path, source_ids: tuple[int, ...]) -> None:
+    """Creates one synthetic log archive and one manifest entry for each of the requested controller sources."""
+    log_directory.mkdir(parents=True, exist_ok=True)
+    for source_id in source_ids:
+        create_test_archive(
+            archive_path=_archive_path(log_directory=log_directory, source_id=source_id),
+            source_id=source_id,
+            messages=_controller_messages(),
+        )
+        _write_manifest_entry(log_directory=log_directory, source_id=source_id)
+
+
+def _write_config(
+    config_path: Path, source_ids: tuple[int, ...], kernel_event_codes: tuple[int, ...] | None = None
+) -> Path:
+    """Writes the extraction configuration declaring the shared module and kernel filters of each controller."""
+    config = ExtractionConfig(
+        controllers=[
+            ControllerExtractionConfig(
+                controller_id=source_id,
+                modules=(
+                    ModuleExtractionConfig(
+                        module_type=_MODULE_TYPE, module_id=_MODULE_ID, event_codes=_MODULE_EVENT_CODES
+                    ),
+                ),
+                kernel=None if kernel_event_codes is None else KernelExtractionConfig(event_codes=kernel_event_codes),
+            )
+            for source_id in source_ids
+        ]
+    )
+    config.to_yaml(file_path=config_path)
+    return config_path
+
+
+def _module_path(output_directory: Path, source_id: str) -> Path:
+    """Resolves the module output file the pipeline writes for the target controller source."""
+    return resolve_module_path(
+        output_directory=resolve_output_directory(output_directory=output_directory),
+        source_id=source_id,
+        module_type=_MODULE_TYPE,
+        module_id=_MODULE_ID,
+    )
+
+
+def _kernel_path(output_directory: Path, source_id: str) -> Path:
+    """Resolves the kernel output file the pipeline writes for the target controller source."""
+    return resolve_kernel_path(
+        output_directory=resolve_output_directory(output_directory=output_directory), source_id=source_id
+    )
+
+
+def _open_tracker(output_directory: Path) -> ProcessingTracker:
+    """Opens the processing tracker the pipeline aligned under the target output directory."""
+    return ProcessingTracker(
+        file_path=resolve_tracker_path(output_directory=resolve_output_directory(output_directory=output_directory))
+    )
+
+
+def _record_dispatches(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Replaces the single-job runner the pipeline dispatches with a recorder and returns the recorded calls."""
+    calls = []
+
+    def _record(**arguments: Any) -> None:
+        calls.append(arguments)
+
+    monkeypatch.setattr(pipeline, "execute_job", _record)
+    return calls

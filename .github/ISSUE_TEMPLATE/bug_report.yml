@@ -21,6 +21,7 @@ body:
       placeholder: |-
         OS: Ubuntu 24.04
         Python: 3.13
+        Hardware: Teensy 4.1
     validations:
       required: true
 

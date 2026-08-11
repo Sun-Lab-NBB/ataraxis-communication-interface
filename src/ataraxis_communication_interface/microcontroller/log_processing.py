@@ -54,11 +54,13 @@ class ExtractedMessages:
     """The event code of each message."""
     dtypes: tuple[str | None, ...]
     """The numpy dtype string for the data payload of each message (e.g., ``'float32'``, ``'uint16'``), or None for
-    state-only messages that carry no data. Combined with the corresponding ``data_payloads`` entry, the stored dtype
-    string allows reconstructing the original numpy array from the payload bytes without any library dependency."""
+    state-only messages that carry no data and for data messages whose prototype code this library does not recognize.
+    Combined with the corresponding ``data_payloads`` entry, the stored dtype string allows reconstructing the
+    original numpy array from the payload bytes without any library dependency."""
     data_payloads: tuple[bytes | None, ...]
-    """The serialized binary payload of each message, or None for state-only messages. Each entry is the raw byte
-    representation of the numpy data array, decodable via the corresponding ``dtypes`` entry."""
+    """The serialized binary payload of each message, or None for state-only messages and for data messages whose
+    prototype code this library does not recognize. Each entry is the raw byte representation of the numpy data array,
+    decodable via the corresponding ``dtypes`` entry."""
 
     @property
     def count(self) -> int:
@@ -92,9 +94,7 @@ class ExtractedControllerData:
 
 @dataclass(slots=True)
 class _ColumnAccumulator:
-    """Accumulates message data in parallel lists during batch extraction, then converts to finalized numpy arrays
-    via ``_finalize_accumulator``.
-    """
+    """Accumulates message data in parallel lists during batch extraction."""
 
     timestamps: list[int]
     """Microseconds elapsed since the UTC epoch onset when each message was received by the PC."""
@@ -103,9 +103,11 @@ class _ColumnAccumulator:
     events: list[int]
     """The event code for each message."""
     dtypes: list[str | None]
-    """The numpy dtype string for each message's data payload, or None for state-only messages."""
+    """The numpy dtype string for each message's data payload, or None for state-only messages and for data messages
+    whose prototype code this library does not recognize."""
     data_payloads: list[bytes | None]
-    """The serialized binary payload of each message, or None for state-only messages."""
+    """The serialized binary payload of each message, or None for state-only messages and for data messages whose
+    prototype code this library does not recognize."""
 
 
 type _BatchResult = tuple[
@@ -158,7 +160,8 @@ def extract_logged_microcontroller_data(
 
     Raises:
         ValueError: If the target path does not exist, does not have a .npz suffix, or does not point to a file. Also
-            raised if a data message carries a data payload of a different size than its prototype code declares.
+            raised if the archive carries no onset timestamp message, and if a data message carries a data payload of
+            a different size than its prototype code declares.
     """
     # Validates the archive path. LogArchiveReader checks existence, but not the .npz suffix or file type.
     if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
@@ -360,8 +363,8 @@ def _process_message_batch(
     # Uses LogArchiveReader to iterate over the batch messages. Passing the pre-discovered onset_us avoids redundant
     # onset scanning in each worker process.
     reader = LogArchiveReader(archive_path=log_path, onset_us=onset_us)
-    for log_msg in reader.iter_messages(keys=file_names):
-        payload = log_msg.payload
+    for log_message in reader.iter_messages(keys=file_names):
+        payload = log_message.payload
         protocol = payload[0]
 
         # Routes module messages (MODULE_DATA / MODULE_STATE) through the extraction pipeline.
@@ -401,7 +404,7 @@ def _process_message_batch(
                     )
 
             # Appends directly to the module's columnar accumulator.
-            accumulator.timestamps.append(int(log_msg.timestamp_us))
+            accumulator.timestamps.append(int(log_message.timestamp_us))
             accumulator.commands.append(header[3])
             accumulator.events.append(event_code)
             accumulator.dtypes.append(dtype_str)
@@ -415,7 +418,7 @@ def _process_message_batch(
 
             # Extracts only messages with requested event codes.
             event_code = header[2]
-            if event_code not in kernel_event_codes:  # type: ignore[operator]
+            if event_code not in kernel_event_codes:  # type: ignore[operator]  # narrowed by the extract_kernel flag.
                 continue
 
             # Resolves the numpy dtype string and extracts the raw data bytes for KERNEL_DATA messages.
@@ -434,7 +437,7 @@ def _process_message_batch(
                     )
 
             # Appends directly to the kernel's columnar accumulator.
-            kernel_accumulator.timestamps.append(int(log_msg.timestamp_us))
+            kernel_accumulator.timestamps.append(int(log_message.timestamp_us))
             kernel_accumulator.commands.append(header[1])
             kernel_accumulator.events.append(event_code)
             kernel_accumulator.dtypes.append(dtype_str)

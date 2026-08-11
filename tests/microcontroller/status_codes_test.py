@@ -26,44 +26,9 @@ from ataraxis_communication_interface.microcontroller.status_codes import (
     describe_custom_module_error,
 )
 
-_CONTROLLER_ID = np.uint8(3)
-_CONTROLLER_NAME = "actor_controller"
-_MODULE_NAME = "water_valve"
-
-
-def _kernel_data(command: int, event: int, payload: np.number | np.ndarray) -> KernelData:
-    """Builds a KernelData message carrying the requested command, event, and data object."""
-    return KernelData(message=np.array([command, event, 0], dtype=np.uint8), data_object=payload)
-
-
-def _kernel_state(command: int, event: int) -> KernelState:
-    """Builds a KernelState message carrying the requested command and event."""
-    return KernelState(message=np.array([command, event], dtype=np.uint8))
-
-
-def _module_data(command: int, event: int, payload: np.number | np.ndarray) -> ModuleData:
-    """Builds a ModuleData message carrying the requested command, event, and data object."""
-    return ModuleData(message=np.array([5, 1, command, event, 0], dtype=np.uint8), data_object=payload)
-
-
-def _module_state(command: int, event: int) -> ModuleState:
-    """Builds a ModuleState message carrying the requested command and event."""
-    return ModuleState(message=np.array([5, 1, command, event], dtype=np.uint8))
-
-
-def _describe_kernel(message: KernelData | KernelState) -> str | None:
-    """Describes the input Kernel message using the shared controller identity."""
-    return describe_kernel_event(message=message, controller_id=_CONTROLLER_ID, controller_name=_CONTROLLER_NAME)
-
-
-def _describe_module(message: ModuleData | ModuleState) -> str | None:
-    """Describes the input Module message using the shared controller and module identities."""
-    return describe_module_event(
-        message=message,
-        controller_id=_CONTROLLER_ID,
-        controller_name=_CONTROLLER_NAME,
-        module_name=_MODULE_NAME,
-    )
+_CONTROLLER_ID: np.uint8 = np.uint8(3)
+_CONTROLLER_NAME: str = "actor_controller"
+_MODULE_NAME: str = "water_valve"
 
 
 def test_kernel_status_codes_mirror_firmware() -> None:
@@ -127,7 +92,8 @@ def test_custom_status_code_range_abuts_the_service_range() -> None:
 
 
 def test_description_tables_cover_every_fault_code() -> None:
-    """Verifies that each description table holds exactly the codes that report a fault."""
+    """Verifies that the Kernel and module tables hold exactly the codes that report a fault, while the two
+    serial layer tables hold their whole enumeration."""
     assert set(_KERNEL_ERROR_DESCRIPTIONS) == {
         KernelStatusCodes.STANDBY,
         KernelStatusCodes.MODULE_SETUP_ERROR,
@@ -177,18 +143,18 @@ def test_descriptions_prescribe_no_response() -> None:
 @pytest.mark.parametrize("event", [KernelStatusCodes.SETUP_COMPLETE, KernelStatusCodes.MODULE_PARAMETERS_SET])
 def test_non_fault_kernel_events_produce_no_description(event: KernelStatusCodes) -> None:
     """Verifies that the Kernel codes reporting ordinary progress produce no description."""
-    assert _describe_kernel(_kernel_state(command=2, event=event)) is None
+    assert _describe_kernel(_build_kernel_state(command=2, event=event)) is None
 
 
 def test_non_fault_module_event_produces_no_description() -> None:
     """Verifies that the service code reporting command completion produces no description."""
-    assert _describe_module(_module_state(command=4, event=ModuleStatusCodes.COMMAND_COMPLETED)) is None
+    assert _describe_module(_build_module_state(command=4, event=ModuleStatusCodes.COMMAND_COMPLETED)) is None
 
 
 def test_every_kernel_fault_code_produces_a_description() -> None:
     """Verifies that every Kernel fault code resolves to a description naming the code and its response."""
     for code in _KERNEL_ERROR_DESCRIPTIONS:
-        description = _describe_kernel(_kernel_data(command=1, event=code, payload=np.zeros(2, dtype=np.uint8)))
+        description = _describe_kernel(_build_kernel_data(command=1, event=code, payload=np.zeros(2, dtype=np.uint8)))
         assert description is not None
         assert KernelStatusCodes(code).name in description
         assert f"code {code}" in description
@@ -198,7 +164,7 @@ def test_every_kernel_fault_code_produces_a_description() -> None:
 def test_every_module_fault_code_produces_a_description() -> None:
     """Verifies that every service fault code resolves to a description naming the module and the code."""
     for code in _MODULE_ERROR_DESCRIPTIONS:
-        description = _describe_module(_module_data(command=4, event=code, payload=np.zeros(2, dtype=np.uint8)))
+        description = _describe_module(_build_module_data(command=4, event=code, payload=np.zeros(2, dtype=np.uint8)))
         assert description is not None
         assert ModuleStatusCodes(code).name in description
         assert _MODULE_NAME in description
@@ -208,7 +174,9 @@ def test_every_module_fault_code_produces_a_description() -> None:
 def test_reception_error_names_both_serial_layer_codes() -> None:
     """Verifies that a reception fault resolves both bytes of its payload into named serial layer statuses."""
     payload = np.array([CommunicationStatusCodes.PARSING_ERROR, TransportStatusCodes.CRC_CHECK_FAILED], dtype=np.uint8)
-    description = _describe_kernel(_kernel_data(command=1, event=KernelStatusCodes.RECEPTION_ERROR, payload=payload))
+    description = _describe_kernel(
+        _build_kernel_data(command=1, event=KernelStatusCodes.RECEPTION_ERROR, payload=payload)
+    )
 
     assert description is not None
     assert "PARSING_ERROR (code 53)" in description
@@ -222,7 +190,9 @@ def test_module_transmission_error_names_both_serial_layer_codes() -> None:
     payload = np.array(
         [CommunicationStatusCodes.TRANSMISSION_ERROR, TransportStatusCodes.PACKET_PARTIALLY_SENT], dtype=np.uint8
     )
-    description = _describe_module(_module_data(command=4, event=ModuleStatusCodes.TRANSMISSION_ERROR, payload=payload))
+    description = _describe_module(
+        _build_module_data(command=4, event=ModuleStatusCodes.TRANSMISSION_ERROR, payload=payload)
+    )
 
     assert description is not None
     assert "TRANSMISSION_ERROR (code 62)" in description
@@ -231,7 +201,7 @@ def test_module_transmission_error_names_both_serial_layer_codes() -> None:
 
 def test_module_transmission_error_drops_the_serial_clause_for_state_messages() -> None:
     """Verifies that a module transmission fault delivered as a state message reports no serial layer codes."""
-    description = _describe_module(_module_state(command=4, event=ModuleStatusCodes.TRANSMISSION_ERROR))
+    description = _describe_module(_build_module_state(command=4, event=ModuleStatusCodes.TRANSMISSION_ERROR))
 
     assert description is not None
     assert "TRANSMISSION_ERROR (code 1)" in description
@@ -246,14 +216,14 @@ def test_module_addressed_faults_name_the_reported_module() -> None:
         KernelStatusCodes.MODULE_PARAMETERS_ERROR,
         KernelStatusCodes.TARGET_MODULE_NOT_FOUND,
     ):
-        description = _describe_kernel(_kernel_data(command=2, event=code, payload=payload))
+        description = _describe_kernel(_build_kernel_data(command=2, event=code, payload=payload))
         assert description is not None
         assert "Hardware module: type 7, id 2." in description
 
 
 def test_module_addressed_faults_drop_the_module_clause_for_narrow_payloads() -> None:
     """Verifies that a Kernel fault whose payload omits one of the two module codes reports neither code."""
-    message = _kernel_data(command=2, event=KernelStatusCodes.MODULE_SETUP_ERROR, payload=np.uint8(7))
+    message = _build_kernel_data(command=2, event=KernelStatusCodes.MODULE_SETUP_ERROR, payload=np.uint8(7))
     description = _describe_kernel(message)
 
     assert description is not None
@@ -263,7 +233,7 @@ def test_module_addressed_faults_drop_the_module_clause_for_narrow_payloads() ->
 
 def test_invalid_protocol_fault_names_the_rejected_protocol() -> None:
     """Verifies that an invalid protocol fault resolves the rejected code to its protocol name."""
-    message = _kernel_data(command=1, event=KernelStatusCodes.INVALID_MESSAGE_PROTOCOL, payload=np.uint8(4))
+    message = _build_kernel_data(command=1, event=KernelStatusCodes.INVALID_MESSAGE_PROTOCOL, payload=np.uint8(4))
     description = _describe_kernel(message)
 
     assert description is not None
@@ -272,7 +242,7 @@ def test_invalid_protocol_fault_names_the_rejected_protocol() -> None:
 
 def test_keepalive_timeout_fault_reports_the_derived_timeout() -> None:
     """Verifies that a keepalive timeout fault reports the timeout value the payload carries."""
-    message = _kernel_data(command=5, event=KernelStatusCodes.KEEPALIVE_TIMEOUT, payload=np.uint32(1000))
+    message = _build_kernel_data(command=5, event=KernelStatusCodes.KEEPALIVE_TIMEOUT, payload=np.uint32(1000))
     description = _describe_kernel(message)
 
     assert description is not None
@@ -281,7 +251,7 @@ def test_keepalive_timeout_fault_reports_the_derived_timeout() -> None:
 
 def test_unrecognized_kernel_code_reports_a_version_mismatch() -> None:
     """Verifies that a Kernel code outside the known range resolves to a version mismatch description."""
-    description = _describe_kernel(_kernel_state(command=2, event=42))
+    description = _describe_kernel(_build_kernel_state(command=2, event=42))
 
     assert description is not None
     assert "UNRECOGNIZED (code 42)" in description
@@ -290,7 +260,7 @@ def test_unrecognized_kernel_code_reports_a_version_mismatch() -> None:
 
 def test_unrecognized_service_code_reports_a_version_mismatch() -> None:
     """Verifies that a service code outside the known range resolves to a version mismatch description."""
-    description = _describe_module(_module_state(command=4, event=20))
+    description = _describe_module(_build_module_state(command=4, event=20))
 
     assert description is not None
     assert "UNRECOGNIZED (code 20)" in description
@@ -299,7 +269,7 @@ def test_unrecognized_service_code_reports_a_version_mismatch() -> None:
 
 def test_faults_arriving_without_a_payload_still_describe_the_code() -> None:
     """Verifies that a fault delivered as a state message describes the code without a payload clause."""
-    description = _describe_kernel(_kernel_state(command=1, event=KernelStatusCodes.RECEPTION_ERROR))
+    description = _describe_kernel(_build_kernel_state(command=1, event=KernelStatusCodes.RECEPTION_ERROR))
 
     assert description is not None
     assert "RECEPTION_ERROR (code 3)" in description
@@ -308,7 +278,7 @@ def test_faults_arriving_without_a_payload_still_describe_the_code() -> None:
 
 def test_faults_carrying_a_malformed_payload_still_describe_the_code() -> None:
     """Verifies that a payload of an unexpected width is dropped rather than raising during description assembly."""
-    message = _kernel_data(command=1, event=KernelStatusCodes.RECEPTION_ERROR, payload=np.uint8(53))
+    message = _build_kernel_data(command=1, event=KernelStatusCodes.RECEPTION_ERROR, payload=np.uint8(53))
     description = _describe_kernel(message)
 
     assert description is not None
@@ -320,7 +290,7 @@ def test_custom_module_error_surfaces_the_registered_explanation() -> None:
     """Verifies that a custom module error carries the interface-supplied explanation and the message payload."""
     explanation = "The valve is not configured to emit audible tones."
     description = describe_custom_module_error(
-        message=_module_data(command=4, event=56, payload=np.uint16(12)),
+        message=_build_module_data(command=4, event=56, payload=np.uint16(12)),
         controller_id=_CONTROLLER_ID,
         controller_name=_CONTROLLER_NAME,
         module_name=_MODULE_NAME,
@@ -338,7 +308,7 @@ def test_custom_module_error_omits_the_payload_clause_for_state_messages() -> No
     """Verifies that a custom module error delivered as a state message reports no data object."""
     explanation = "The pin mode does not permit the requested command."
     description = describe_custom_module_error(
-        message=_module_state(command=3, event=53),
+        message=_build_module_state(command=3, event=53),
         controller_id=_CONTROLLER_ID,
         controller_name=_CONTROLLER_NAME,
         module_name=_MODULE_NAME,
@@ -347,3 +317,38 @@ def test_custom_module_error_omits_the_payload_clause_for_state_messages() -> No
 
     assert explanation in description
     assert "Data object" not in description
+
+
+def _build_kernel_data(command: int, event: int, payload: np.number | np.ndarray) -> KernelData:
+    """Builds a KernelData message carrying the requested command, event, and data object."""
+    return KernelData(message=np.array([command, event, 0], dtype=np.uint8), data_object=payload)
+
+
+def _build_kernel_state(command: int, event: int) -> KernelState:
+    """Builds a KernelState message carrying the requested command and event."""
+    return KernelState(message=np.array([command, event], dtype=np.uint8))
+
+
+def _build_module_data(command: int, event: int, payload: np.number | np.ndarray) -> ModuleData:
+    """Builds a ModuleData message carrying the requested command, event, and data object."""
+    return ModuleData(message=np.array([5, 1, command, event, 0], dtype=np.uint8), data_object=payload)
+
+
+def _build_module_state(command: int, event: int) -> ModuleState:
+    """Builds a ModuleState message carrying the requested command and event."""
+    return ModuleState(message=np.array([5, 1, command, event], dtype=np.uint8))
+
+
+def _describe_kernel(message: KernelData | KernelState) -> str | None:
+    """Describes the input Kernel message using the shared controller identity."""
+    return describe_kernel_event(message=message, controller_id=_CONTROLLER_ID, controller_name=_CONTROLLER_NAME)
+
+
+def _describe_module(message: ModuleData | ModuleState) -> str | None:
+    """Describes the input Module message using the shared controller and module identities."""
+    return describe_module_event(
+        message=message,
+        controller_id=_CONTROLLER_ID,
+        controller_name=_CONTROLLER_NAME,
+        module_name=_MODULE_NAME,
+    )

@@ -80,7 +80,8 @@ class JobDescriptor:
     source_id: str
     """The identifier of the controller source whose archive this job reads."""
     core_weight: int
-    """The cores this job occupies while it runs, which is the width of the extraction pool its body opens."""
+    """The cores this job occupies while it runs, which is the width of the extraction pool its body opens once the
+    job holds more than one core."""
 
     @classmethod
     def for_archive(
@@ -166,7 +167,9 @@ class JobDescriptor:
                 f"its values cannot be read as the type its field declares: {error}."
             )
             console.error(message=message, error=ValueError)
-            raise  # pragma: no cover - console.error always raises, this satisfies the linter's return analysis.
+
+            # Satisfies ruff RET503. console.error() is NoReturn, so this line never executes.
+            raise  # pragma: no cover
 
     @property
     def dispatch_key(self) -> tuple[str, str]:

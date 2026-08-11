@@ -351,12 +351,13 @@ _PROTOTYPE_DTYPE_STRINGS: dict[int, str] = {
     code: str(factory().dtype) for code, factory in _PROTOTYPE_FACTORIES.items()
 }
 """Maps prototype integer codes to their numpy dtype strings (e.g., ``'float32'``, ``'uint16'``). Built once at module
-load by calling each factory and caching the dtype, avoiding per-message object allocation during log processing."""
+load by calling each factory and caching the dtype, so resolving the dtype of a code costs a lookup rather than an
+allocation."""
 
 _PROTOTYPE_BYTE_SIZES: dict[int, int] = {code: int(factory().nbytes) for code, factory in _PROTOTYPE_FACTORIES.items()}
 """Maps prototype integer codes to the byte size of the data object each code declares. Built once at module load
-alongside the dtype strings, so log processing can check a message's data payload against the size its prototype
-code promises without allocating a prototype object."""
+alongside the dtype strings, so checking a data payload against the size its prototype code promises costs a lookup
+rather than an allocation."""
 
 _PROTOTYPE_OBJECTS: dict[int, PrototypeType] = {code: factory() for code, factory in _PROTOTYPE_FACTORIES.items()}
 """Maps prototype integer codes to one shared instance of the object each code declares. Built once at module load
@@ -1062,7 +1063,7 @@ class SerialPrototypes(IntEnum):
         """Returns the byte size of the data object associated with the input prototype code.
 
         Uses a pre-built lookup table to avoid instantiating a prototype object, making this suitable for hot paths
-        where only the size is needed (e.g., validating a logged data payload against its declared prototype).
+        where only the size is needed.
 
         Args:
             code: The prototype integer code for which to retrieve the data object's byte size.
@@ -1077,7 +1078,7 @@ class SerialPrototypes(IntEnum):
         """Returns the numpy dtype string associated with the input prototype code.
 
         Uses a pre-built lookup table to avoid instantiating a prototype object, making this suitable for hot paths
-        where only the dtype string is needed (e.g., log processing serialization).
+        where only the dtype string is needed.
 
         Args:
             code: The prototype integer code for which to retrieve the dtype string.

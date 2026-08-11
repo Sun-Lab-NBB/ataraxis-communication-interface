@@ -28,7 +28,7 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
     Returns:
         A dictionary containing the config path, a list of controller entries with their modules and
         kernel settings, and the total controller count. Returns an error dictionary if the file is
-        missing or cannot be parsed.
+        missing, is not a file, or cannot be parsed.
     """
     path = Path(config_path)
 
@@ -43,7 +43,6 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
     except Exception as error:
         return {"error": f"Unable to read extraction config: {error}"}
 
-    # Serializes each controller's modules, event codes, and optional kernel settings into dictionaries.
     controllers: list[dict[str, Any]] = []
     for controller in config.controllers:
         module_entries = [
@@ -60,7 +59,6 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
             "modules": module_entries,
         }
 
-        # Includes kernel event codes when kernel extraction is configured for this controller.
         if controller.kernel is not None:
             controller_entry["kernel"] = {
                 "event_codes": list(controller.kernel.event_codes),
@@ -96,7 +94,7 @@ def write_extraction_config_tool(config_path: str, controllers: list[dict[str, A
         A dictionary containing a 'success' flag, the config file path, and the controller count.
         Returns an error dictionary if the input data is invalid or the file cannot be written.
     """
-    # Converts raw controller dictionaries into typed ExtractionConfig dataclasses.
+    # The MCP boundary delivers plain JSON, so each mapping is rebuilt into the typed dataclass the config stores.
     try:
         controller_configs: list[ControllerExtractionConfig] = []
         for controller_dict in controllers:
@@ -109,7 +107,6 @@ def write_extraction_config_tool(config_path: str, controllers: list[dict[str, A
                 for module in controller_dict["modules"]
             )
 
-            # Constructs the optional kernel extraction config when present.
             kernel_config = None
             kernel_data = controller_dict.get("kernel")
             if kernel_data is not None:
@@ -151,11 +148,11 @@ def validate_extraction_config_tool(
     """Validates an extraction configuration for structural correctness and optionally cross-references it against
     a microcontroller manifest.
 
-    Rejects a configuration that holds no controller entries. Checks that every controller has at least one
-    extraction target (modules or kernel). Verifies that all module
-    and kernel entries have non-empty event codes without duplicates. Confirms that module (type, id) pairs are
-    unique within each controller. When a manifest path is provided, additionally verifies that every controller ID
-    and module identifier in the config matches a registered entry in the manifest.
+    Rejects a configuration that holds no controller entries. Checks that every controller has at least one extraction
+    target (modules or kernel). Verifies that all module and kernel entries have non-empty event codes without
+    duplicates. Confirms that module (type, id) pairs are unique within each controller. When a manifest path is
+    provided, additionally verifies that every controller ID and module identifier in the config matches a registered
+    entry in the manifest.
 
     Args:
         config_path: The absolute path to the extraction configuration YAML file to validate.
@@ -164,7 +161,8 @@ def validate_extraction_config_tool(
 
     Returns:
         A dictionary containing a 'valid' flag, a 'config_path' key, a list of 'errors' (empty when valid), and
-        a 'summary' with controller and module counts. Returns an error dictionary if the file cannot be read.
+        a 'summary' carrying 'total_controllers', 'total_modules', and 'controllers_with_kernel'. Returns an
+        error dictionary if the file cannot be read.
     """
     path = Path(config_path)
 
@@ -215,7 +213,7 @@ def validate_extraction_config_tool(
             elif len(controller.kernel.event_codes) != len(set(controller.kernel.event_codes)):
                 errors.append(f"{kernel_label}: event_codes contains duplicates.")
 
-    # Cross-references against the manifest when provided.
+    # Cross-referencing is optional, since a config's structure can be validated before its manifest is available.
     if manifest_path is not None:
         manifest_file = Path(manifest_path)
 
@@ -231,7 +229,7 @@ def validate_extraction_config_tool(
                 manifest = None
 
             if manifest is not None:
-                # Builds lookup structures from the manifest.
+                # Indexes the manifest once, so the per-controller checks below do not rescan every entry.
                 manifest_controller_ids: set[int] = set()
                 manifest_modules: dict[int, set[tuple[int, int]]] = {}
 
@@ -241,7 +239,7 @@ def validate_extraction_config_tool(
                         (module.module_type, module.module_id) for module in manifest_entry.modules
                     }
 
-                # Validates each config controller against the manifest.
+                # A config naming a controller or module the manifest never registered would extract nothing.
                 for config_controller in config.controllers:
                     controller_label = f"Controller {config_controller.controller_id}"
 

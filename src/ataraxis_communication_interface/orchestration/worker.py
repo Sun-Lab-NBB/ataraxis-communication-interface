@@ -73,9 +73,8 @@ def execute_job(
         re-raising when the block raises an Exception. The configuration is read inside that context, so a
         configuration error is recorded against the job rather than escaping it.
 
-        Writes the feather files directly into the output directory, creating it when it does not exist, and
-        registers no job on the tracker, so a scheduler owning its own tracker and output layout dispatches this
-        function unchanged.
+        Writes the feather files directly into the output directory, creating it when it does not exist, and registers
+        no job on the tracker.
 
         Publishes each feather file through a temporary file and a rename, so a job killed mid-write leaves the
         previously written file intact rather than a truncated one a reader cannot decode.
@@ -83,16 +82,18 @@ def execute_job(
     Args:
         log_path: The path to the .npz log archive to process.
         output_directory: The path to the directory where the output feather files are written.
-        source_id: The source ID string identifying the log archive.
+        source_id: The identifier of the controller source whose log archive is processed.
         job_id: The unique hexadecimal identifier for this processing job.
         workers: The number of worker processes to use for parallel processing.
-        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
+        tracker: The tracker recording this job's runtime status.
         config_path: The path to the ExtractionConfig .yaml file declaring this controller's extraction targets.
-        display_progress: Determines whether to display a progress bar during extraction.
+        display_progress: Determines whether to display a progress bar during parallel batch processing. A job that
+            runs sequentially displays nothing.
         executor: When provided, parallel processing reuses this pool instead of creating a new one. The pool is
             passed through to extract_logged_microcontroller_data to avoid spawning a redundant process pool.
 
     Raises:
+        FileNotFoundError: If no file exists at the supplied configuration path.
         ValueError: If the configuration declares no entry for this controller, if it declares a module or a kernel
             entry with empty event codes, or if it declares no extraction targets at all. Also raised if the archive
             path does not resolve to a readable .npz file, if a data message's payload size disagrees with its
@@ -173,7 +174,8 @@ def _resolve_event_filters(
 
     Args:
         controller_config: The extraction configuration of the controller whose archive is processed.
-        source_id: The source ID string identifying the log archive, used to attribute a configuration error.
+        source_id: The identifier of the controller source whose log archive is processed, used to attribute a
+            configuration error.
 
     Returns:
         The per-module event code filters keyed by the module type and identifier pair, and the kernel event code

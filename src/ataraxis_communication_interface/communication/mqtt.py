@@ -19,9 +19,6 @@ class MQTTCommunication:
     MQTT protocol over the TCP interface.
 
     Notes:
-        Primarily, the class is intended to be used alongside the SerialCommunication class to transfer the data between
-        microcontrollers and the rest of the runtime infrastructure.
-
         The MQTT protocol requires a broker that facilitates the communication, which has to be available to this class
         at initialization. See https://mqtt.org/ for more details.
 
@@ -34,7 +31,7 @@ class MQTTCommunication:
     Attributes:
         _ip: Stores the IP address of the MQTT broker.
         _port: Stores the port used by the broker's TCP socket.
-        _connected: Tracks whether the class instance is currently connected to the MQTT broker.
+        _connected: Determines whether the class instance is currently connected to the MQTT broker.
         _monitored_topics: Stores the topics monitored by the instance for incoming messages.
         _output_queue: Buffers incoming messages received from other MQTT clients before their data is accessed via
             class methods.
@@ -52,9 +49,9 @@ class MQTTCommunication:
         self._connected: bool = False
         self._monitored_topics: tuple[str, ...] = monitored_topics if monitored_topics is not None else ()
 
-        # Initializes the queue to buffer incoming data. The queue may not be used if the class is not configured to
-        # receive any data, but this is a fairly minor inefficiency.
-        self._output_queue: Queue = Queue()  # type: ignore[type-arg]
+        # The queue may not be used if the class is not configured to receive any data, but this is a fairly minor
+        # inefficiency.
+        self._output_queue: Queue = Queue()  # type: ignore[type-arg]  # queue.Queue is not subscriptable at runtime.
 
         # Initializes the MQTT client. Note, it needs to be connected before it can send and receive messages!
         self._client: mqtt.Client = mqtt.Client(
@@ -74,37 +71,6 @@ class MQTTCommunication:
         """Ensures that the instance disconnects from the broker before being garbage-collected."""
         self.disconnect()
 
-    def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
-        """Receives data from the MQTT broker and buffers it in the output queue.
-
-        Args:
-            _client: The MQTT client that received the message. Currently not used.
-            _userdata: Custom user-defined data. Currently not used.
-            message: The received MQTT message.
-        """
-        # Whenever a message is received, it is buffered via the local queue object.
-        self._output_queue.put_nowait((message.topic, message.payload))
-
-    def _on_disconnect(
-        self,
-        _client: mqtt.Client,
-        _userdata: Any,
-        _disconnect_flags: mqtt.DisconnectFlags,
-        _reason_code: ReasonCode,
-        _properties: Properties | None,
-    ) -> None:
-        """Clears the tracked connection state when the client loses its link to the MQTT broker.
-
-        Args:
-            _client: The MQTT client that lost the connection. Currently not used.
-            _userdata: Custom user-defined data. Currently not used.
-            _disconnect_flags: The flags that communicate whether the broker or the client initiated the
-                disconnection. Currently not used.
-            _reason_code: The code that communicates the reason for the disconnection. Currently not used.
-            _properties: The MQTT v5 properties transmitted with the disconnection. Currently not used.
-        """
-        self._connected = False
-
     def connect(self) -> None:
         """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
@@ -116,9 +82,8 @@ class MQTTCommunication:
             with a listener callback to monitor the incoming traffic.
 
         Raises:
-            ConnectionError: If the MQTT broker cannot be connected using the provided IP and Port.
+            ConnectionError: If the MQTT broker cannot be connected using the provided IP and port.
         """
-        # Guards against re-connecting an already connected client.
         if self._connected:
             return
 
@@ -152,8 +117,8 @@ class MQTTCommunication:
             self._client.on_message = self._on_message
             self._client.loop_start()
 
-        # Subscribes to necessary topics with qos of 0. Note, this assumes that the communication is happening over
-        # a virtual TCP socket and, therefore, does not need qos.
+        # The qos of 0 assumes that the communication is happening over a virtual TCP socket, which does not need the
+        # delivery guarantees a higher qos provides.
         for topic in self._monitored_topics:
             self._client.subscribe(topic=topic, qos=0)
 
@@ -221,15 +186,42 @@ class MQTTCommunication:
 
     def disconnect(self) -> None:
         """Disconnects the client from the MQTT broker."""
-        # Prevents running the rest of the code if the client was not connected.
         if not self._connected:
             return
 
-        # Stops the listener thread if the client was subscribed to receive topic data.
         if self._monitored_topics:
             self._client.loop_stop()
 
-        # Disconnects from the client.
         self._client.disconnect()
 
+        self._connected = False
+
+    def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        """Receives data from the MQTT broker and buffers it in the output queue.
+
+        Args:
+            _client: The MQTT client that received the message. Currently not used.
+            _userdata: Custom user-defined data. Currently not used.
+            message: The received MQTT message.
+        """
+        self._output_queue.put_nowait((message.topic, message.payload))
+
+    def _on_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        _reason_code: ReasonCode,
+        _properties: Properties | None,
+    ) -> None:
+        """Clears the tracked connection state when the client loses its link to the MQTT broker.
+
+        Args:
+            _client: The MQTT client that lost the connection. Currently not used.
+            _userdata: Custom user-defined data. Currently not used.
+            _disconnect_flags: The flags that communicate whether the broker or the client initiated the
+                disconnection. Currently not used.
+            _reason_code: The code that communicates the reason for the disconnection. Currently not used.
+            _properties: The MQTT v5 properties transmitted with the disconnection. Currently not used.
+        """
         self._connected = False

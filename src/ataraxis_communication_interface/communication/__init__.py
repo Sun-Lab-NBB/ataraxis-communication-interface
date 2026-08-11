@@ -1,5 +1,6 @@
-"""Provides the serial and MQTT communication classes alongside the message protocol and data prototype definitions used
-to exchange commands and data between host-machines (PCs) and Arduino / Teensy microcontrollers.
+"""Provides the serial and MQTT communication classes, the command and data message classes, and the message protocol
+and data prototype definitions used to exchange commands and data between host-machines (PCs) and Arduino / Teensy
+microcontrollers.
 """
 
 from .mqtt import MQTTCommunication

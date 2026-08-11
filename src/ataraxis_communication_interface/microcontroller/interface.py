@@ -1,5 +1,7 @@
 """Provides the ModuleInterface and MicroControllerInterface classes that aggregate the methods allowing Python PC
-clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers.
+clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers. It also
+provides the evaluate_port() function, which determines whether a serial port is connected to an Ataraxis
+microcontroller.
 """
 
 from __future__ import annotations
@@ -46,7 +48,6 @@ from ..communication import (
     ControllerIdentification,
 )
 
-# Prevents typing-related imports from executing at runtime.
 if TYPE_CHECKING:
     from pathlib import Path
     from multiprocessing.managers import SyncManager
@@ -117,7 +118,7 @@ class ModuleInterface(ABC):
         module_type: The code that identifies the type (family) of the interfaced module.
         module_id: The code that identifies the specific interfaced module instance.
         name: A colloquial human-readable name for this hardware module (e.g., 'encoder', 'lick_sensor'). Written
-            to the microcontroller manifest file alongside the type+id code to identify this module.
+            to the microcontroller manifest file alongside the module's type and id codes to identify this module.
         error_codes: An optional mapping of the codes used by the module to communicate runtime errors to the
             explanations surfaced when those errors arrive. Receiving a message with an event-code from this mapping
             raises a RuntimeError that carries the matching explanation and aborts the runtime. Every code must fall
@@ -240,7 +241,7 @@ class ModuleInterface(ABC):
         # This attribute is initialized to a placeholder value. The actual value is assigned by the
         # MicroControllerInterface class that manages this ModuleInterface. During MicroControllerInterface
         # initialization, it updates the attribute for all managed interfaces via referencing.
-        self._input_queue: MPQueue | None = None  # type: ignore[type-arg]
+        self._input_queue: MPQueue | None = None  # type: ignore[type-arg]  # MPQueue is not generic.
 
         #  Pre-creates the Dequeue command object, as it does not change throughout runtime.
         self._dequeue_command = DequeueModuleCommand(
@@ -323,9 +324,116 @@ class ModuleInterface(ABC):
         """
         raise NotImplementedError
 
+    def send_command(self, command: np.uint8, *, noblock: np.bool_, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
+        """Packages the input command data into the appropriate message structure and sends it to the managed hardware
+        module.
+
+        Notes:
+            This method caches up to 32 unique command messages in the instance-specific LRU cache to speed up sending
+            previously created command messages.
+
+        Args:
+            command: The id-code of the command to execute.
+            noblock: Determines whether the microcontroller managing the hardware module is allowed to concurrently
+                execute other commands while executing the requested command.
+            repetition_delay: The time, in microseconds, to wait before repeating the command. If set to 0, the command
+                is only executed once.
+        """
+        # Prevents interfacing with the microcontroller until the communication is initialized.
+        if self._input_queue is None or self._create_command_message is None:
+            message = (
+                f"Unable to send the command message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
+                f"instance to enable constructing and sending messages to the microcontroller. Note: at this time only "
+                f"the main runtime process can construct and send messages to the microcontroller."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        command_message = self._create_command_message(command=command, noblock=noblock, cycle_delay=repetition_delay)
+        self._input_queue.put(command_message)
+
+    def send_parameters(
+        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any] | np.bool_ | np.floating[Any], ...]
+    ) -> None:
+        """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
+        hardware module.
+
+        Notes:
+            This method caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending
+            previously created parameter messages.
+
+        Args:
+            parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
+                module. Note, the parameters must appear in the same order and use the same data-types as the module's
+                parameter structure on the microcontroller.
+        """
+        # Prevents interfacing with the microcontroller until the communication is initialized.
+        if self._input_queue is None or self._create_parameters_message is None:
+            message = (
+                f"Unable to send the runtime parameters update message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
+                f"instance to enable constructing and sending messages to the microcontroller. Note: at this time only "
+                f"the main runtime process can construct and send messages to the microcontroller."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        # Creates or queries the command message object from the instance-specific LRU cache and submits it to the
+        # microcontroller.
+        self._input_queue.put(self._create_parameters_message(parameter_data=parameter_data))
+
+    def reset_command_queue(self) -> None:
+        """Instructs the microcontroller to clear the managed hardware module's command queue."""
+        # Prevents interfacing with the microcontroller until the communication is initialized.
+        if self._input_queue is None:
+            message = (
+                f"Unable to send the dequeue command message to the module {self._module_id} of type "
+                f"{self._module_type}. Use the module interface instance to initialize and start the "
+                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        self._input_queue.put(self._dequeue_command)
+
+    def set_input_queue(self, input_queue: MPQueue) -> None:  # type: ignore[type-arg]  # MPQueue is not generic.
+        """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object."""
+        self._input_queue = input_queue
+
+    @property
+    def module_type(self) -> np.uint8:
+        """Returns the id-code of the type (family) of modules managed by this interface instance."""
+        return self._module_type
+
+    @property
+    def module_id(self) -> np.uint8:
+        """Returns the id-code of the specific module instance managed by this interface instance."""
+        return self._module_id
+
+    @property
+    def type_id(self) -> np.uint16:
+        """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
+        the id-code of the managed module instance.
+        """
+        return self._type_id
+
+    @property
+    def data_codes(self) -> set[np.uint8]:
+        """Returns the set of message event-codes that require online processing during runtime."""
+        return self._data_codes
+
+    @property
+    def error_codes(self) -> dict[np.uint8, str]:
+        """Returns the mapping of message event codes that trigger runtime errors to their explanations."""
+        return self._error_codes
+
+    @property
+    def name(self) -> str:
+        """Returns the human-readable name of this module interface instance."""
+        return self._name
+
     def _create_command_message_implementation(
         self,
         command: np.uint8,
+        *,
         noblock: np.bool_,
         cycle_delay: np.uint32,
     ) -> OneOffModuleCommand | RepeatedModuleCommand:
@@ -377,120 +485,6 @@ class ModuleInterface(ABC):
             parameter_data=parameter_data,
         )
 
-    def send_command(self, command: np.uint8, noblock: np.bool_, repetition_delay: np.uint32 = _ZERO_LONG) -> None:
-        """Packages the input command data into the appropriate message structure and sends it to the managed hardware
-        module.
-
-        Notes:
-            This method caches up to 32 unique command messages in the instance-specific LRU cache to speed up sending
-            previously created command messages.
-
-        Args:
-            command: The id-code of the command to execute.
-            noblock: Determines whether the microcontroller managing the hardware module is allowed to concurrently
-                execute other commands while executing the requested command.
-            repetition_delay: The time, in microseconds, to wait before repeating the command. If set to 0, the command
-                is only executed once.
-        """
-        # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None or self._create_command_message is None:
-            message = (
-                f"Unable to send the command message to the module {self._module_id} of type "
-                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
-                f"instance to enable constructing and sending messages to the microcontroller. Note: at this time only "
-                f"the main runtime process can construct and send messages to the microcontroller."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        # Creates or queries the command message object from the instance-specific LRU cache.
-        command_message = self._create_command_message(command, noblock, repetition_delay)
-
-        # Submits the packaged command for execution.
-        self._input_queue.put(command_message)
-
-    def send_parameters(
-        self, parameter_data: tuple[np.unsignedinteger[Any] | np.signedinteger[Any] | np.bool_ | np.floating[Any], ...]
-    ) -> None:
-        """Packages the input parameter tuple into the appropriate message structure and sends it to the managed
-        hardware module.
-
-        Notes:
-            This method caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending
-            previously created parameter messages.
-
-        Args:
-            parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
-                module. Note, the parameters must appear in the same order and use the same data-types as the module's
-                parameter structure on the microcontroller.
-        """
-        # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None or self._create_parameters_message is None:
-            message = (
-                f"Unable to send the runtime parameters update message to the module {self._module_id} of type "
-                f"{self._module_type}. Use the module interface instance to initialize the MicroControllerInterface "
-                f"instance to enable constructing and sending messages to the microcontroller. Note: at this time only "
-                f"the main runtime process can construct and send messages to the microcontroller."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        # Creates or queries the command message object from the instance-specific LRU cache and submits it to the
-        # microcontroller.
-        self._input_queue.put(self._create_parameters_message(parameter_data))
-
-    def reset_command_queue(self) -> None:
-        """Instructs the microcontroller to clear the managed hardware module's command queue."""
-        # Prevents interfacing with the microcontroller until the communication is initialized.
-        if self._input_queue is None:
-            message = (
-                f"Unable to send the dequeue command message to the module {self._module_id} of type "
-                f"{self._module_type}. Use the module interface instance to initialize and start the "
-                f"MicroControllerInterface instance to enable constructing and sending messages to the microcontroller."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        # Submits the pre-created dequeue command for execution.
-        self._input_queue.put(self._dequeue_command)
-
-    def set_input_queue(self, input_queue: MPQueue) -> None:  # type: ignore[type-arg]
-        """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object.
-
-        This service method is used during the MicroControllerInterface initialization to finalize the instance's
-        configuration and should not be called directly by end users.
-        """
-        self._input_queue = input_queue
-
-    @property
-    def module_type(self) -> np.uint8:
-        """Returns the id-code of the type (family) of modules managed by this interface instance."""
-        return self._module_type
-
-    @property
-    def module_id(self) -> np.uint8:
-        """Returns the id-code of the specific module instance managed by this interface instance."""
-        return self._module_id
-
-    @property
-    def type_id(self) -> np.uint16:
-        """Returns the unique 16-bit unsigned integer value that results from combining the bits of the type-code and
-        the id-code of the managed module instance.
-        """
-        return self._type_id
-
-    @property
-    def data_codes(self) -> set[np.uint8]:
-        """Returns the set of message event-codes that require online processing during runtime."""
-        return self._data_codes
-
-    @property
-    def error_codes(self) -> dict[np.uint8, str]:
-        """Returns the mapping of message event codes that trigger runtime errors to their explanations."""
-        return self._error_codes
-
-    @property
-    def name(self) -> str:
-        """Returns the human-readable name of this module interface instance."""
-        return self._name
-
 
 class MicroControllerInterface:
     """Interfaces with the hardware module instances managed by the Arduino or Teensy microcontroller running the
@@ -529,10 +523,6 @@ class MicroControllerInterface:
         keepalive_interval: The interval, in milliseconds, at which to send the keepalive messages to the
             microcontroller. Setting this argument to 0 disables keepalive messaging functionality.
 
-    Raises:
-        TypeError: If any of the input arguments are not of the expected type.
-        ValueError: If two ModuleInterface instances share the same combined module type-code and id-code.
-
     Attributes:
         _started: Tracks whether the communication process has been started.
         _shutdown_lock: Stores the lock that serializes the shutdown sequence between stop() and the watchdog thread,
@@ -546,8 +536,8 @@ class MicroControllerInterface:
         _logger_queue: The Multiprocessing Queue object used to pipe log data to the DataLogger core(s).
         _log_directory: Stores the output directory used by the DataLogger to save temporary log entries and the final
             .npz log archive.
-        _mp_manager: The multiprocessing Manager used to initialize and manage the Queue instance that pipes
-            command and parameter messages to the communication process.
+        _multiprocessing_manager: The multiprocessing Manager used to initialize and manage the Queue instance that
+            pipes command and parameter messages to the communication process.
         _input_queue: The multiprocessing Queue used to pipe the data to be sent to the microcontroller to
             the remote communication process.
         _terminator_array: Stores the SharedMemoryArray instance used to control the remote communication process.
@@ -556,6 +546,10 @@ class MicroControllerInterface:
         _reset_command: Stores the pre-packaged Kernel-addressed command that resets the managed microcontroller to the
             default state.
         _keepalive_interval: Stores the keepalive interval in milliseconds.
+
+    Raises:
+        TypeError: If any of the input arguments are not of the expected type.
+        ValueError: If two ModuleInterface instances share the same combined module type-code and id-code.
     """
 
     # Pre-packages the user-addressable Kernel reset command into a class attribute. Since the command is known and
@@ -586,7 +580,7 @@ class MicroControllerInterface:
         # access while disconnect() and destroy() take no lock at all.
         self._shutdown_lock: Lock = Lock()
 
-        self._mp_manager: SyncManager = Manager()  # The manager is terminated by the __del__ method.
+        self._multiprocessing_manager: SyncManager = Manager()  # The manager is terminated by the __del__ method.
 
         # Ensures that input arguments have valid types. Only checks the arguments that are not verified by downstream
         # classes.
@@ -640,7 +634,6 @@ class MicroControllerInterface:
             )
             console.error(message=message, error=TypeError)
 
-        # Controller (kernel) ID and name information.
         self._controller_id: np.uint8 = controller_id
         self._name: str = name
 
@@ -651,13 +644,16 @@ class MicroControllerInterface:
 
         self._modules: tuple[ModuleInterface, ...] = tuple(module_interfaces)
 
-        # Extracts the queue and log path from the logger instance.
-        self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]
+        # Reads the queue and the output directory off the logger instance rather than re-deriving them, so the
+        # interface and the logger always resolve to the same destination.
+        self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]  # MPQueue is not generic.
         self._log_directory: Path = data_logger.output_directory
 
         # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
-        # data between the communication process and the main process managing the overall runtime.
-        self._input_queue: MPQueue = self._mp_manager.Queue()  # type: ignore[assignment, type-arg]
+        # data between the communication process and the main process managing the overall runtime. The suppression
+        # below is required because MPQueue is not generic and because the manager returns a queue proxy rather than a
+        # multiprocessing.Queue.
+        self._input_queue: MPQueue = self._multiprocessing_manager.Queue()  # type: ignore[assignment, type-arg]
         self._terminator_array: SharedMemoryArray | None = None
         self._communication_process: Process | None = None
         self._watchdog_thread: Thread | None = None
@@ -712,7 +708,7 @@ class MicroControllerInterface:
     def __del__(self) -> None:
         """Ensures that all resources are properly released when the instance is garbage-collected."""
         self.stop()
-        self._mp_manager.shutdown()
+        self._multiprocessing_manager.shutdown()
 
     def reset_controller(self) -> None:
         """Resets the managed microcontroller to use the default hardware and software parameters."""
@@ -732,59 +728,6 @@ class MicroControllerInterface:
     def modules(self) -> tuple[ModuleInterface, ...]:
         """Returns the tuple of ModuleInterface instances managed by this MicroControllerInterface."""
         return self._modules
-
-    def _watchdog(self) -> None:
-        """Monitors the communication process to ensure it remains alive during runtime.
-
-        Raises RuntimeErrors if it detects that the communication process has prematurely shut down. Verifies the
-        process state in 20-millisecond cycles and releases the GIL between state verifications.
-
-        Notes:
-            If the method detects that the communication process has terminated prematurely, it carries out the
-            necessary resource cleanup steps before raising the error. The watchdog runs in a daemon thread, so the
-            error surfaces as a traceback on stderr while the main process continues.
-        """
-        timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
-
-        # The watchdog function runs until the global shutdown signal is emitted.
-        while self._terminator_array is not None and not self._terminator_array[0]:
-            # Checks process state every 20 ms. Releases the GIL while waiting.
-            timer.delay(delay=_RuntimeParameters.WATCHDOG_INTERVAL.value, allow_sleep=True, block=False)
-
-            # Only monitors the Process state after the communication is initialized via the start() method.
-            if not self._started:
-                continue
-
-            if self._communication_process is not None and not self._communication_process.is_alive():
-                # Claims the shutdown under the lock stop() takes as well, so exactly one of the two retires the
-                # instance. A concurrent stop() can claim it between the liveness check above and this acquisition,
-                # and the claimant owns every step below. Re-reading the flag here keeps this thread from tearing the
-                # instance down a second time and reporting a shutdown that already happened.
-                with self._shutdown_lock:
-                    if not self._started or self._terminator_array is None:
-                        return
-
-                    # Prevents the __del__ method from running stop(), as the code below terminates all assets.
-                    self._started = False
-
-                    # Activates the shutdown flag.
-                    self._terminator_array[0] = 1
-
-                    # The process should already be terminated, but there are no downsides to making sure it is dead.
-                    self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
-
-                    # Disconnects from the shared memory array and destroys its shared buffer.
-                    self._terminator_array.disconnect()
-                    self._terminator_array.destroy()
-
-                # Raises outside the lock, since a traceback unwinding with the lock held would leave a concurrent
-                # stop() waiting on a lock this thread never releases.
-                message = (
-                    f"The communication process of the MicroControllerInterface with id {self._controller_id} has been "
-                    f"prematurely shut down. This likely indicates that the process has encountered a runtime error "
-                    f"that terminated the process."
-                )
-                console.error(message=message, error=RuntimeError)
 
     def start(self) -> None:  # pragma: no cover - spawns the communication process against a live serial port.
         """Starts the instance's communication process and begins interfacing with the microcontroller.
@@ -846,7 +789,7 @@ class MicroControllerInterface:
 
                 # Waits for at most _RuntimeParameters.PROCESS_TERMINATION_TIMEOUT seconds and gives up on the join
                 # once that period elapses, to prevent deadlocks.
-                self._communication_process.join(_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
+                self._communication_process.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
                 # Disconnects from the shared memory array and destroys its shared buffer.
                 self._terminator_array.disconnect()
@@ -860,7 +803,6 @@ class MicroControllerInterface:
                 )
                 console.error(error=RuntimeError, message=message)
 
-        # Creates and starts the watchdog thread.
         self._watchdog_thread = Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
 
@@ -868,7 +810,6 @@ class MicroControllerInterface:
         # Teensy microcontroller boards that do not reset upon communication interface connection cycling.
         self.reset_controller()
 
-        # Sets the started flag.
         self._started = True
 
     def stop(self) -> None:
@@ -895,17 +836,70 @@ class MicroControllerInterface:
             # Emits the process shutdown signal.
             self._terminator_array[0] = 1
 
-        # Waits until the communication process terminates
+        # Joins the communication process and the watchdog thread before releasing the shared memory array below, as
+        # both read the array during their own shutdown and would fault on a buffer destroyed under them.
         if self._communication_process is not None:
             self._communication_process.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
-        # Waits for the watchdog thread to terminate.
         if self._watchdog_thread is not None:
             self._watchdog_thread.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
         # Disconnects from the shared memory array and destroys its shared buffer.
         self._terminator_array.disconnect()
         self._terminator_array.destroy()
+
+    def _watchdog(self) -> None:
+        """Monitors the communication process to ensure it remains alive during runtime.
+
+        Raises RuntimeErrors if it detects that the communication process has prematurely shut down. Verifies the
+        process state in 20-millisecond cycles and releases the GIL between state verifications.
+
+        Notes:
+            If the method detects that the communication process has terminated prematurely, it carries out the
+            necessary resource cleanup steps before raising the error. The watchdog runs in a daemon thread, so the
+            error surfaces as a traceback on stderr while the main process continues.
+        """
+        timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+
+        # The watchdog function runs until the global shutdown signal is emitted.
+        while self._terminator_array is not None and not self._terminator_array[0]:
+            # Checks process state every 20 ms. Releases the GIL while waiting.
+            timer.delay(delay=_RuntimeParameters.WATCHDOG_INTERVAL.value, allow_sleep=True, block=False)
+
+            # Only monitors the Process state after the communication is initialized via the start() method.
+            if not self._started:
+                continue
+
+            if self._communication_process is not None and not self._communication_process.is_alive():
+                # Claims the shutdown under the lock stop() takes as well, so exactly one of the two retires the
+                # instance. A concurrent stop() can claim it between the liveness check above and this acquisition,
+                # and the claimant owns every step below. Re-reading the flag here keeps this thread from tearing the
+                # instance down a second time and reporting a shutdown that already happened.
+                with self._shutdown_lock:
+                    if not self._started or self._terminator_array is None:
+                        return
+
+                    # Prevents the __del__ method from running stop(), as the code below terminates all assets.
+                    self._started = False
+
+                    # Activates the shutdown flag.
+                    self._terminator_array[0] = 1
+
+                    # The process should already be terminated, but there are no downsides to making sure it is dead.
+                    self._communication_process.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
+
+                    # Disconnects from the shared memory array and destroys its shared buffer.
+                    self._terminator_array.disconnect()
+                    self._terminator_array.destroy()
+
+                # Raises outside the lock, since a traceback unwinding with the lock held would leave a concurrent
+                # stop() waiting on a lock this thread never releases.
+                message = (
+                    f"The communication process of the MicroControllerInterface with id {self._controller_id} has been "
+                    f"prematurely shut down. This likely indicates that the process has encountered a runtime error "
+                    f"that terminated the process."
+                )
+                console.error(message=message, error=RuntimeError)
 
     @staticmethod
     def _verify_microcontroller_communication(
@@ -928,8 +922,8 @@ class MicroControllerInterface:
             RuntimeError: If the method is unable to communicate with the microcontroller.
             ValueError: If the microcontroller and the interface instance do not have matching configurations.
         """
-        # Constructs Kernel-addressed commands used to verify that the interface and the
-        # microcontroller have matching configurations.
+        # Constructs Kernel-addressed commands used to verify that the interface and the microcontroller have matching
+        # configurations.
         identify_controller_command = KernelCommand(
             command=np.uint8(KernelCommandCodes.IDENTIFY_CONTROLLER.value),
             return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
@@ -1091,8 +1085,8 @@ class MicroControllerInterface:
         controller_id: np.uint8,
         controller_name: str,
         module_interfaces: tuple[ModuleInterface, ...],
-        input_queue: MPQueue,  # type: ignore[type-arg]
-        logger_queue: MPQueue,  # type: ignore[type-arg]
+        input_queue: MPQueue,  # type: ignore[type-arg]  # MPQueue is not generic.
+        logger_queue: MPQueue,  # type: ignore[type-arg]  # MPQueue is not generic.
         terminator_array: SharedMemoryArray,
         port: str,
         baudrate: int,
@@ -1219,7 +1213,6 @@ class MicroControllerInterface:
                     keepalive_response_received = False
                     timeout_timer.reset()
 
-                # Attempts to receive the data from the microcontroller
                 incoming_data = serial_communication.receive_message()
 
                 # If no data is available advances to the next cycle iteration
@@ -1245,8 +1238,8 @@ class MicroControllerInterface:
                     )
 
                 # Handles Module-addressed messages. The event codes below the custom range are reserved for the base
-                # Module class of the firmware and are resolved by this library, and the codes at or above that bound
-                # are assigned by module developers to communicate states and errors.
+                # Module class of the firmware and are resolved by this library. The codes at or above that bound are
+                # assigned by module developers to communicate states and errors.
                 elif isinstance(incoming_data, (ModuleState, ModuleData)):
                     # Reads the combined type and id code of the incoming data. This is used to find the specific
                     # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
@@ -1290,8 +1283,8 @@ class MicroControllerInterface:
 
         # If an unknown and unhandled exception occurs, prints and flushes the exception message to the terminal
         # before re-raising the exception to terminate the process.
-        except Exception as e:
-            sys.stderr.write(str(e))
+        except Exception as runtime_error:
+            sys.stderr.write(str(runtime_error))
             sys.stderr.flush()
             raise
 
@@ -1326,7 +1319,7 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
     """
     try:
         # Initializes a fake multiprocessing queue to initialize communication.
-        fake_queue: MPQueue = MPQueue()  # type: ignore[type-arg]
+        fake_queue: MPQueue = MPQueue()  # type: ignore[type-arg]  # MPQueue is not generic.
 
         # Initializes a timer to prevent stale identification attempts from running forever.
         timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
@@ -1370,12 +1363,11 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
         if not isinstance(response, ControllerIdentification):
             return -1, None
 
-        # Otherwise, returns the microcontroller's ID.
         return int(response.controller_id), None
 
-    except Exception as e:
+    except Exception as connection_error:
         # Catches any connection-related exceptions and returns an error message instead of propagating the exception.
         # This prevents individual port failures from aborting the entire evaluation process.
-        error_type = type(e).__name__
-        error_message = str(e) or error_type
+        error_type = type(connection_error).__name__
+        error_message = str(connection_error) or error_type
         return -1, f"{error_type}: {error_message}"

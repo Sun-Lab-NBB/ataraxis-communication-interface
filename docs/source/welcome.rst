@@ -10,10 +10,12 @@ has a companion library written in C++,
 `ataraxis-micro-controller <https://github.com/Sun-Lab-NBB/ataraxis-micro-controller>`_, intended for Arduino and Teensy
 microcontrollers managing user-defined custom hardware modules.
 
-This website only contains the API documentation for the classes and methods offered by this library. See the project
-GitHub repository for installation instructions and library usage examples:
+This website only contains the API documentation for the classes, functions, constants, and command-line interface
+offered by this library. See the project GitHub repository for installation instructions and library usage examples:
 `ataraxis-communication-interface GitHub repository <https://github.com/Sun-Lab-NBB/ataraxis-communication-interface>`_.
 
 .. _`Ataraxis`: https://github.com/Sun-Lab-NBB/ataraxis
-.. _`ataraxis-communication-interface GitHub repository`: https://github.com/Sun-Lab-NBB/ataraxis-communication-interface
+.. _`ataraxis-micro-controller`: https://github.com/Sun-Lab-NBB/ataraxis-micro-controller
+.. _`ataraxis-communication-interface GitHub repository`:
+   https://github.com/Sun-Lab-NBB/ataraxis-communication-interface
 .. _`Sun (NeuroAI) lab`: https://neuroai.github.io/sunlab/

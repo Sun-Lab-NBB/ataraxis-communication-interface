@@ -32,9 +32,11 @@ class ExtractedDataColumns(StrEnum):
     EVENT = "event"
     """Holds the event code of each message."""
     DTYPE = "dtype"
-    """Holds the numpy dtype string of each message's data payload, or null for a state-only message."""
+    """Holds the numpy dtype string of each message's data payload, or null for a state-only message and for a data
+    message whose prototype code this library does not recognize."""
     DATA = "data"
-    """Holds the raw payload bytes of each message, or null for a state-only message."""
+    """Holds the raw payload bytes of each message, or null for a state-only message and for a data message whose
+    prototype code this library does not recognize."""
 
 
 def build_message_dataframe(messages: ExtractedMessages) -> pl.DataFrame:
@@ -125,8 +127,8 @@ def get_event_data[ScalarT: np.generic](
     Raises:
         ValueError: If the requested event code is a state-only event, whose messages carry no data payload. If a
             message carrying the event code stores a null payload inside an otherwise decodable stream, which marks
-            its prototype code as unrecognized. If the decoded value count is not a whole multiple of the message
-            count.
+            its prototype code as unrecognized. If the messages carrying the event code store their payloads under
+            more than one dtype. If the decoded value count is not a whole multiple of the message count.
     """
     event_dataframe = partition.get(event_code)
     if event_dataframe is None:
