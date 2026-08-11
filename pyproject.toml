@@ -55,6 +55,9 @@ dependencies = [
     # Host Resource Introspection
     "psutil>=7,<8",
 
+    # Cross-process File Locking
+    "filelock>=3,<4",
+
     # CLI
     "click>=8,<9",
 

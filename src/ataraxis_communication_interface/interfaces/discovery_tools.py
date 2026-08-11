@@ -261,9 +261,10 @@ def write_microcontroller_manifest_tool(
 ) -> dict[str, Any]:
     """Registers a microcontroller source in the manifest file within a DataLogger output directory.
 
-    If the manifest already exists (another MicroControllerInterface has already registered), appends the new
-    controller entry. Otherwise, creates a new manifest. Each module entry must have 'module_type' (int type code),
-    'module_id' (int ID code), and 'name' (str) keys.
+    If the manifest already exists (another MicroControllerInterface has already registered), replaces the entry
+    registered under the same controller_id or appends a new one when the manifest carries none. Otherwise, creates a
+    new manifest. Each module entry must have 'module_type' (int type code), 'module_id' (int ID code), and 'name'
+    (str) keys.
 
     Important:
         The AI agent calling this tool MUST know the controller ID, name, and module details. Do not guess
@@ -373,7 +374,10 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
         except Exception:  # noqa: S112
             continue
 
-        for controller in manifest.controllers:
+        # Collapses a repeated controller id, since one controller addresses one archive and one tracker entry. A
+        # manifest written before the writer replaced a re-registered entry can still hold several rows for one id,
+        # and every id-keyed consumer of this tool keeps one of them, so reporting each row would disagree with them.
+        for controller in {controller.id: controller for controller in manifest.controllers}.values():
             archive_path = archives.get(str(controller.id))
             if archive_path is None:
                 continue

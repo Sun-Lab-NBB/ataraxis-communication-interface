@@ -358,7 +358,8 @@ To support using the same logger instance for multiple concurrently active sourc
 Each MicroControllerInterface instance automatically writes a `microcontroller_manifest.yaml` file into the DataLogger
 output directory during initialization. The manifest associates the controller_id with the human-readable `name`
 provided to the MicroControllerInterface constructor, along with the list of module sources. When multiple
-MicroControllerInterface instances share the same DataLogger, each instance appends its entry to the same manifest file.
+MicroControllerInterface instances share the same DataLogger, each instance registers its entry in the same manifest
+file, replacing the entry any earlier instance registered under the same controller_id.
 The manifest is required by the [log processing](#log-processing) pipeline to validate which `.npz` archives were
 produced by ataraxis-communication-interface and to resolve source IDs for processing.
 

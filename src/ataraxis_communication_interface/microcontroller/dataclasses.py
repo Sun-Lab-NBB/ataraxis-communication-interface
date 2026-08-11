@@ -5,9 +5,9 @@ extraction configurations.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from threading import Lock
 from dataclasses import dataclass
 
+from filelock import FileLock
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import YamlConfig
 
@@ -21,8 +21,8 @@ MICROCONTROLLER_MANIFEST_FILENAME: str = "microcontroller_manifest.yaml"
 EXTRACTION_CONFIGURATION_FILENAME: str = "extraction_configuration.yaml"
 """The default filename used for extraction configuration files."""
 
-_MANIFEST_WRITE_LOCK: Lock = Lock()
-"""The lock that serializes the manifest read-modify-write sequence performed by write_microcontroller_manifest()."""
+_MANIFEST_LOCK_TIMEOUT: float = 10.0
+"""The maximum time, in seconds, to wait for the manifest's .lock file before aborting the registration."""
 
 
 def write_microcontroller_manifest(
@@ -42,14 +42,20 @@ def write_microcontroller_manifest(
         controller_id: The controller_id of the MicroControllerInterface instance to register.
         controller_name: The colloquial human-readable name for the microcontroller.
         modules: A tuple of ModuleSourceData instances describing the hardware modules managed by this controller.
+
+    Raises:
+        Timeout: If the manifest's .lock file cannot be acquired within the timeout period.
     """
     manifest_path = log_directory / MICROCONTROLLER_MANIFEST_FILENAME
     entry = MicroControllerSourceData(id=controller_id, name=controller_name, modules=modules)
+    lock = FileLock(lock_file=str(manifest_path.with_suffix(manifest_path.suffix + ".lock")))
 
-    # The read, the append, and the write do not form an atomic sequence across the separate threads that concurrent
-    # MCP tool calls run on. The temporary file atomic_write() opens is named per process, so two threads of one
-    # process collide on that name instead of serializing behind it.
-    with _MANIFEST_WRITE_LOCK:
+    # The read, the replacement, and the write do not form an atomic sequence on their own. The temporary file
+    # atomic_write() opens is named per process, so two threads of one process collide on that name instead of
+    # serializing behind it, while two processes miss each other's name entirely and the second write drops the first
+    # entry. Both the threads that concurrent MCP tool calls run on and the separate processes that construct
+    # MicroControllerInterface instances reach this function, so the lock is a file lock rather than a thread lock.
+    with lock.acquire(timeout=_MANIFEST_LOCK_TIMEOUT):
         # Reads the existing manifest if one has already been written by another MicroControllerInterface instance
         # sharing this DataLogger.
         manifest = (
