@@ -74,7 +74,7 @@ class MQTTCommunication:
         """Ensures that the instance disconnects from the broker before being garbage-collected."""
         self.disconnect()
 
-    def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:  # pragma: no cover
+    def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         """Receives data from the MQTT broker and buffers it in the output queue.
 
         Args:
@@ -85,7 +85,7 @@ class MQTTCommunication:
         # Whenever a message is received, it is buffered via the local queue object.
         self._output_queue.put_nowait((message.topic, message.payload))
 
-    def _on_disconnect(  # pragma: no cover
+    def _on_disconnect(
         self,
         _client: mqtt.Client,
         _userdata: Any,

@@ -91,7 +91,7 @@ class _RuntimeParameters(IntEnum):
     of the remote communication process."""
 
 
-class ModuleInterface(ABC):  # pragma: no cover
+class ModuleInterface(ABC):
     """Provides the API used by other library components to interface with the custom hardware module controlled by
     the companion Arduino or Teensy microcontroller.
 
@@ -492,7 +492,7 @@ class ModuleInterface(ABC):  # pragma: no cover
         return self._name
 
 
-class MicroControllerInterface:  # pragma: no cover
+class MicroControllerInterface:
     """Interfaces with the hardware module instances managed by the Arduino or Teensy microcontroller running the
     ataraxis-micro-controller library.
 
@@ -786,7 +786,7 @@ class MicroControllerInterface:  # pragma: no cover
                 )
                 console.error(message=message, error=RuntimeError)
 
-    def start(self) -> None:
+    def start(self) -> None:  # pragma: no cover - spawns the communication process against a live serial port.
         """Starts the instance's communication process and begins interfacing with the microcontroller.
 
         Notes:
@@ -836,7 +836,7 @@ class MicroControllerInterface:  # pragma: no cover
 
         initialization_timer.reset()
         # Blocks until the microcontroller has finished all initialization steps or encounters an initialization error.
-        while self._terminator_array[1] != 1:  # pragma: no cover
+        while self._terminator_array[1] != 1:
             if (
                 not self._communication_process.is_alive()
                 or initialization_timer.elapsed > _RuntimeParameters.PROCESS_INITIALIZATION_TIMEOUT.value
@@ -1313,7 +1313,7 @@ class MicroControllerInterface:  # pragma: no cover
                     sys.stderr.flush()
 
 
-def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:  # pragma: no cover
+def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
     """Determines whether the target serial port is connected to an Ataraxis MicroController.
 
     Args:

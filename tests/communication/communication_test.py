@@ -979,6 +979,34 @@ def test_mqtt_communication_send_data_publish_error(monkeypatch: pytest.MonkeyPa
         unity_communication.send_data(topic=TEST_TOPICS[0], payload="test message")
 
 
+def test_mqtt_communication_on_message_buffers_the_payload() -> None:
+    """Verifies that the message callback buffers the topic and payload of the message the broker delivers."""
+    # Invokes the callback the way the client's listener thread does, which keeps the buffering behavior verifiable
+    # without a broker to route a real publication through.
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    message = mqtt.MQTTMessage(mid=1, topic=TEST_TOPICS[0].encode())
+    message.payload = b"test message"
+
+    assert not unity_communication.has_data
+
+    unity_communication._on_message(unity_communication._client, None, message)
+
+    assert unity_communication.has_data
+    assert unity_communication._output_queue.get_nowait() == (TEST_TOPICS[0], b"test message")
+
+
+def test_mqtt_communication_on_disconnect_clears_the_connection_state() -> None:
+    """Verifies that the disconnection callback clears the tracked connection state."""
+    # The callback ignores every argument other than the instance it is bound to, so the link loss is reported with
+    # the placeholder values the unused parameters document.
+    unity_communication = MQTTCommunication(ip=BROKER_IP, port=BROKER_PORT, monitored_topics=TEST_TOPICS)
+    unity_communication._connected = True
+
+    unity_communication._on_disconnect(unity_communication._client, None, None, None, None)
+
+    assert not unity_communication._connected
+
+
 @pytest.mark.xdist_group(name="group1")
 def test_unity_communication_queue_management() -> None:
     """Verifies that MQTTCommunication's message queue properly handles multiple messages."""
