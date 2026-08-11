@@ -265,11 +265,13 @@ def config_show(config_path: Path) -> None:
     "the declared per-job allocation of 8 cores.",
 )
 @click.option(
-    "-p",
-    "--progress/--no-progress",
-    default=True,
+    "-np",
+    "--no-progress",
+    is_flag=True,
+    default=False,
     show_default=True,
-    help="Determines whether to display progress bars during data extraction.",
+    help="Determines whether to suppress the progress bars during data extraction. The progress bars are displayed by "
+    "default.",
 )
 def process(
     log_directory: Path,
@@ -279,7 +281,7 @@ def process(
     specifier: tuple[str, ...],
     *,
     workers: int,
-    progress: bool,
+    no_progress: bool,
 ) -> None:
     """Processes MicroControllerInterface log archives to extract hardware module and kernel message data.
 
@@ -296,7 +298,7 @@ def process(
         job_id=job_id,
         source_ids=list(specifier) if specifier else None,
         workers=workers,
-        display_progress=progress,
+        display_progress=not no_progress,
     )
 
 
