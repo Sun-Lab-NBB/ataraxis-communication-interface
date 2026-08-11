@@ -61,7 +61,7 @@ dependencies:
     - ataraxis-base-utilities==7.0.0
     - ataraxis-data-structures==7.1.0
     - ataraxis-time==7.0.0
-    - ataraxis-transport-layer-pc==5.0.0
+    - ataraxis-transport-layer-pc==5.1.0
     - attrs==26.1.0
     - babel==2.18.0
     - bashlex==0.18
@@ -86,8 +86,10 @@ dependencies:
     - h11==0.16.0
     - hatchling==1.31.0
     - httpcore==1.0.9
+    - httpcore2==2.10.0
     - httpx==0.28.1
     - httpx-sse==0.4.3
+    - httpx2==2.10.0
     - humanize==4.16.0
     - id==1.6.1
     - idna==3.18
@@ -106,7 +108,8 @@ dependencies:
     - llvmlite==0.49.0rc1
     - loguru==0.7.3
     - markdown-it-py==4.2.0
-    - mcp==1.29.0
+    - mcp==2.0.0
+    - mcp-types==2.0.0
     - mdurl==0.1.2
     - more-itertools==11.1.0
     - mypy==2.3.0
@@ -115,6 +118,7 @@ dependencies:
     - nh3==0.3.6
     - numba==0.67.0rc1
     - numpy==2.5.2
+    - opentelemetry-api==1.44.0
     - paho-mqtt==2.1.0
     - pathspec==1.1.1
     - polars==1.43.2
@@ -158,8 +162,8 @@ dependencies:
     - tox-uv==1.36.0
     - tqdm==4.70.0
     - trove-classifiers==2026.6.1.19
+    - truststore==0.10.4
     - twine==6.2.0
-    - types-paho-mqtt==1.6.0.20240321
     - types-psutil==7.2.2.20260518
     - types-pyserial==3.5.0.20260712
     - typing-inspection==0.4.2
