@@ -429,7 +429,8 @@ Apache Feather (IPC) format.
 The pipeline uses the [microcontroller manifest](#data-logging) to validate that `.npz` archives were produced by
 ataraxis-communication-interface. A `microcontroller_manifest.yaml` file must be present in the log directory for
 processing to succeed. Controller IDs to process are resolved directly from the extraction configuration and validated
-against the manifest.
+against the manifest. The `axci config create` command generates the precursor extraction configuration from that
+manifest, populating every controller and module with empty event codes for the user to fill in.
 
 One recording writes one MicroControllerInterface set to one DataLogger, so exactly one manifest is supported per
 invocation. A log directory tree holding several manifests, or archives written by several DataLogger instances,
@@ -627,6 +628,16 @@ This library provides the `axci` CLI that exposes the following commands:
 | `mcp`           | Starts the MCP server for AI agent integration                           |
 
 Use `axci --help` or `axci COMMAND --help` for detailed usage information.
+
+A CLI-driven extraction generates the configuration from the manifest and then processes the archives that manifest
+tags:
+
+```bash
+# Generates the precursor configuration. Fill in the event codes for each module entry before processing.
+axci config create -m /path/to/logs/microcontroller_manifest.yaml -o /path/to/extraction_config.yaml
+
+axci process -ld /path/to/logs -od /path/to/output -c /path/to/extraction_config.yaml
+```
 
 ### MCP Server
 
