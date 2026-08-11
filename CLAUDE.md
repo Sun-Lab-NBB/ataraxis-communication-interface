@@ -122,9 +122,10 @@ or its dependencies, prefer using available MCP tools over direct code execution
 
 The companion [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) C++ library is the
 firmware counterpart to this library, and parts of this codebase track it in lockstep. The enumerations in
-`microcontroller/status_codes.py` mirror `kKernelStatusCodes`, `kCoreStatusCodes`, `kCommunicationStatusCodes`, and the
-microcontroller-side `kTransportStatusCodes`, so a firmware release that changes a code requires the mirror to change
-with it.
+`microcontroller/status_codes.py` mirror `kKernelStatusCodes`, `kCoreStatusCodes`, `kCommunicationStatusCodes`, the
+microcontroller-side `kTransportStatusCodes`, and `kKernelCommands`. `communication/protocols.py` mirrors `kProtocols`
+and `kPrototypes`, and the dataclasses in `communication/messages.py` mirror the packed message structs the firmware
+declares in `axmc_shared_assets.h`. A firmware release that changes any of them requires the mirror to change with it.
 
 ## Distribution model
 
@@ -213,7 +214,7 @@ data from DataLogger archives.
   process, verifies the controller and module identity, and launches the watchdog thread, and the process requires an
   explicit `stop()` call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
 - **Message Protocol Stack**: Four levels: `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
-  frame encoding), message protocols (12 types via `SerialProtocols` enum), and data prototypes (252 numpy types
+  frame encoding), message protocols (13 types via `SerialProtocols` enum), and data prototypes (252 numpy types
   via `SerialPrototypes` enum).
 - **LRU Caching**: `ModuleInterface` caches command messages (`maxsize=32`) and parameter messages (`maxsize=16`)
   to avoid redundant serialization during repeated operations.
@@ -269,7 +270,7 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   LRU-cached message construction, and `reset_command_queue()` sends a dequeue command. See
   `examples/example_interface.py` for a reference subclass.
 - **Serial communication** (`communication/protocols.py`, `messages.py`, `serial.py`): `SerialProtocols`
-  (12 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer. Command classes pack bytes via
+  (13 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer. Command classes pack bytes via
   the `packed_data` property, and reception classes parse header bytes via properties.
 - **MQTT communication** (`communication/mqtt.py`): `paho-mqtt` v2 client with callback reception into a `Queue`.
   `get_data()` returns `(topic, message)` tuples or `None`, and the `has_data` property checks queue state.

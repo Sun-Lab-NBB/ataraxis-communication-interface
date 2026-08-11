@@ -20,7 +20,8 @@ _MAXIMUM_PARAMETERS_SIZE: int = 250
 
 COBS encodes at most 254 payload bytes behind a single overhead byte, which caps every payload the TransportLayer
 transmits at 254 bytes. The four-byte ModuleParameters header travels inside that payload, leaving 250 bytes for the
-serialized parameter values.
+serialized parameter values. This is the protocol ceiling, which a microcontroller reaches only when its serial buffer
+is large enough. Boards with smaller buffers cap the payload lower, and the TransportLayer reports that bound.
 """
 
 _ZERO_BYTE: np.uint8 = np.uint8(0)
@@ -212,8 +213,9 @@ class ModuleParameters:
         """Serializes the instance's data.
 
         Raises:
-            ValueError: If the combined size of the serialized parameter values exceeds the maximum size the
-                microcontroller is able to receive.
+            ValueError: If the combined size of the serialized parameter values exceeds the ceiling the COBS framing
+                imposes on a single payload. Microcontrollers with small serial buffers cap the size below that
+                ceiling, and the TransportLayer reports the lower bound when the message reaches it.
         """
         # Calculates the total size of serialized parameters in bytes directly from item sizes. The sum accumulates in
         # Python integer arithmetic, as a uint8 accumulator silently wraps at the very sizes the guard below rejects.
