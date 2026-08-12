@@ -239,8 +239,9 @@ data from DataLogger archives.
   jobs and the stages queued beside them are sized on one scale. Changing a constant here changes how this stage
   competes for admission against every other stage a scheduler plans with it.
 - **Library-Owned Output Contract**: This library owns both directions of the format it writes.
-  `resolve_module_path()` and `resolve_kernel_path()` name the files, `find_module_paths()` and `parse_module_path()`
-  recover them, all four in `orchestration/jobs.py`, and `partition_events()`, `get_event_timestamps()`, and
+  `resolve_module_path()` and `resolve_kernel_path()` name the files, `find_module_paths()` and `find_kernel_paths()`
+  discover them, `parse_module_path()` and `parse_kernel_path()` recover the identity each name encodes, all six in
+  `orchestration/jobs.py`, and `partition_events()`, `get_event_timestamps()`, and
   `get_event_data()` read the table through the `ExtractedDataColumns` enumeration rather than through string
   literals. A downstream consumer reads the extracted data through these rather than reimplementing the naming
   convention and the schema.
