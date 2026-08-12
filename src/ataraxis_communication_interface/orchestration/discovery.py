@@ -237,9 +237,8 @@ def prepare_jobs(
         job is prepared, which is every write this call performs outside a job's own output. The prepared job list
         lives in the returned set rather than on disk.
 
-        Reads no archive. Every job carries the core ceiling as its width, and the extraction reads an archive below
-        the parallel processing threshold sequentially whatever width it is given, so a caller that only runs jobs pays
-        nothing to prepare them.
+        Reads no archive. Every job carries the declared allocation as its width, which the sizing pass replaces with
+        the width the job's own archive resolves to.
 
         A tree holding no manifest prepares no job whatever the configuration declares, matching the empty universe
         the resolution reports for it.

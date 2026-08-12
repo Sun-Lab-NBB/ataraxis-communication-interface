@@ -46,10 +46,8 @@ def run_log_processing_pipeline(
         lets independent external jobs share one tracker without resetting each other's state. That is what supports
         running every controller of one recording in parallel under an external scheduler.
 
-        Each job runs at the smaller of the requested worker ceiling and the declared per-job allocation, and the
-        extraction reads an archive below the parallel processing threshold sequentially whatever width it is given.
-        A sequential run commits one job's resources at a time, so it weighs nothing against a budget and reads no
-        archive before dispatching it.
+        Each job runs at the width the caller named, or at the width its own archive resolves to when the caller
+        named none. Jobs run one at a time, so this path weighs nothing against a core or a memory budget.
 
     Args:
         log_directory: The path to the root directory to search for .npz log archives. The directory is searched

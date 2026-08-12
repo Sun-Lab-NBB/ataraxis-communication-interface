@@ -60,23 +60,31 @@ Notes:
     them.
 """
 
-SPAWNED_CHILD_MEMORY_MB: int = 220
+SPAWNED_CHILD_MEMORY_MB: int = 152
 """The resident memory one spawned child holds before it touches any data, covering the interpreter and the package's
-import graph. The term is charged once for a job's body, and once more for each core a job that opens an extraction
-pool holds."""
+import graph. The term is charged for each core a job that opens an extraction pool holds, and it is what one warmed
+but idle slot of a batch's shared pool reserves."""
+
+_JOB_BODY_MEMORY_MB: int = 180
+"""The resident memory one job body holds beyond the archive it reads, covering the interpreter, the package's import
+graph, and the fixed part of the columnar output it assembles.
+
+Notes:
+    The term stands above the spawned child baseline because a body writes the extracted feather files, which loads a
+    serialization backend a pool child that only decodes the messages it is handed never reaches.
+"""
 
 _POOL_MEMORY_RESERVATION_DIVISOR: int = 2
 """The share of the memory budget the shared pool's warmed job bodies may claim, expressed as a divisor. The
 remainder covers the work those bodies perform."""
 
-_ARCHIVE_DIRECTORY_RATIO: float = 2.5
+_ARCHIVE_DIRECTORY_RATIO: float = 2.7
 """The resident memory a log archive reader holds per byte of archive on disk. Reading an archive builds one
 directory entry per logged message, which dominates the decoded payload itself.
 
 Notes:
-    The ratio a reader holds rises with the width of the pool the job opens, since a wider pool splits the same archive
-    into more slices while every child still holds the whole message directory. The value covers the widest allocation
-    a job receives rather than the narrowest, so a sequential job is charged the same generous rate as a pooled one.
+    Every reader holds the directory of the whole archive whatever share of it that reader decodes, so the term is
+    charged once per reader and does not vary with the width of the pool a job opens.
 """
 
 _MEMORY_BUDGET_FRACTION: float = 0.85
@@ -89,9 +97,10 @@ _MEMORY_ROUNDING_QUANTUM_MB: int = 256
 """The multiple every reportable estimate is rounded up to.
 
 Notes:
-    The quantum is a quarter of the memory the smallest job shape holds, so rounding costs a sequential job a fraction
-    of its own footprint rather than several times it. A coarser quantum charges the two shapes the stage emits at
-    nearly the same figure, which would let a batch of sequential jobs reserve the memory a batch of pooled ones needs.
+    The quantum covers what one job body holds once the tolerance is applied, so the smallest job shape is charged one
+    quantum rather than the four a whole-gigabyte quantum charged it. A coarser quantum charges the two shapes the
+    stage emits at nearly the same figure, which would let a batch of sequential jobs reserve the memory a batch of
+    pooled ones needs.
 """
 
 _BYTES_PER_MEGABYTE: int = 1024 * 1024
@@ -110,7 +119,7 @@ class ArchiveFootprint:
     """Determines whether the figures were read from the archive rather than falling back to the job baseline."""
 
 
-def resolve_archive_footprint(archive_path: Path, *, read_message_count: bool = True) -> ArchiveFootprint:
+def resolve_archive_footprint(archive_path: Path) -> ArchiveFootprint:
     """Reads the properties of the target log archive that size the job reading it.
 
     Notes:
@@ -120,15 +129,12 @@ def resolve_archive_footprint(archive_path: Path, *, read_message_count: bool = 
 
     Args:
         archive_path: The path to the .npz log archive to read.
-        read_message_count: Determines whether to open the archive and count the messages it holds. Unsetting this
-            yields a footprint whose message count is zero, which sizes memory correctly and resolves cores to
-            a single worker.
 
     Returns:
         The footprint describing the archive.
     """
     try:
-        message_count = read_archive_message_count(archive_path=archive_path) if read_message_count else 0
+        message_count = read_archive_message_count(archive_path=archive_path)
         archive_bytes = archive_path.stat().st_size
     except Exception:
         return ArchiveFootprint(message_count=0, archive_bytes=0, modeled=False)
@@ -140,14 +146,9 @@ def resolve_job_workers(footprint: ArchiveFootprint) -> int:
     """Resolves the cores one extraction job receives, from the archive it reads.
 
     Notes:
-        The stage emits two job shapes and nothing between them. An archive below the parallel extraction threshold
-        is read sequentially on one core, and every archive above it is read by a pool at the declared allocation.
-        Intermediate widths are not offered, because the speedup between one core and the declared allocation is
-        smooth enough that a narrower pool costs a job time without returning a core the batch can place elsewhere.
-
-        The width follows from the archive alone, so the same archive is sized identically whatever the host is doing
-        and whatever budget the batch holds. Admission, rather than this resolver, holds a job to the cores its batch
-        can spare.
+        The stage offers no width between the two it emits, because the speedup between one core and the declared
+        allocation is smooth enough that a narrower pool costs a job time without returning a core the batch can
+        place elsewhere.
 
     Args:
         footprint: The footprint of the archive this job reads.
@@ -167,11 +168,14 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
     Notes:
         The two job shapes the stage emits hold memory in two different ways. A sequential job opens no pool and holds
         the body's reader alone. A pooled job splits its archive across the extraction pool, and every child of that
-        pool opens the archive itself while the job body holds a reader of its own for the whole job, so the archive's
-        message directory is held once per core and once more for the body.
+        pool opens the archive itself while the job body holds a reader of its own for the whole job. The archive's
+        message directory is therefore held once per core and once more for the body.
 
-        An unmodeled footprint falls back to the spawned child baseline, which is a floor to plan around rather than
-        a measurement.
+        The body and a pool child carry separate baselines, because a body assembles and writes the extracted output
+        while a child returns the messages it decoded and holds nothing else.
+
+        An unmodeled footprint falls back to the job body baseline, which is a floor to plan around rather than a
+        measurement.
 
     Args:
         footprint: The footprint of the archive this job reads.
@@ -179,37 +183,37 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
             than one.
 
     Returns:
-        The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to a whole gigabyte.
+        The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to the reporting
+        quantum.
     """
     if not footprint.modeled:
-        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
+        return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB)
 
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
 
     if cores == 1:
-        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
+        return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader)
 
-    readers = cores + 1
-    return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
+    return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader + cores * (SPAWNED_CHILD_MEMORY_MB + per_reader))
 
 
-def estimate_archive_job_memory_mb(archive_path: Path, cores: int) -> tuple[int, bool]:
-    """Estimates the memory one extraction job holds, from the archive path alone.
+def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:
+    """Resolves the cores and the memory one extraction job receives, from the archive it reads.
 
     Notes:
-        Reads the archive's size without opening it, costing one stat call. The module defining this estimator imports
-        nothing from its own package, so a scheduler consuming the sizing model takes it alone.
+        Reads the archive once and answers both halves of the sizing model from that read, so a scheduler planning
+        this stage reproduces neither the width rule nor the memory model.
 
     Args:
         archive_path: The path to the .npz log archive the job reads.
-        cores: The cores the job holds.
 
     Returns:
-        The memory the job holds in megabytes, and whether the estimate follows from the archive's own size rather
-        than from the spawned child baseline.
+        The cores the job receives, the memory it holds in megabytes, and whether both figures follow from the
+        archive itself rather than from the spawned child baseline.
     """
-    footprint = resolve_archive_footprint(archive_path=archive_path, read_message_count=False)
-    return estimate_job_memory_mb(footprint=footprint, cores=cores), footprint.modeled
+    footprint = resolve_archive_footprint(archive_path=archive_path)
+    cores = resolve_job_workers(footprint=footprint)
+    return cores, estimate_job_memory_mb(footprint=footprint, cores=cores), footprint.modeled
 
 
 def resolve_core_budget(requested_budget: int) -> int:
@@ -284,7 +288,7 @@ def _bytes_to_megabytes(byte_count: float) -> int:
 
 
 def _apply_tolerance(memory_mb: int) -> int:
-    """Applies the estimate tolerance to a modeled memory figure and rounds it up to a whole gigabyte.
+    """Applies the estimate tolerance to a modeled memory figure and rounds it up to the reporting quantum.
 
     Notes:
         Rounding to a fixed quantum here keeps the figure an admission decision weighs identical to the figure a

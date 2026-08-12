@@ -40,7 +40,7 @@ from ..microcontroller import ExtractionConfig
 _OVERVIEW_AXES: tuple[str, ...] = ("status",)
 """The directory keys a caller filters the batch overview by, which a bare call reports the counts of."""
 
-_OVERVIEW_SEMI_FIELDS: tuple[str, ...] = ("log_directory", "status", "summary")
+_OVERVIEW_SEMI_DETAIL_FIELDS: tuple[str, ...] = ("log_directory", "status", "summary")
 """The fields every listed log directory carries."""
 
 _OVERVIEW_DETAIL_FIELDS: tuple[str, ...] = ("tracker_path", "jobs", "error")
@@ -66,14 +66,16 @@ def prepare_log_processing_batch_tool(
 
     Important:
         The AI agent calling this tool MUST run discover_microcontroller_data_tool first to obtain log directory
-        paths and confirmed source IDs. The agent MUST ask the user for the output directory paths and extraction
-        configuration path before calling this tool. Do not assume or guess directory paths or source IDs.
+        paths, and MUST read the confirmed source IDs from the 'breakdown' that call reports or from the 'sources'
+        list it returns under include_items. The agent MUST ask the user for the output directory paths and
+        extraction configuration path before calling this tool. Do not assume or guess directory paths or source IDs.
 
     Args:
         log_directories: The list of absolute paths to DataLogger output directories containing log archives.
             Accepts paths from the 'log_directories' list returned by discover_microcontroller_data_tool.
-        source_ids: The list of confirmed source IDs to process. Accepts IDs from the 'source_id' field of
-            entries in the 'sources' list returned by discover_microcontroller_data_tool. Applied uniformly: each
+        source_ids: The list of confirmed source IDs to process. Accepts the 'source_id' keys of the 'breakdown' a
+            bare discover_microcontroller_data_tool call reports, and the 'source_id' field of the entries in the
+            'sources' list it returns once a filter is named or include_items is set. Applied uniformly: each
             log directory creates a job for every source ID in this list that is registered in the microcontroller
             manifest, has a matching archive on disk, and is declared in the extraction configuration. A source
             failing any condition is reported with its reason under that directory's 'skipped_sources'. An empty
@@ -661,8 +663,9 @@ def get_batch_status_overview_tool(
 
     Returns:
         A dictionary carrying 'total_log_directories', an aggregate 'summary' of job counts, and a 'breakdown' of
-        directories per status. Carries a 'log_directories' list with 'rows', 'matched_rows', 'start_row', and
-        'next_start_row' whenever a status is named or the listing is requested. Returns an error dictionary if the
+        directories per status. Adds a 'log_directories' list alongside top-level 'rows', 'matched_rows', 'start_row',
+        and 'next_start_row' paging fields whenever a status is named or the listing is requested. Returns an error
+        dictionary if the
         root directory is missing, is not a directory, cannot be searched, or a status names a value no tracker holds.
     """
     root_path = Path(root_directory)
@@ -737,7 +740,7 @@ def get_batch_status_overview_tool(
             return rejection
         matched = [entry for entry in matched if entry["status"] in statuses]
 
-    fields = (*_OVERVIEW_SEMI_FIELDS, *_OVERVIEW_DETAIL_FIELDS) if detailed else _OVERVIEW_SEMI_FIELDS
+    fields = (*_OVERVIEW_SEMI_DETAIL_FIELDS, *_OVERVIEW_DETAIL_FIELDS) if detailed else _OVERVIEW_SEMI_DETAIL_FIELDS
     window = resolve_page(
         total=len(matched), limit=resolve_detail_limit(limit=limit, detailed=detailed), start_row=start_row
     )

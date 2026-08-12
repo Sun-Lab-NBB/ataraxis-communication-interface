@@ -24,8 +24,12 @@ Notes:
 """
 
 _MODULE_FILE_FIELD_COUNT: int = 5
-"""The underscore-separated fields a module output filename carries, which are the controller prefix, the source
-identifier, the module infix, the module type code, and the module identifier code."""
+"""The underscore-separated fields a module output filename holds, which is the prefix, the source identifier, the
+module marker, the module type, and the module identifier."""
+
+_KERNEL_FILE_FIELD_COUNT: int = 3
+"""The underscore-separated fields a kernel output filename holds, which is the prefix, the source identifier, and the
+kernel marker."""
 
 
 class OutputLayout(StrEnum):
@@ -301,6 +305,23 @@ def find_module_paths(data_directory: Path) -> list[Path]:
     return sorted(data_directory.glob(pattern))
 
 
+def find_kernel_paths(data_directory: Path) -> list[Path]:
+    """Discovers every kernel output file an extraction job wrote into the target directory.
+
+    Args:
+        data_directory: The directory the extraction jobs write their output into.
+
+    Returns:
+        The paths to every kernel output file the directory holds, sorted by path, and an empty list when the
+        directory does not exist.
+    """
+    if not data_directory.is_dir():
+        return []
+
+    pattern = f"{OutputLayout.FILE_PREFIX}*{OutputLayout.KERNEL_INFIX}{OutputLayout.FILE_SUFFIX}"
+    return sorted(data_directory.glob(pattern))
+
+
 def parse_module_path(file_path: Path) -> tuple[int, int, int]:
     """Reads the controller source, the module type, and the module identifier a module output filename encodes.
 
@@ -334,3 +355,38 @@ def parse_module_path(file_path: Path) -> tuple[int, int, int]:
         console.error(message=message, error=ValueError)
 
     return int(parts[1]), int(parts[3]), int(parts[4])
+
+
+def parse_kernel_path(file_path: Path) -> int:
+    """Reads the controller source a kernel output filename encodes.
+
+    Notes:
+        Inverts resolve_kernel_path(), so a consumer recovers the identity of the source a file holds from the file
+        alone rather than from the manifest that named it.
+
+    Args:
+        file_path: The path to the kernel output file to read the identity of.
+
+    Returns:
+        The controller source identifier.
+
+    Raises:
+        ValueError: If the filename does not follow the kernel output naming convention, or if its source identifier
+            is not an integer.
+    """
+    parts = file_path.stem.split("_")
+
+    if (
+        len(parts) != _KERNEL_FILE_FIELD_COUNT
+        or f"{parts[0]}_" != OutputLayout.FILE_PREFIX
+        or f"_{parts[2]}" != OutputLayout.KERNEL_INFIX
+        or not parts[1].isdigit()
+    ):
+        message = (
+            f"Unable to parse the kernel output filename '{file_path.name}'. The filename does not follow the "
+            f"'{OutputLayout.FILE_PREFIX}{{source_id}}{OutputLayout.KERNEL_INFIX}{OutputLayout.FILE_SUFFIX}' "
+            f"naming convention."
+        )
+        console.error(message=message, error=ValueError)
+
+    return int(parts[1])

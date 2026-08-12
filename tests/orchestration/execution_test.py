@@ -424,8 +424,8 @@ def test_group_jobs_by_tracker(tmp_path: Path) -> None:
 @pytest.mark.xdist_group(name="orchestration")
 def test_resolve_pool_size_reflects_the_memory_budget() -> None:
     """Verifies that the slot count a batch opens is held to the warmed bodies half its memory budget can hold."""
-    # Half of 1024 MB holds two spawned children, which is fewer than the jobs or the cores on offer.
-    assert resolve_pool_size(job_count=4, core_budget=8, memory_budget_mb=1024) == 2
+    # Half of 1024 MB holds three spawned children, which is fewer than the jobs or the cores on offer.
+    assert resolve_pool_size(job_count=4, core_budget=8, memory_budget_mb=1024) == 3
 
     # A budget that cannot afford a single body still opens one slot, so the batch is never stalled by its own model.
     assert resolve_pool_size(job_count=4, core_budget=8, memory_budget_mb=SPAWNED_CHILD_MEMORY_MB) == 1

@@ -17,7 +17,9 @@ from ataraxis_communication_interface.orchestration.jobs import (
     OutputLayout,
     JobDescriptor,
     generate_job_ids,
+    find_kernel_paths,
     find_module_paths,
+    parse_kernel_path,
     parse_module_path,
     resolve_kernel_path,
     resolve_module_path,
@@ -629,3 +631,66 @@ def _build_descriptor(tmp_path: Path, source_id: int = 1, core_weight: int = 1) 
 def _normalize(text: object) -> str:
     """Collapses the line wrapping the console applies, so a message fragment matches the raised error's text."""
     return " ".join(str(text).split())
+
+
+def test_find_kernel_paths(tmp_path: Path) -> None:
+    """Verifies that find_kernel_paths discovers every kernel output file the directory holds, sorted by path."""
+    second = resolve_kernel_path(output_directory=tmp_path, source_id="2")
+    first = resolve_kernel_path(output_directory=tmp_path, source_id="1")
+    for path in (second, first):
+        path.touch()
+
+    # The module file and an unrelated file share the directory, so neither may appear in the kernel result.
+    resolve_module_path(output_directory=tmp_path, source_id="1", module_type=3, module_id=4).touch()
+    tmp_path.joinpath("notes.txt").touch()
+
+    assert find_kernel_paths(data_directory=tmp_path) == [first, second]
+
+
+def test_find_kernel_paths_empty_directory(tmp_path: Path) -> None:
+    """Verifies that find_kernel_paths reports no files for a directory an extraction job has not written to."""
+    assert find_kernel_paths(data_directory=tmp_path) == []
+
+
+def test_find_kernel_paths_missing_directory(tmp_path: Path) -> None:
+    """Verifies that find_kernel_paths reports no files for a directory that does not exist."""
+    assert find_kernel_paths(data_directory=tmp_path / "absent") == []
+
+
+def test_parse_kernel_path_inverts_resolution(tmp_path: Path) -> None:
+    """Verifies that parse_kernel_path recovers the source identifier resolve_kernel_path encoded."""
+    kernel_path = resolve_kernel_path(output_directory=tmp_path, source_id="222")
+
+    assert parse_kernel_path(file_path=kernel_path) == 222
+
+
+def test_find_kernel_paths_round_trips_through_parse_kernel_path(tmp_path: Path) -> None:
+    """Verifies that every file find_kernel_paths discovers parses back into the source that named it."""
+    for source_id in (1, 10, 222):
+        resolve_kernel_path(output_directory=tmp_path, source_id=str(source_id)).touch()
+
+    discovered = find_kernel_paths(data_directory=tmp_path)
+
+    assert sorted(parse_kernel_path(file_path=path) for path in discovered) == [1, 10, 222]
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "controller_1_module_2_3.feather",
+        "controller_kernel.feather",
+        "controller_1_kernel_2.feather",
+        "controller_abc_kernel.feather",
+        "session_1_kernel.feather",
+        "controller_1_widget.feather",
+    ],
+)
+def test_parse_kernel_path_rejects_foreign_names(tmp_path: Path, filename: str) -> None:
+    """Verifies that parse_kernel_path rejects a filename outside the kernel output naming convention."""
+    message = (
+        f"Unable to parse the kernel output filename '{filename}'. The filename does not follow the "
+        f"'controller_{{source_id}}_kernel.feather' naming convention."
+    )
+
+    with pytest.raises(ValueError, match=error_format(message)):
+        parse_kernel_path(file_path=tmp_path / filename)

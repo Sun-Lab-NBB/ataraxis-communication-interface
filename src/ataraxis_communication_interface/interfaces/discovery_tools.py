@@ -51,7 +51,7 @@ on one serial port, so the backends it imports repay no pool wider than a single
 _SOURCE_AXES: tuple[str, ...] = ("source_id", "name")
 """The source keys a caller filters the recording listing by, which a bare call reports the counts of."""
 
-_SOURCE_SEMI_FIELDS: tuple[str, ...] = ("recording_root", "source_id", "name", "log_directory")
+_SOURCE_SEMI_DETAIL_FIELDS: tuple[str, ...] = ("recording_root", "source_id", "name", "log_directory")
 """The fields every listed source carries."""
 
 _SOURCE_DETAIL_FIELDS: tuple[str, ...] = ("log_archive", "modules")
@@ -372,9 +372,11 @@ def discover_microcontroller_data_tool(
 
     Returns:
         A dictionary carrying 'log_directories' for batch processing, 'total_sources', 'total_log_directories', and a
-        'breakdown' per axis. Carries a 'sources' list with 'rows', 'matched_rows', 'start_row', and 'next_start_row'
-        whenever a filter is named or the listing is requested. Returns an error dictionary if the root directory is
-        missing, is not a directory, cannot be searched, or a filter names a value the scan did not find.
+        'breakdown' per axis. Adds a 'sources' list alongside top-level 'rows', 'matched_rows', 'start_row', and
+        'next_start_row' paging fields whenever a filter is named or the listing is requested. A scan confirming no
+        source returns an empty 'sources' list and an empty 'breakdown' whatever the filters name. Returns an error
+        dictionary if the root directory is missing, is not a directory, cannot be searched, or a filter names a value
+        the scan did find no source for.
     """
     root_path = Path(root_directory)
 
@@ -470,7 +472,7 @@ def discover_microcontroller_data_tool(
             return rejection
         matched = [source for source in matched if source["name"] == name]
 
-    fields = (*_SOURCE_SEMI_FIELDS, *_SOURCE_DETAIL_FIELDS) if detailed else _SOURCE_SEMI_FIELDS
+    fields = (*_SOURCE_SEMI_DETAIL_FIELDS, *_SOURCE_DETAIL_FIELDS) if detailed else _SOURCE_SEMI_DETAIL_FIELDS
     window = resolve_page(
         total=len(matched), limit=resolve_detail_limit(limit=limit, detailed=detailed), start_row=start_row
     )
