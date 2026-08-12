@@ -110,7 +110,7 @@ class ArchiveFootprint:
     """Determines whether the figures were read from the archive rather than falling back to the job baseline."""
 
 
-def resolve_archive_footprint(archive_path: Path, *, read_message_count: bool = True) -> ArchiveFootprint:
+def resolve_archive_footprint(archive_path: Path) -> ArchiveFootprint:
     """Reads the properties of the target log archive that size the job reading it.
 
     Notes:
@@ -120,15 +120,12 @@ def resolve_archive_footprint(archive_path: Path, *, read_message_count: bool = 
 
     Args:
         archive_path: The path to the .npz log archive to read.
-        read_message_count: Determines whether to open the archive and count the messages it holds. Unsetting this
-            yields a footprint whose message count is zero, which sizes memory correctly and resolves cores to
-            a single worker.
 
     Returns:
         The footprint describing the archive.
     """
     try:
-        message_count = read_archive_message_count(archive_path=archive_path) if read_message_count else 0
+        message_count = read_archive_message_count(archive_path=archive_path)
         archive_bytes = archive_path.stat().st_size
     except Exception:
         return ArchiveFootprint(message_count=0, archive_bytes=0, modeled=False)

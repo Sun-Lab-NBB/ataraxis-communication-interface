@@ -75,27 +75,9 @@ def test_resolve_archive_footprint_models_real_archive(tmp_path: Path) -> None:
     assert footprint.archive_bytes > 0
 
 
-def test_resolve_archive_footprint_skips_message_count(tmp_path: Path) -> None:
-    """Verifies that resolve_archive_footprint reports a stat-only footprint when the message count is not requested."""
-    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
-    _write_archive(archive_path=archive_path)
-
-    footprint = resolve_archive_footprint(archive_path=archive_path, read_message_count=False)
-
-    # The archive is never opened, so the size is measured while the count stays at zero. The zero count still sizes
-    # memory correctly and resolves the job to a single core.
-    assert footprint.modeled
-    assert footprint.message_count == 0
-    assert footprint.archive_bytes == archive_path.stat().st_size
-    assert resolve_job_workers(footprint=footprint) == 1
-
-
-@pytest.mark.parametrize("read_message_count", [True, False])
-def test_resolve_archive_footprint_falls_back_for_missing_archive(tmp_path: Path, *, read_message_count: bool) -> None:
+def test_resolve_archive_footprint_falls_back_for_missing_archive(tmp_path: Path) -> None:
     """Verifies that resolve_archive_footprint returns an unmodeled footprint for an archive that does not exist."""
-    footprint = resolve_archive_footprint(
-        archive_path=tmp_path / f"1{LOG_ARCHIVE_SUFFIX}", read_message_count=read_message_count
-    )
+    footprint = resolve_archive_footprint(archive_path=tmp_path / f"1{LOG_ARCHIVE_SUFFIX}")
 
     # Neither the message count read nor the stat call can resolve a path that does not exist.
     assert footprint == _UNMODELED_FOOTPRINT
@@ -112,20 +94,6 @@ def test_resolve_archive_footprint_falls_back_for_corrupt_archive(tmp_path: Path
     footprint = resolve_archive_footprint(archive_path=archive_path)
 
     assert footprint == _UNMODELED_FOOTPRINT
-
-
-def test_resolve_archive_footprint_models_corrupt_archive_without_message_count(tmp_path: Path) -> None:
-    """Verifies that resolve_archive_footprint models a corrupt archive from its size when it does not open it."""
-    archive_path = tmp_path / f"2{LOG_ARCHIVE_SUFFIX}"
-    archive_path.write_text("This is not a valid numpy archive.")
-
-    footprint = resolve_archive_footprint(archive_path=archive_path, read_message_count=False)
-
-    # Skipping the message count skips the decode that would have rejected the file, so the sizing model sees a
-    # readable file of the reported size. The stage that opens the archive is the one that reports the corruption.
-    assert footprint.modeled
-    assert footprint.message_count == 0
-    assert footprint.archive_bytes == archive_path.stat().st_size
 
 
 @pytest.mark.parametrize("message_count", [0, 1, PARALLEL_EXTRACTION_THRESHOLD - 1])
