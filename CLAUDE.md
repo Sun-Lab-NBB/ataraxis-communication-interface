@@ -167,7 +167,7 @@ data from DataLogger archives.
 | `src/.../microcontroller/log_processing.py` | Log data extraction algorithm and the columnar structures it returns          |
 | `src/.../microcontroller/extracted_data.py` | Extracted message table schema, its writer, and the primitives that read it   |
 | `src/.../orchestration/`                    | Job identity, sizing, discovery, the single-job runner, and execution paths   |
-| `src/.../interfaces/`                       | CLI (`axci`), MCP server entry point, shared instance, and MCP tool groups    |
+| `src/.../interfaces/`                       | CLI (`axci`), MCP entry point, shared instance, response machinery, tools    |
 | `tests/`                                    | Test suite, grouped into per-package directories mirroring the source layout  |
 | `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
 | `docs/`                                     | Sphinx API documentation source                                               |
@@ -226,9 +226,12 @@ data from DataLogger archives.
 - **Columnar Data Extraction**: Log processing accumulates data in parallel lists via `_ColumnAccumulator`, converts
   to numpy arrays, then builds Polars DataFrames for efficient Feather output.
 - **Archive-Derived Job Sizing**: Every job is sized before dispatch from the archive it will read.
-  `resolve_archive_footprint()` reads the `.npz` zip directory and the file size, and `resolve_job_workers()` narrows
-  the declared `CONTROLLER_EXTRACTION_JOB_CORES` width to the workers the archive repays at one worker per
-  `PARALLEL_PROCESSING_THRESHOLD` messages. `estimate_job_memory_mb()` charges one spawned child baseline and one
+  `resolve_archive_footprint()` reads the `.npz` zip directory and the file size, and `resolve_job_workers()` emits one
+  of two shapes and nothing between them: a single core below `PARALLEL_EXTRACTION_THRESHOLD` (15000 data messages) and
+  the declared `CONTROLLER_EXTRACTION_JOB_CORES` width (4) at or above it. That threshold is distinct from the
+  `PARALLEL_PROCESSING_THRESHOLD` governing message batching inside the archive reader. The width follows from the
+  archive alone, so admission rather than the resolver holds a job to the cores its batch can spare.
+  `estimate_job_memory_mb()` charges one spawned child baseline and one
   archive reader per core, plus one more of each for the job body, and takes a sequential branch for a single-core job.
   The execution manager then admits jobs against both a core budget (`available_cores - 2`) and a memory budget (a share
   of the host's physical memory), admitting an oversized job alone rather than starving it. The declared width and every
@@ -297,4 +300,6 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return
   JSON-serializable `dict[str, Any]`, except the two discovery tools `list_microcontrollers_tool` and
   `check_mqtt_broker_tool`, which return a preformatted `str`. Execution uses `JobExecutionState`
-  (`orchestration/execution.py`) with archive-derived core and memory budgets.
+  (`orchestration/execution.py`) with host-derived core and memory budgets, against which archive-derived per-job sizes
+  are admitted. A read tool that lists items builds its response through `interfaces/responses.py`, which owns the
+  bare, filtered, and detailed staging and the `rows`, `matched_rows`, `start_row`, and `next_start_row` paging fields.

@@ -38,6 +38,7 @@ Orchestration
 .. Documents the package constants explicitly, for the reason given above the MicroController autodata directives.
 .. autodata:: ataraxis_communication_interface.orchestration.jobs.CONTROLLER_EXTRACTION_JOB_NAME
 .. autodata:: ataraxis_communication_interface.orchestration.allocation.CONTROLLER_EXTRACTION_JOB_CORES
+.. autodata:: ataraxis_communication_interface.orchestration.allocation.PARALLEL_EXTRACTION_THRESHOLD
 .. autodata:: ataraxis_communication_interface.orchestration.allocation.SPAWNED_CHILD_MEMORY_MB
 
 CLI

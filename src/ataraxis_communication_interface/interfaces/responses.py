@@ -26,7 +26,8 @@ class PageWindow:
     """The items the page carries, or None when the page runs to the end of the matches."""
     next_start_row: int | None
     """The ``start_row`` that retrieves the following page, or None when this page ends the matches. A caller walks a
-    matched set by following this until it is None, which is a stronger signal than comparing counts."""
+    matched set by following this until it is None, since a page that fills its own limit exactly may still end the
+    matches."""
 
     @property
     def stop(self) -> int | None:
@@ -38,12 +39,7 @@ def resolve_page(total: int, limit: int, start_row: int) -> PageWindow:
     """Resolves which slice of a matched item set a response carries.
 
     Notes:
-        The caller slices its own list from the returned window, so one paging rule serves every read tool whatever
-        collection it reports.
-
-        A limit at or below zero lifts the cap and returns every match from the requested start. That escape exists so
-        a caller reading under a tight filter can take the whole result in one response, and so the useful page size
-        can grow as an agent's context does. It is never the default.
+        A limit at or below zero lifts the cap and returns every match from the requested start.
 
     Args:
         total: The items matching the caller's filters, before any cap.
@@ -87,10 +83,6 @@ def page_fields(window: PageWindow, total: int, listed: int) -> dict[str, Any]:
 def resolve_detail_limit(limit: int | None, *, detailed: bool) -> int:
     """Resolves the page size to use when the caller named none, from the detail the response carries.
 
-    Notes:
-        The default follows the weight of one item rather than one figure for every response, because a detailed item
-        carries several times what a semi-detail one does.
-
     Args:
         limit: The limit the caller named, or None to take the default.
         detailed: Determines whether the response carries full per-item fields.
@@ -105,32 +97,8 @@ def resolve_detail_limit(limit: int | None, *, detailed: bool) -> int:
     return _DEFAULT_DETAILED_LIMIT
 
 
-def count_values(values: Iterable[Any]) -> dict[str, int]:
-    """Counts how often each value occurs, which is one axis of a breakdown.
-
-    Notes:
-        Values are keyed by their string form, so an enumeration member and its value count as one. A null counts
-        under ``none``, since an absent subject is itself a category a caller filters on.
-
-    Args:
-        values: The values to count.
-
-    Returns:
-        A dictionary mapping each value to its count, ordered by value.
-    """
-    counts: dict[str, int] = {}
-    for value in values:
-        key = "none" if value is None else str(value)
-        counts[key] = counts.get(key, 0) + 1
-    return dict(sorted(counts.items()))
-
-
 def item_breakdown(items: Sequence[dict[str, Any]], axes: tuple[str, ...]) -> dict[str, dict[str, int]]:
     """Counts how many items carry each value of every filterable axis.
-
-    Notes:
-        This is what a bare call reports in place of a listing. It names the values a caller can filter on and how much
-        each would match, so an agent orients itself on one response rather than paging a whole scan.
 
     Args:
         items: The whole matched item set.
@@ -140,13 +108,13 @@ def item_breakdown(items: Sequence[dict[str, Any]], axes: tuple[str, ...]) -> di
         A dictionary mapping each present axis to its value counts.
     """
     return {
-        axis: count_values(values=[item.get(axis) for item in items])
+        axis: _count_values(values=[item.get(axis) for item in items])
         for axis in axes
         if any(axis in item for item in items)
     }
 
 
-def project_item(item: dict[str, Any], fields: Sequence[str], *, drop_empty: bool = True) -> dict[str, Any]:
+def project_item(item: dict[str, Any], fields: Sequence[str]) -> dict[str, Any]:
     """Narrows one item to the named fields, leaving out the ones carrying nothing.
 
     Notes:
@@ -156,8 +124,6 @@ def project_item(item: dict[str, Any], fields: Sequence[str], *, drop_empty: boo
     Args:
         item: The item to narrow.
         fields: The fields to keep, in the order they should appear.
-        drop_empty: Determines whether to leave out the fields whose value is None, an empty string, or an empty list
-            or dictionary.
 
     Returns:
         The narrowed item.
@@ -167,7 +133,7 @@ def project_item(item: dict[str, Any], fields: Sequence[str], *, drop_empty: boo
         if field_name not in item:
             continue
         value = item[field_name]
-        if drop_empty and (value is None or (isinstance(value, list | dict | str) and len(value) == 0)):
+        if value is None or (isinstance(value, list | dict | str) and not value):
             continue
         narrowed[field_name] = value
     return narrowed
@@ -194,3 +160,23 @@ def reject_unknown(items: Sequence[dict[str, Any]], key: str, values: list[str],
     if unknown:
         return {"error": f"No {subject} has '{key}' in {unknown}. Available: {available}."}
     return None
+
+
+def _count_values(values: Iterable[Any]) -> dict[str, int]:
+    """Counts how often each value occurs.
+
+    Notes:
+        Values are keyed by their string form, so an enumeration member and its value count as one. A null counts
+        under ``none``, since an absent subject is itself a category a caller filters on.
+
+    Args:
+        values: The values to count.
+
+    Returns:
+        A dictionary mapping each value to its count, ordered by value.
+    """
+    counts: dict[str, int] = {}
+    for value in values:
+        key = "none" if value is None else str(value)
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))

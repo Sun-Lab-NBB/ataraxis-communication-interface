@@ -16,8 +16,13 @@ from .communication import (
 from .orchestration import (
     CONTROLLER_EXTRACTION_JOB_NAME,
     CONTROLLER_EXTRACTION_JOB_CORES,
+    PARALLEL_EXTRACTION_THRESHOLD,
     JobSource,
     JobUniverse,
+    ArchiveFootprint,
+    resolve_job_workers,
+    estimate_job_memory_mb,
+    resolve_archive_footprint,
     execute_job,
     resolve_jobs,
     find_module_paths,
@@ -56,6 +61,11 @@ from .microcontroller import (
 
 __all__ = [
     "CONTROLLER_EXTRACTION_JOB_CORES",
+    "PARALLEL_EXTRACTION_THRESHOLD",
+    "ArchiveFootprint",
+    "resolve_job_workers",
+    "estimate_job_memory_mb",
+    "resolve_archive_footprint",
     "CONTROLLER_EXTRACTION_JOB_NAME",
     "EXTRACTION_CONFIGURATION_FILENAME",
     "MAXIMUM_CUSTOM_STATUS_CODE",

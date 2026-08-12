@@ -89,8 +89,8 @@ _MEMORY_ROUNDING_QUANTUM_MB: int = 256
 """The multiple every reportable estimate is rounded up to.
 
 Notes:
-    The quantum is a quarter of the memory the smallest job shape holds, so rounding costs a sequential job a fraction
-    of its own footprint rather than several times it. A coarser quantum charges the two shapes the stage emits at
+    The quantum is roughly the memory one spawned child holds, so the smallest job shape is charged two quanta rather
+    than the four a whole-gigabyte quantum charged it. A coarser quantum charges the two shapes the stage emits at
     nearly the same figure, which would let a batch of sequential jobs reserve the memory a batch of pooled ones needs.
 """
 
@@ -140,14 +140,9 @@ def resolve_job_workers(footprint: ArchiveFootprint) -> int:
     """Resolves the cores one extraction job receives, from the archive it reads.
 
     Notes:
-        The stage emits two job shapes and nothing between them. An archive below the parallel extraction threshold
-        is read sequentially on one core, and every archive above it is read by a pool at the declared allocation.
-        Intermediate widths are not offered, because the speedup between one core and the declared allocation is
-        smooth enough that a narrower pool costs a job time without returning a core the batch can place elsewhere.
-
-        The width follows from the archive alone, so the same archive is sized identically whatever the host is doing
-        and whatever budget the batch holds. Admission, rather than this resolver, holds a job to the cores its batch
-        can spare.
+        The stage offers no width between the two it emits, because the speedup between one core and the declared
+        allocation is smooth enough that a narrower pool costs a job time without returning a core the batch can
+        place elsewhere.
 
     Args:
         footprint: The footprint of the archive this job reads.
@@ -167,8 +162,8 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
     Notes:
         The two job shapes the stage emits hold memory in two different ways. A sequential job opens no pool and holds
         the body's reader alone. A pooled job splits its archive across the extraction pool, and every child of that
-        pool opens the archive itself while the job body holds a reader of its own for the whole job, so the archive's
-        message directory is held once per core and once more for the body.
+        pool opens the archive itself while the job body holds a reader of its own for the whole job. The archive's
+        message directory is therefore held once per core and once more for the body.
 
         An unmodeled footprint falls back to the spawned child baseline, which is a floor to plan around rather than
         a measurement.
@@ -179,7 +174,8 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
             than one.
 
     Returns:
-        The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to a whole gigabyte.
+        The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to the reporting
+        quantum.
     """
     if not footprint.modeled:
         return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
@@ -284,7 +280,7 @@ def _bytes_to_megabytes(byte_count: float) -> int:
 
 
 def _apply_tolerance(memory_mb: int) -> int:
-    """Applies the estimate tolerance to a modeled memory figure and rounds it up to a whole gigabyte.
+    """Applies the estimate tolerance to a modeled memory figure and rounds it up to the reporting quantum.
 
     Notes:
         Rounding to a fixed quantum here keeps the figure an admission decision weighs identical to the figure a

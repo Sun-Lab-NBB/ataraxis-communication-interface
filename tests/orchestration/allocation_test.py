@@ -361,7 +361,7 @@ def test_resolve_pool_size_binds_on_affordable_bodies() -> None:
 
     pool_size = resolve_pool_size(job_count=100, core_budget=64, memory_budget_mb=memory_budget_mb)
 
-    # Half of a one gigabyte budget holds two 200 MB bodies, leaving the remainder for the work those bodies perform.
+    # Half of a one gigabyte budget holds two 220 MB bodies, leaving the remainder for the work those bodies perform.
     assert pool_size == affordable_bodies
     assert pool_size == 2
 
