@@ -20,6 +20,14 @@ from ataraxis_data_structures import (
 )
 from ataraxis_transport_layer_pc import list_available_ports
 
+from .responses import (
+    page_fields,
+    project_item,
+    resolve_page,
+    item_breakdown,
+    reject_unknown,
+    resolve_detail_limit,
+)
 from .mcp_instance import mcp
 from ..communication import MQTTCommunication
 from ..microcontroller import (
@@ -39,6 +47,16 @@ _UNIDENTIFIED_CONTROLLER_ID: int = -1
 _WORKER_THREAD_CEILING: int = 1
 """The number of threads each port evaluation worker pins its numeric backends to. A worker spends its runtime waiting
 on one serial port, so the backends it imports repay no pool wider than a single thread."""
+
+_SOURCE_AXES: tuple[str, ...] = ("source_id", "name")
+"""The source keys a caller filters the recording listing by, which a bare call reports the counts of."""
+
+_SOURCE_SEMI_FIELDS: tuple[str, ...] = ("recording_root", "source_id", "name", "log_directory")
+"""The fields every listed source carries."""
+
+_SOURCE_DETAIL_FIELDS: tuple[str, ...] = ("log_archive", "modules")
+"""The fields a listed source carries once detail is requested. One entry per registered module makes the module list
+the term that grows a whole-project listing fastest, so it is withheld until a caller asks for it."""
 
 
 @mcp.tool()
@@ -319,21 +337,44 @@ def write_microcontroller_manifest_tool(
 
 
 @mcp.tool()
-def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
-    """Discovers confirmed microcontroller recordings under a root directory.
+def discover_microcontroller_data_tool(
+    root_directory: str,
+    source_ids: list[str] | None = None,
+    name: str | None = None,
+    limit: int | None = None,
+    start_row: int = 0,
+    *,
+    include_items: bool = False,
+    detailed: bool = False,
+) -> dict[str, Any]:
+    """Discovers confirmed microcontroller recordings under a root directory, in three widening stages.
 
     Recursively searches for microcontroller_manifest.yaml files to identify controller sources. Only sources whose
-    log archives (``{source_id}_log.npz``) exist on disk are included. For each confirmed source, returns the
-    controller metadata and associated hardware modules from the manifest.
+    log archives (``{source_id}_log.npz``) exist on disk are included.
+
+    A bare call reports the counts and the flat log directory list a batch is prepared from, alongside a ``breakdown``
+    naming every controller id and name the scan found. Naming a filter adds a page of sources carrying their
+    identity and their directories. Opting into detail adds each source's archive path and its module list, which is
+    what makes a whole-project listing large.
+
+    The counts, the breakdown, and the log directory list span every confirmed source regardless of the filters, so
+    narrowing what is listed never distorts what is reported.
 
     Args:
         root_directory: The absolute path to the root directory to search. Searched recursively.
+        source_ids: Restricts the listing to these controller ids.
+        name: Restricts the listing to one controller name.
+        limit: The sources to list. Defaults to 200, or to 50 when detail is requested. A value at or below zero lists
+            every match, which is how a caller reading under a tight filter takes the whole result at once.
+        start_row: The match index to begin the listing at. Follow ``next_start_row`` to walk a long result.
+        include_items: Determines whether to list sources when no filter is named.
+        detailed: Determines whether the listed sources report their archive path and module list.
 
     Returns:
-        A dictionary containing a 'sources' list where each entry has 'recording_root', 'source_id', 'name',
-        'log_archive', 'log_directory', and 'modules' keys, a flat 'log_directories' list for batch processing,
-        and aggregate counts. Returns an error dictionary if the root directory is missing, is not a directory, or
-        cannot be searched.
+        A dictionary carrying 'log_directories' for batch processing, 'total_sources', 'total_log_directories', and a
+        'breakdown' per axis. Carries a 'sources' list with 'rows', 'matched_rows', 'start_row', and 'next_start_row'
+        whenever a filter is named or the listing is requested. Returns an error dictionary if the root directory is
+        missing, is not a directory, cannot be searched, or a filter names a value the scan did not find.
     """
     root_path = Path(root_directory)
 
@@ -388,30 +429,55 @@ def discover_microcontroller_data_tool(root_directory: str) -> dict[str, Any]:
             "log_directories": [],
             "total_sources": 0,
             "total_log_directories": 0,
+            "breakdown": {},
         }
 
     log_directory_paths = sorted(log_directories_with_archives)
     log_directory_to_root = _resolve_log_directory_roots(log_directory_paths=log_directory_paths)
 
     sources_output: list[dict[str, Any]] = []
-    for log_directory, source_id, name, archive_path, module_entries in confirmed_sources:
+    for log_directory, source_id, controller_name, archive_path, module_entries in confirmed_sources:
         sources_output.append(
             {
                 "recording_root": str(log_directory_to_root[log_directory]),
                 "source_id": str(source_id),
-                "name": name,
+                "name": controller_name,
                 "log_archive": str(archive_path),
                 "log_directory": str(log_directory),
                 "modules": module_entries,
             }
         )
 
-    return {
-        "sources": sources_output,
+    response: dict[str, Any] = {
         "log_directories": sorted(str(log_directory) for log_directory in log_directory_paths),
         "total_sources": len(sources_output),
         "total_log_directories": len(log_directory_paths),
+        "breakdown": item_breakdown(items=sources_output, axes=_SOURCE_AXES),
     }
+
+    if source_ids is None and name is None and not include_items:
+        return response
+
+    matched = sources_output
+    if source_ids is not None:
+        rejection = reject_unknown(items=sources_output, key="source_id", values=source_ids, subject="source")
+        if rejection is not None:
+            return rejection
+        matched = [source for source in matched if source["source_id"] in source_ids]
+    if name is not None:
+        rejection = reject_unknown(items=sources_output, key="name", values=[name], subject="source")
+        if rejection is not None:
+            return rejection
+        matched = [source for source in matched if source["name"] == name]
+
+    fields = (*_SOURCE_SEMI_FIELDS, *_SOURCE_DETAIL_FIELDS) if detailed else _SOURCE_SEMI_FIELDS
+    window = resolve_page(
+        total=len(matched), limit=resolve_detail_limit(limit=limit, detailed=detailed), start_row=start_row
+    )
+    page = matched[window.start : window.stop]
+    response["sources"] = [project_item(item=source, fields=fields) for source in page]
+    response.update(page_fields(window=window, total=len(matched), listed=len(page)))
+    return response
 
 
 def _resolve_log_directory_roots(log_directory_paths: list[Path]) -> dict[Path, Path]:

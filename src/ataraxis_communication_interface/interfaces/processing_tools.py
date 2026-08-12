@@ -9,6 +9,14 @@ from dataclasses import replace
 from ataraxis_time import TimeUnits, TimestampFormats, TimestampPrecisions, convert_time, get_timestamp
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker, discover_marker_files
 
+from .responses import (
+    page_fields,
+    project_item,
+    resolve_page,
+    item_breakdown,
+    reject_unknown,
+    resolve_detail_limit,
+)
 from .mcp_instance import mcp, read_tracker_status
 from ..orchestration import (
     JobSizing,
@@ -28,6 +36,16 @@ from ..orchestration import (
     resolve_memory_budget_mb,
 )
 from ..microcontroller import ExtractionConfig
+
+_OVERVIEW_AXES: tuple[str, ...] = ("status",)
+"""The directory keys a caller filters the batch overview by, which a bare call reports the counts of."""
+
+_OVERVIEW_SEMI_FIELDS: tuple[str, ...] = ("log_directory", "status", "summary")
+"""The fields every listed log directory carries."""
+
+_OVERVIEW_DETAIL_FIELDS: tuple[str, ...] = ("tracker_path", "jobs", "error")
+"""The fields a listed log directory carries once detail is requested. One entry per tracked job makes the job list
+the term that grows a whole-project overview fastest, so it is withheld until a caller asks for it."""
 
 
 @mcp.tool()
@@ -115,7 +133,7 @@ def prepare_log_processing_batch_tool(
                 source_ids=source_ids or None,
                 strict_sources=False,
             )
-            sized_jobs = [size_job(job=job, core_ceiling=job_set.core_ceiling) for job in job_set.jobs]
+            sized_jobs = [size_job(job=job) for job in job_set.jobs]
             sized_jobs.sort(key=lambda entry: entry[1].memory_mb, reverse=True)
         except Exception as error:
             failed_directories.append({"log_directory": log_directory_string, "error": str(error)})
@@ -185,10 +203,10 @@ def execute_log_processing_jobs_tool(
     Takes job descriptors from the manifest produced by prepare_log_processing_batch_tool and starts a background
     execution manager. Each job descriptor must include its own 'config_path' key pointing to the ExtractionConfig
     YAML file for that job. Each job's cores and memory are resolved from the archive it reads before dispatch, so a
-    long recording and a short one are admitted at their own sizes. A job runs at the declared stage width narrowed
-    to the workers its own archive repays, and an archive below the parallel processing threshold takes a single
-    core. The manager admits a job once the running set has room for both its cores and its memory, and it admits an
-    oversized job alone rather than leaving it queued forever.
+    long recording and a short one are admitted at their own sizes. An archive below the parallel extraction threshold
+    takes a single core and every archive above it takes the declared stage width, collapsed onto the core budget when
+    that budget is narrower. The manager admits a job once the running set has room for both its cores and its memory,
+    and it admits an oversized job alone rather than leaving it queued forever.
 
     Important:
         Only one execution session can be active at a time. Use cancel_log_processing_tool to cancel an active
@@ -252,7 +270,7 @@ def execute_log_processing_jobs_tool(
             invalid_jobs.append({**job_dict, "error": "Missing or unreadable sizing keys from the prepared manifest."})
             continue
 
-        core_weight = resolve_job_workers(footprint=footprint, ceiling=resolved_cores)
+        core_weight = min(resolve_job_workers(footprint=footprint), resolved_cores)
         descriptor = replace(descriptor, core_weight=core_weight)
         sizing = JobSizing(
             memory_mb=estimate_job_memory_mb(footprint=footprint, cores=core_weight),
@@ -611,18 +629,41 @@ def reset_log_processing_jobs_tool(
 
 
 @mcp.tool()
-def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
-    """Discovers and summarizes processing status for all log directories under a root directory.
+def get_batch_status_overview_tool(
+    root_directory: str,
+    statuses: list[str] | None = None,
+    limit: int | None = None,
+    start_row: int = 0,
+    *,
+    include_items: bool = False,
+    detailed: bool = False,
+) -> dict[str, Any]:
+    """Summarizes processing status for all log directories under a root directory, in three widening stages.
 
     Recursively searches for microcontroller_processing_tracker.yaml files and aggregates their status. Each tracker
     corresponds to a single DataLogger output directory.
 
+    A bare call reports the aggregate job counts alongside a ``breakdown`` naming how many directories carry each
+    status, which answers what needs attention without listing anything. Naming a status adds a page of directories
+    carrying their own counts. Opting into detail adds each directory's tracker path and its per-job entries.
+
+    The aggregate counts and the breakdown span every discovered directory regardless of the filters, so narrowing
+    what is listed never distorts what is reported.
+
     Args:
         root_directory: The absolute path to the root directory to search for tracker files.
+        statuses: Restricts the listing to directories carrying these status labels.
+        limit: The directories to list. Defaults to 200, or to 50 when detail is requested. A value at or below zero
+            lists every match, which is how a caller reading under a tight filter takes the whole result at once.
+        start_row: The match index to begin the listing at. Follow ``next_start_row`` to walk a long result.
+        include_items: Determines whether to list directories when no status is named.
+        detailed: Determines whether the listed directories report their tracker path and per-job entries.
 
     Returns:
-        A dictionary containing per-log-directory status summaries and aggregate counts. Returns an error dictionary
-        if the root directory is missing, is not a directory, or cannot be searched.
+        A dictionary carrying 'total_log_directories', an aggregate 'summary' of job counts, and a 'breakdown' of
+        directories per status. Carries a 'log_directories' list with 'rows', 'matched_rows', 'start_row', and
+        'next_start_row' whenever a status is named or the listing is requested. Returns an error dictionary if the
+        root directory is missing, is not a directory, cannot be searched, or a status names a value no tracker holds.
     """
     root_path = Path(root_directory)
 
@@ -675,8 +716,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
                 }
             )
 
-    return {
-        "log_directories": log_directory_statuses,
+    response: dict[str, Any] = {
         "total_log_directories": len(log_directory_statuses),
         "summary": {
             "succeeded": aggregate_succeeded,
@@ -684,4 +724,24 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, Any]:
             "running": aggregate_running,
             "scheduled": aggregate_scheduled,
         },
+        "breakdown": item_breakdown(items=log_directory_statuses, axes=_OVERVIEW_AXES),
     }
+
+    if statuses is None and not include_items:
+        return response
+
+    matched = log_directory_statuses
+    if statuses is not None:
+        rejection = reject_unknown(items=log_directory_statuses, key="status", values=statuses, subject="log directory")
+        if rejection is not None:
+            return rejection
+        matched = [entry for entry in matched if entry["status"] in statuses]
+
+    fields = (*_OVERVIEW_SEMI_FIELDS, *_OVERVIEW_DETAIL_FIELDS) if detailed else _OVERVIEW_SEMI_FIELDS
+    window = resolve_page(
+        total=len(matched), limit=resolve_detail_limit(limit=limit, detailed=detailed), start_row=start_row
+    )
+    page = matched[window.start : window.stop]
+    response["log_directories"] = [project_item(item=entry, fields=fields) for entry in page]
+    response.update(page_fields(window=window, total=len(matched), listed=len(page)))
+    return response

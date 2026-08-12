@@ -9,6 +9,7 @@ from ataraxis_data_structures import ProcessingTracker
 
 from .worker import execute_job
 from .discovery import prepare_jobs
+from .allocation import resolve_job_workers, resolve_archive_footprint
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,9 +64,9 @@ def run_log_processing_pipeline(
         source_ids: The controller IDs to process in local mode. Each ID must be declared in the extraction
             configuration and resolve to exactly one archive. If not provided, processes every configured controller.
             This argument is ignored in external mode.
-        workers: The ceiling on the workers any single job receives. Setting this to a value less than 1 resolves the
-            ceiling from the host's core count. Setting this to 1 conducts every job sequentially. The resolved
-            ceiling is capped at the declared per-job allocation of 8 cores.
+        workers: The workers every job receives. A positive value is used verbatim. A non-positive value resolves the
+            width from each archive, which is one worker below the parallel extraction threshold and the declared
+            per-job allocation above it.
         display_progress: Determines whether to display progress bars during parallel batch processing. A job that
             runs sequentially displays nothing.
 
@@ -87,7 +88,6 @@ def run_log_processing_pipeline(
         config_path=config,
         source_ids=source_ids,
         job_id=job_id,
-        core_ceiling=workers,
     )
 
     # A caller reaching this function asked for work to be carried out, so resolving nothing is a failure here even
@@ -110,12 +110,18 @@ def run_log_processing_pipeline(
     tracker = ProcessingTracker(file_path=job_set.tracker_path)
 
     for job in job_set.jobs:
+        # An unset width is the one choice the caller left open, so it is resolved from each archive in turn.
+        job_workers = (
+            workers
+            if workers > 0
+            else resolve_job_workers(footprint=resolve_archive_footprint(archive_path=job.archive_path))
+        )
         execute_job(
             log_path=job.archive_path,
             output_directory=job.output_directory,
             source_id=job.source_id,
             job_id=job.job_id,
-            workers=job.core_weight,
+            workers=job_workers,
             tracker=tracker,
             config_path=job.config_path,
             display_progress=display_progress,
