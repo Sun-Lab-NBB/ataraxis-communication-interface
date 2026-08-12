@@ -60,23 +60,31 @@ Notes:
     them.
 """
 
-SPAWNED_CHILD_MEMORY_MB: int = 220
+SPAWNED_CHILD_MEMORY_MB: int = 152
 """The resident memory one spawned child holds before it touches any data, covering the interpreter and the package's
-import graph. The term is charged once for a job's body, and once more for each core a job that opens an extraction
-pool holds."""
+import graph. The term is charged for each core a job that opens an extraction pool holds, and it is what one warmed
+but idle slot of a batch's shared pool reserves."""
+
+_JOB_BODY_MEMORY_MB: int = 180
+"""The resident memory one job body holds beyond the archive it reads, covering the interpreter, the package's import
+graph, and the fixed part of the columnar output it assembles.
+
+Notes:
+    The term stands above the spawned child baseline because a body writes the extracted feather files, which loads a
+    serialization backend a pool child that only decodes the messages it is handed never reaches.
+"""
 
 _POOL_MEMORY_RESERVATION_DIVISOR: int = 2
 """The share of the memory budget the shared pool's warmed job bodies may claim, expressed as a divisor. The
 remainder covers the work those bodies perform."""
 
-_ARCHIVE_DIRECTORY_RATIO: float = 2.5
+_ARCHIVE_DIRECTORY_RATIO: float = 2.7
 """The resident memory a log archive reader holds per byte of archive on disk. Reading an archive builds one
 directory entry per logged message, which dominates the decoded payload itself.
 
 Notes:
-    The ratio a reader holds rises with the width of the pool the job opens, since a wider pool splits the same archive
-    into more slices while every child still holds the whole message directory. The value covers the widest allocation
-    a job receives rather than the narrowest, so a sequential job is charged the same generous rate as a pooled one.
+    Every reader holds the directory of the whole archive whatever share of it that reader decodes, so the term is
+    charged once per reader and does not vary with the width of the pool a job opens.
 """
 
 _MEMORY_BUDGET_FRACTION: float = 0.85
@@ -89,9 +97,10 @@ _MEMORY_ROUNDING_QUANTUM_MB: int = 256
 """The multiple every reportable estimate is rounded up to.
 
 Notes:
-    The quantum is roughly the memory one spawned child holds, so the smallest job shape is charged two quanta rather
-    than the four a whole-gigabyte quantum charged it. A coarser quantum charges the two shapes the stage emits at
-    nearly the same figure, which would let a batch of sequential jobs reserve the memory a batch of pooled ones needs.
+    The quantum covers what one job body holds once the tolerance is applied, so the smallest job shape is charged one
+    quantum rather than the four a whole-gigabyte quantum charged it. A coarser quantum charges the two shapes the
+    stage emits at nearly the same figure, which would let a batch of sequential jobs reserve the memory a batch of
+    pooled ones needs.
 """
 
 _BYTES_PER_MEGABYTE: int = 1024 * 1024
@@ -162,8 +171,11 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
         pool opens the archive itself while the job body holds a reader of its own for the whole job. The archive's
         message directory is therefore held once per core and once more for the body.
 
-        An unmodeled footprint falls back to the spawned child baseline, which is a floor to plan around rather than
-        a measurement.
+        The body and a pool child carry separate baselines, because a body assembles and writes the extracted output
+        while a child returns the messages it decoded and holds nothing else.
+
+        An unmodeled footprint falls back to the job body baseline, which is a floor to plan around rather than a
+        measurement.
 
     Args:
         footprint: The footprint of the archive this job reads.
@@ -175,15 +187,14 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
         quantum.
     """
     if not footprint.modeled:
-        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
+        return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB)
 
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
 
     if cores == 1:
-        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
+        return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader)
 
-    readers = cores + 1
-    return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
+    return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader + cores * (SPAWNED_CHILD_MEMORY_MB + per_reader))
 
 
 def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:

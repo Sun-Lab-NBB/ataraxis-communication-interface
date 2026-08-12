@@ -17,6 +17,7 @@ from ataraxis_communication_interface.communication import SerialPrototypes
 from ataraxis_communication_interface.orchestration.allocation import (
     _RESERVED_CORES,
     _BYTES_PER_MEGABYTE,
+    _JOB_BODY_MEMORY_MB,
     SPAWNED_CHILD_MEMORY_MB,
     _MEMORY_BUDGET_FRACTION,
     _ARCHIVE_DIRECTORY_RATIO,
@@ -44,7 +45,7 @@ _MEGABYTE: int = 1024 * 1024
 _UNMODELED_FOOTPRINT: ArchiveFootprint = ArchiveFootprint(message_count=0, archive_bytes=0, modeled=False)
 """Stores the footprint resolve_archive_footprint returns for an archive it cannot read."""
 
-_UNMODELED_MEMORY_MB: int = _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
+_UNMODELED_MEMORY_MB: int = _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB)
 """Stores the memory floor every consumer plans around when an archive yields no footprint."""
 
 
@@ -120,27 +121,27 @@ def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
 
 
 def test_estimate_job_memory_mb_unmodeled_footprint() -> None:
-    """Verifies that estimate_job_memory_mb falls back to the spawned child baseline for an unmodeled footprint."""
+    """Verifies that estimate_job_memory_mb falls back to the job body baseline for an unmodeled footprint."""
     # The core count does not enter the estimate, since an unmodeled footprint carries no archive to split.
     for cores in (1, 4, CONTROLLER_EXTRACTION_JOB_CORES):
         estimate = estimate_job_memory_mb(footprint=_UNMODELED_FOOTPRINT, cores=cores)
 
         assert estimate == _UNMODELED_MEMORY_MB
-        assert estimate == 512
+        assert estimate == 256
         assert estimate % _MEMORY_ROUNDING_QUANTUM_MB == 0
 
 
 def test_estimate_job_memory_mb_charges_one_body_and_one_reader_serially() -> None:
-    """Verifies that estimate_job_memory_mb charges a single-core job for one spawned child and one reader."""
+    """Verifies that estimate_job_memory_mb charges a single-core job for one job body and one reader."""
     footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
 
     estimate = estimate_job_memory_mb(footprint=footprint, cores=1)
 
-    # A 64 MB archive builds a 161 MB reader, which the sequential body holds alongside its own 220 MB baseline. The
-    # 381 MB sum carries the tolerance to 458 MB and rounds up to the 512 MB the batch is charged.
+    # A 64 MB archive builds a 173 MB reader, which the sequential body holds alongside its own 180 MB baseline. The
+    # 353 MB sum carries the tolerance to 424 MB and rounds up to the 512 MB the batch is charged.
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
-    assert per_reader == 161
-    assert estimate == _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
+    assert per_reader == 173
+    assert estimate == _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader)
     assert estimate == _expected_memory_mb(archive_bytes=footprint.archive_bytes, cores=1)
     assert estimate == 512
 
@@ -152,13 +153,14 @@ def test_estimate_job_memory_mb_charges_every_reader_in_parallel() -> None:
 
     estimate = estimate_job_memory_mb(footprint=footprint, cores=cores)
 
-    # Four pool children plus the job body hold five spawned child baselines and five readers, which is 1905 MB before
-    # the tolerance carries it to 2287 MB and the rounding lifts it to 2304 MB.
+    # The job body holds its own baseline and reader, and each of the four pool children holds a spawned child
+    # baseline and a reader of its own, which is 1653 MB before the tolerance and the rounding lift it to 2048 MB.
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
-    readers = cores + 1
-    assert estimate == _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
+    assert estimate == _apply_tolerance(
+        memory_mb=_JOB_BODY_MEMORY_MB + per_reader + cores * (SPAWNED_CHILD_MEMORY_MB + per_reader)
+    )
     assert estimate == _expected_memory_mb(archive_bytes=footprint.archive_bytes, cores=cores)
-    assert estimate == 2304
+    assert estimate == 2048
 
 
 def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path() -> None:
@@ -171,7 +173,7 @@ def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path() -> None:
     # Taking a second core opens a pool, so the body's reader is joined by one reader and one baseline per child.
     assert parallel_estimate > serial_estimate
     assert serial_estimate == 512
-    assert parallel_estimate == 1536
+    assert parallel_estimate == 1280
 
 
 def test_estimate_job_memory_mb_scales_with_cores() -> None:
@@ -186,7 +188,7 @@ def test_estimate_job_memory_mb_scales_with_cores() -> None:
     assert estimates == [
         _expected_memory_mb(archive_bytes=footprint.archive_bytes, cores=cores) for cores in core_counts
     ]
-    assert estimates == [2048, 5632, 9216]
+    assert estimates == [2048, 5632, 9472]
     assert all(estimate % _MEMORY_ROUNDING_QUANTUM_MB == 0 for estimate in estimates)
 
 
@@ -202,7 +204,7 @@ def test_estimate_job_memory_mb_scales_with_archive_bytes() -> None:
     assert estimates == sorted(estimates)
     assert estimates[0] < estimates[-1]
     assert estimates == [_expected_memory_mb(archive_bytes=size, cores=4) for size in archive_sizes]
-    assert estimates == [1536, 2304, 9216]
+    assert estimates == [1024, 2048, 9472]
     assert all(estimate % _MEMORY_ROUNDING_QUANTUM_MB == 0 for estimate in estimates)
 
 
@@ -274,9 +276,9 @@ def test_resolve_pool_size_binds_on_affordable_bodies() -> None:
 
     pool_size = resolve_pool_size(job_count=100, core_budget=64, memory_budget_mb=memory_budget_mb)
 
-    # Half of a one gigabyte budget holds two 220 MB bodies, leaving the remainder for the work those bodies perform.
+    # Half of a one gigabyte budget holds three 152 MB bodies, leaving the remainder for the work those bodies perform.
     assert pool_size == affordable_bodies
-    assert pool_size == 2
+    assert pool_size == 3
 
 
 def test_resolve_pool_size_scales_with_memory_budget() -> None:
@@ -288,7 +290,7 @@ def test_resolve_pool_size_scales_with_memory_budget() -> None:
 
     assert pool_sizes == sorted(pool_sizes)
     assert pool_sizes[0] < pool_sizes[-1]
-    assert pool_sizes == [2, 9, 37]
+    assert pool_sizes == [3, 13, 53]
 
 
 @pytest.mark.parametrize(
@@ -336,7 +338,7 @@ def test_bytes_to_megabytes_non_positive_byte_count(byte_count: float) -> None:
     [
         (0, 256),
         (1, 256),
-        (SPAWNED_CHILD_MEMORY_MB, 512),
+        (SPAWNED_CHILD_MEMORY_MB, 256),
         (1024, 1280),
         (2048, 2560),
     ],
@@ -361,11 +363,10 @@ def _expected_memory_mb(archive_bytes: int, cores: int) -> int:
 
     # A single-core job takes the sequential path, which opens no extraction pool and holds the body's reader alone.
     if cores == 1:
-        return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB + per_reader)
+        return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader)
 
-    # Every pool child holds a spawned child's baseline and a reader of its own, and the job body holds one of each.
-    readers = cores + 1
-    return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
+    # Every pool child holds a spawned child's baseline and a reader of its own, alongside the body and its reader.
+    return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader + cores * (SPAWNED_CHILD_MEMORY_MB + per_reader))
 
 
 def _write_archive(archive_path: Path, source_id: int = 1) -> None:

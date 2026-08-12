@@ -26,7 +26,7 @@ from ataraxis_communication_interface.orchestration.discovery import (
     resolve_jobs,
 )
 from ataraxis_communication_interface.orchestration.allocation import (
-    SPAWNED_CHILD_MEMORY_MB,
+    _JOB_BODY_MEMORY_MB,
     PARALLEL_EXTRACTION_THRESHOLD,
     CONTROLLER_EXTRACTION_JOB_CORES,
     _apply_tolerance,
@@ -786,7 +786,7 @@ def test_size_job_applies_the_memory_model(tmp_path: Path) -> None:
 
 
 def test_size_job_unreadable_archive(tmp_path: Path) -> None:
-    """Verifies that size_job falls back to the spawned child baseline for an archive it cannot read."""
+    """Verifies that size_job falls back to the job body baseline for an archive it cannot read."""
     log_directory = tmp_path / "logs"
     _write_manifest_entry(log_directory=log_directory, source_id=1)
     (log_directory / f"1{LOG_ARCHIVE_SUFFIX}").write_text("This is not a valid numpy archive.")
@@ -802,7 +802,7 @@ def test_size_job_unreadable_archive(tmp_path: Path) -> None:
     assert not sizing.modeled
     assert sizing.message_count == 0
     assert sizing.archive_bytes == 0
-    assert sizing.memory_mb == _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB)
+    assert sizing.memory_mb == _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB)
     assert sized_job.core_weight == 1
 
 

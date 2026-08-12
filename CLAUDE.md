@@ -231,8 +231,9 @@ data from DataLogger archives.
   the declared `CONTROLLER_EXTRACTION_JOB_CORES` width (4) at or above it. That threshold is distinct from the
   `PARALLEL_PROCESSING_THRESHOLD` governing message batching inside the archive reader. The width follows from the
   archive alone, so admission rather than the resolver holds a job to the cores its batch can spare.
-  `estimate_job_memory_mb()` charges one spawned child baseline and one
-  archive reader per core, plus one more of each for the job body, and takes a sequential branch for a single-core job.
+  `estimate_job_memory_mb()` charges one spawned child baseline and one archive reader per core, plus the job body's
+  own baseline and reader, and takes a sequential branch for a single-core job. The body and a pool child carry
+  separate baselines, because a body assembles and writes the extracted output while a child returns what it decoded.
   The execution manager then admits jobs against both a core budget (`available_cores - 2`) and a memory budget (a share
   of the host's physical memory), admitting an oversized job alone rather than starving it. The declared width and every
   memory term carry the values the platform's own estimators were calibrated to against measured peaks, so this stage's
