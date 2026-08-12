@@ -112,7 +112,7 @@ def test_resolve_job_workers_below_threshold(message_count: int) -> None:
     [PARALLEL_EXTRACTION_THRESHOLD, PARALLEL_EXTRACTION_THRESHOLD + 1, PARALLEL_EXTRACTION_THRESHOLD * 100],
 )
 def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
-    """Verifies that resolve_job_workers gives the declared core allocation to every archive above the threshold."""
+    """Verifies that resolve_job_workers gives the declared core allocation to an archive at or above the threshold."""
     footprint = _modeled_footprint(message_count=message_count, archive_bytes=512 * _MEGABYTE)
 
     # The stage emits two job shapes and nothing between them, so a hundredfold larger archive receives the same
@@ -426,8 +426,8 @@ def test_size_archive_job_sizes_a_real_archive(tmp_path: Path) -> None:
     assert memory_mb == estimate_job_memory_mb(footprint=footprint, cores=cores)
 
 
-def test_size_archive_job_widens_past_the_threshold() -> None:
-    """Verifies that size_archive_job reports the declared allocation for an archive above the threshold."""
+def test_resolve_job_workers_at_the_threshold() -> None:
+    """Verifies that resolve_job_workers reports the declared allocation at the parallel extraction threshold."""
     footprint = _modeled_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
 
     assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES

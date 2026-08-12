@@ -209,7 +209,7 @@ def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:
 
     Returns:
         The cores the job receives, the memory it holds in megabytes, and whether both figures follow from the
-        archive itself rather than from the spawned child baseline.
+        archive itself rather than from the job body baseline.
     """
     footprint = resolve_archive_footprint(archive_path=archive_path)
     cores = resolve_job_workers(footprint=footprint)

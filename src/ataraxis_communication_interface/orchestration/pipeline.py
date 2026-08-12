@@ -75,7 +75,8 @@ def run_log_processing_pipeline(
             if the configuration declares no controllers, if a requested controller or job identifier is not
             registered, or if the resolved archives span several directories. Also raised once a job runs, if a
             configured module or the kernel declares empty event codes, if a controller declares no extraction
-            targets, or if a logged data message's payload size disagrees with its prototype code.
+            targets, if the archive carries no onset timestamp message, or if a logged data message's payload size
+            disagrees with its prototype code.
         OSError: If any directory beneath the log directory cannot be read.
         TimeoutError: If the processing tracker's lock cannot be acquired, which a batch running concurrently over
             the same output directory can cause.

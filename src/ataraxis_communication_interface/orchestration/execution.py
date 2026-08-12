@@ -64,9 +64,10 @@ class JobExecutionState:
     """Tracks runtime state for one batch execution session budgeted by both cores and memory.
 
     Notes:
-        Every job body runs in a worker of one shared pool that outlives it, and each body opens its own extraction
-        pool sized to the cores its job was admitted at. Total live processes are the pool's slot count plus the
-        cores of the running set, and both terms are budgeted.
+        Every job body runs in a worker of one shared pool that outlives it. A body admitted at more than one core
+        opens its own extraction pool at that width, and a body admitted at one core reads its archive sequentially.
+        Total live processes are the pool's slot count plus the cores of the running set that opened a pool, and both
+        terms are budgeted.
     """
 
     all_jobs: dict[tuple[str, str], JobDescriptor] = field(default_factory=dict)
@@ -177,8 +178,8 @@ def job_execution_manager(state: JobExecutionState) -> None:
         recording sequentially and never reaches it.
 
         Runs as a daemon thread for the lifetime of one execution session. Creates the pool once and keeps it, so a
-        job body starts in a worker that is already alive. Each body opens its own extraction pool at the width its
-        job was admitted at.
+        job body starts in a worker that is already alive. A body admitted at more than one core opens its own
+        extraction pool at that width.
 
         Cancellation stops new admissions and lets the running jobs finish.
 

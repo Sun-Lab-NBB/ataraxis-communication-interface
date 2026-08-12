@@ -37,10 +37,10 @@ _SOURCE_ID: int = 101
 """Stores the source ID used by every synthetic log archive built by this module."""
 
 _MODULE_TYPE: int = 1
-"""Stores the type code of the hardware module that produces the module messages of every synthetic archive."""
+"""Stores the type code of the hardware module the module message builders of this file address."""
 
 _MODULE_ID: int = 2
-"""Stores the instance code of the hardware module that produces the module messages of every synthetic archive."""
+"""Stores the instance code of the hardware module the module message builders of this file address."""
 
 _MODULE_KEY: tuple[int, int] = (_MODULE_TYPE, _MODULE_ID)
 """Stores the (type, id) pair the extraction filters and the returned module data are keyed by."""
@@ -682,7 +682,7 @@ def _build_archive(archive_path: Path, messages: list[tuple[int, NDArray[np.uint
 
 
 def _build_module_state(elapsed_us: int, command: int, event: int) -> tuple[int, NDArray[np.uint8]]:
-    """Builds a timestamped MODULE_STATE message for the module every synthetic archive registers."""
+    """Builds a timestamped MODULE_STATE message for the shared test hardware module."""
     return (
         elapsed_us,
         create_module_state_payload(module_type=_MODULE_TYPE, module_id=_MODULE_ID, command=command, event=event),
@@ -692,7 +692,7 @@ def _build_module_state(elapsed_us: int, command: int, event: int) -> tuple[int,
 def _build_module_data(
     elapsed_us: int, command: int, event: int, prototype_code: int, data_bytes: list[int]
 ) -> tuple[int, NDArray[np.uint8]]:
-    """Builds a timestamped MODULE_DATA message for the module every synthetic archive registers."""
+    """Builds a timestamped MODULE_DATA message for the shared test hardware module."""
     return (
         elapsed_us,
         create_module_data_payload(

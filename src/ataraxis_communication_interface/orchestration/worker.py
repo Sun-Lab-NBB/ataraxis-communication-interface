@@ -96,8 +96,9 @@ def execute_job(
         FileNotFoundError: If no file exists at the supplied configuration path.
         ValueError: If the configuration declares no entry for this controller, if it declares a module or a kernel
             entry with empty event codes, or if it declares no extraction targets at all. Also raised if the archive
-            path does not resolve to a readable .npz file, if a data message's payload size disagrees with its
-            prototype code, or if the tracker holds no entry for this job identifier.
+            path does not resolve to a readable .npz file, if the archive carries no onset timestamp message, if a data
+            message's payload size disagrees with its prototype code, or if the tracker holds no entry for this job
+            identifier.
         TimeoutError: If the tracker's lock cannot be acquired.
     """
     console.echo(message=f"Running '{CONTROLLER_EXTRACTION_JOB_NAME}' job for source '{source_id}' (ID: {job_id})...")

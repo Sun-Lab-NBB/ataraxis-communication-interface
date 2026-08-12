@@ -380,7 +380,7 @@ def test_run_log_processing_pipeline_resolves_an_unset_width_per_archive(
     archive_names = [_archive_path(log_directory=log_directory, source_id=source_id).name for source_id in (1, 2)]
     assert events == [f"size:{archive_names[0]}", "dispatch:1", f"size:{archive_names[1]}", "dispatch:2"]
 
-    # Both archives hold two messages, which is below the parallel extraction threshold and takes the sequential shape.
+    # Both archives hold four messages, below the parallel extraction threshold, so each takes the sequential shape.
     assert {call["workers"] for call in calls} == {1}
 
 

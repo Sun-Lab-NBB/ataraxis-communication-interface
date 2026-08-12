@@ -550,6 +550,8 @@ class MicroControllerInterface:
     Raises:
         TypeError: If any of the input arguments are not of the expected type.
         ValueError: If two ModuleInterface instances share the same combined module type-code and id-code.
+        Timeout: If the microcontroller manifest's .lock file in the DataLogger output directory cannot be acquired
+            within the timeout period.
     """
 
     # Pre-packages the user-addressable Kernel reset command into a class attribute. Since the command is known and

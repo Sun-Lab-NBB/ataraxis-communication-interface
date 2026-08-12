@@ -7,7 +7,7 @@ import multiprocessing
 from multiprocessing import Queue
 
 # Configures the multiprocessing start method before any test imports a module that spawns a process. The method can
-# be set only once per interpreter, so moving this line below the imports leaves the platform default in force.
+# be set only once per interpreter, so an import below that fixes the context first would make this call raise.
 multiprocessing.set_start_method("spawn")
 
 import numpy as np

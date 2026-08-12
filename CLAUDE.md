@@ -54,6 +54,7 @@ Skills are distributed through the ataraxis marketplace and are loaded into Clau
 | `/microcontroller-setup`               | MCP-based microcontroller discovery, MQTT verification, and manifests |
 | `/microcontroller-interface`           | MicroControllerInterface and ModuleInterface API usage and lifecycle  |
 | `/communication-mcp-environment-setup` | MCP server connectivity diagnostics and environment verification      |
+| `/cli-reference`                       | Reference for every axci CLI command, option, and MCP tool mapping    |
 | `/pipeline`                            | End-to-end pipeline orchestration and multi-controller planning       |
 | `/extraction-configuration`            | ExtractionConfig parameters, generation, validation, and lifecycle    |
 | `/log-input-format`                    | Reference for NPZ archive format, source IDs, and DataLogger output   |
@@ -275,8 +276,8 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   LRU-cached message construction, and `reset_command_queue()` sends a dequeue command. See
   `examples/example_interface.py` for a reference subclass.
 - **Serial communication** (`communication/protocols.py`, `messages.py`, `serial.py`): `SerialProtocols`
-  (13 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer. Command classes pack bytes via
-  the `packed_data` property, and reception classes parse header bytes via properties.
+  (13 protocols) and `SerialPrototypes` (252 prototypes) define the protocol layer. Command classes pack bytes into
+  the `packed_data` field their `__post_init__` populates, and reception classes parse header bytes via properties.
 - **MQTT communication** (`communication/mqtt.py`): `paho-mqtt` v2 client with callback reception into a `Queue`.
   `get_data()` returns `(topic, message)` tuples or `None`, and the `has_data` property checks queue state.
 - **Data classes and manifests** (`microcontroller/dataclasses.py`): inner classes are frozen, so create new instances
