@@ -6,12 +6,7 @@ from pathlib import Path
 import pytest
 from tests.log_archives import create_test_archive, create_module_state_payload
 from ataraxis_base_utilities import error_format
-from ataraxis_data_structures import (
-    LOG_ARCHIVE_SUFFIX,
-    PARALLEL_PROCESSING_THRESHOLD,
-    ProcessingStatus,
-    ProcessingTracker,
-)
+from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, ProcessingStatus, ProcessingTracker
 
 from ataraxis_communication_interface.orchestration import discovery
 from ataraxis_communication_interface.orchestration.jobs import (
@@ -32,9 +27,9 @@ from ataraxis_communication_interface.orchestration.discovery import (
 )
 from ataraxis_communication_interface.orchestration.allocation import (
     SPAWNED_CHILD_MEMORY_MB,
+    PARALLEL_EXTRACTION_THRESHOLD,
     CONTROLLER_EXTRACTION_JOB_CORES,
     _apply_tolerance,
-    resolve_core_budget,
     resolve_job_workers,
     estimate_job_memory_mb,
     resolve_archive_footprint,
@@ -62,13 +57,7 @@ _MODULE_ID: int = 2
 _EVENT_CODES: tuple[int, ...] = (10, 20)
 """Stores the event codes every synthetic extraction configuration declares for its module."""
 
-_HOST_CORE_BUDGET: int = resolve_core_budget(requested_budget=-1)
-"""Stores the core ceiling the host resolves for a caller that requests none."""
-
-_RESOLVED_JOB_CEILING: int = min(_HOST_CORE_BUDGET, CONTROLLER_EXTRACTION_JOB_CORES)
-"""Stores the ceiling a prepared job receives, which is the host budget bounded by the declared job width."""
-
-_WIDE_ARCHIVE_MESSAGES: int = PARALLEL_PROCESSING_THRESHOLD * 3
+_WIDE_ARCHIVE_MESSAGES: int = PARALLEL_EXTRACTION_THRESHOLD
 """Stores the message count of the archive used to exercise the multi-core branch of the sizing model."""
 
 
@@ -291,7 +280,6 @@ def test_prepare_jobs_builds_descriptors(tmp_path: Path) -> None:
         log_directory=log_directory,
         output_directory=output_root,
         config_path=config_path,
-        core_ceiling=4,
     )
 
     assert [job.source_id for job in job_set.jobs] == ["1", "10", "2"]
@@ -305,7 +293,7 @@ def test_prepare_jobs_builds_descriptors(tmp_path: Path) -> None:
         assert job.tracker_path == job_set.tracker_path
         assert job.job_name == CONTROLLER_EXTRACTION_JOB_NAME
         assert job.job_id == identifiers[job.source_id]
-        assert job.core_weight == job_set.core_ceiling
+        assert job.core_weight == CONTROLLER_EXTRACTION_JOB_CORES
 
     # Every descriptor addresses a distinct tracker entry, so no two jobs of one set collide during dispatch.
     assert len({job.dispatch_key for job in job_set.jobs}) == len(job_set.jobs)
@@ -328,12 +316,12 @@ def test_prepare_jobs_reads_no_archive(tmp_path: Path, monkeypatch: pytest.Monke
         log_directory=log_directory,
         output_directory=tmp_path / "output",
         config_path=config_path,
-        core_ceiling=4,
     )
 
     assert len(job_set.jobs) == 2
-    # Every job carries the ceiling itself, because narrowing it to what an archive repays belongs to the sizing pass.
-    assert {job.core_weight for job in job_set.jobs} == {4}
+    # Every job carries the declared width, because resolving the shape its own archive earns belongs to the sizing
+    # pass that opens it.
+    assert {job.core_weight for job in job_set.jobs} == {CONTROLLER_EXTRACTION_JOB_CORES}
 
 
 def test_prepare_jobs_accepts_unreadable_archive(tmp_path: Path) -> None:
@@ -347,47 +335,10 @@ def test_prepare_jobs_accepts_unreadable_archive(tmp_path: Path) -> None:
         log_directory=log_directory,
         output_directory=tmp_path / "output",
         config_path=config_path,
-        core_ceiling=4,
     )
 
     assert [job.source_id for job in job_set.jobs] == ["5"]
-    assert job_set.jobs[0].core_weight == 4
-
-
-def test_prepare_jobs_resolves_ceiling_from_host(tmp_path: Path) -> None:
-    """Verifies that prepare_jobs resolves a non-positive core ceiling from the host, bounded by the job width."""
-    log_directory = tmp_path / "logs"
-    _build_recording(log_directory=log_directory, source_ids=(1,))
-    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
-
-    for core_ceiling in (-1, 0):
-        job_set = prepare_jobs(
-            log_directory=log_directory,
-            output_directory=tmp_path / f"output{core_ceiling}",
-            config_path=config_path,
-            core_ceiling=core_ceiling,
-        )
-
-        assert job_set.core_ceiling == _RESOLVED_JOB_CEILING
-        assert job_set.jobs[0].core_weight == _RESOLVED_JOB_CEILING
-        assert job_set.core_ceiling >= 1
-
-
-def test_prepare_jobs_honors_explicit_ceiling(tmp_path: Path) -> None:
-    """Verifies that prepare_jobs honors an explicitly requested core ceiling on the set and on every descriptor."""
-    log_directory = tmp_path / "logs"
-    _build_recording(log_directory=log_directory, source_ids=(1, 2))
-    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 2))
-
-    job_set = prepare_jobs(
-        log_directory=log_directory,
-        output_directory=tmp_path / "output",
-        config_path=config_path,
-        core_ceiling=1,
-    )
-
-    assert job_set.core_ceiling == 1
-    assert {job.core_weight for job in job_set.jobs} == {1}
+    assert job_set.jobs[0].core_weight == CONTROLLER_EXTRACTION_JOB_CORES
 
 
 def test_prepare_jobs_selects_requested_sources(tmp_path: Path) -> None:
@@ -820,67 +771,18 @@ def test_size_job_applies_the_memory_model(tmp_path: Path) -> None:
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
     job_set = prepare_jobs(log_directory=log_directory, output_directory=tmp_path / "output", config_path=config_path)
 
-    sized_job, sizing = size_job(job=job_set.jobs[0], core_ceiling=CONTROLLER_EXTRACTION_JOB_CORES)
+    sized_job, sizing = size_job(job=job_set.jobs[0])
 
     footprint = resolve_archive_footprint(archive_path=job_set.jobs[0].archive_path)
-    expected_cores = resolve_job_workers(footprint=footprint, ceiling=CONTROLLER_EXTRACTION_JOB_CORES)
+    expected_cores = resolve_job_workers(footprint=footprint)
     assert sized_job.core_weight == expected_cores
+    # An archive holding the threshold's worth of messages takes the parallel shape, which is the branch of the
+    # memory model that charges one baseline and one reader per pool child on top of the job body's own pair.
+    assert sized_job.core_weight == CONTROLLER_EXTRACTION_JOB_CORES
     assert sizing.memory_mb == estimate_job_memory_mb(footprint=footprint, cores=expected_cores)
     assert sizing.message_count == _WIDE_ARCHIVE_MESSAGES
     assert sizing.archive_bytes == job_set.jobs[0].archive_path.stat().st_size
     assert sizing.modeled
-
-
-def test_size_job_narrows_cores_to_the_repaid_workers(tmp_path: Path) -> None:
-    """Verifies that size_job narrows a job's width to the workers its own archive repays."""
-    log_directory = tmp_path / "logs"
-    _build_recording(log_directory=log_directory, source_ids=(1,), message_count=_WIDE_ARCHIVE_MESSAGES)
-    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
-    job_set = prepare_jobs(
-        log_directory=log_directory,
-        output_directory=tmp_path / "output",
-        config_path=config_path,
-        core_ceiling=64,
-    )
-
-    sized_job, _ = size_job(job=job_set.jobs[0], core_ceiling=64)
-
-    # Three thresholds' worth of messages repay three workers, which is below both the ceiling and the declared width.
-    assert sized_job.core_weight == _WIDE_ARCHIVE_MESSAGES // PARALLEL_PROCESSING_THRESHOLD
-    assert sized_job.core_weight == 3
-    # The preparation caps a requested ceiling at the declared job width, so the descriptor carries that width.
-    assert job_set.jobs[0].core_weight == CONTROLLER_EXTRACTION_JOB_CORES
-
-
-def test_size_job_default_ceiling_resolves_from_the_host(tmp_path: Path) -> None:
-    """Verifies that a non-positive ceiling resolves from the host instead of collapsing the job to a single core."""
-    log_directory = tmp_path / "logs"
-    _build_recording(log_directory=log_directory, source_ids=(1,), message_count=_WIDE_ARCHIVE_MESSAGES)
-    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
-    job_set = prepare_jobs(log_directory=log_directory, output_directory=tmp_path / "output", config_path=config_path)
-    footprint = resolve_archive_footprint(archive_path=job_set.jobs[0].archive_path)
-    expected_cores = resolve_job_workers(footprint=footprint, ceiling=_HOST_CORE_BUDGET)
-
-    for core_ceiling in (-1, 0):
-        sized_job, _ = size_job(job=job_set.jobs[0], core_ceiling=core_ceiling)
-
-        assert sized_job.core_weight == expected_cores
-        # A ceiling passed through unresolved would floor the width at one core on every host.
-        if _HOST_CORE_BUDGET > 1:
-            assert sized_job.core_weight > 1
-
-
-def test_size_job_honors_an_explicit_ceiling(tmp_path: Path) -> None:
-    """Verifies that size_job never resolves a width above the ceiling the caller supplied."""
-    log_directory = tmp_path / "logs"
-    _build_recording(log_directory=log_directory, source_ids=(1,), message_count=_WIDE_ARCHIVE_MESSAGES)
-    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
-    job_set = prepare_jobs(log_directory=log_directory, output_directory=tmp_path / "output", config_path=config_path)
-
-    for core_ceiling in (1, 2):
-        sized_job, _ = size_job(job=job_set.jobs[0], core_ceiling=core_ceiling)
-
-        assert sized_job.core_weight == core_ceiling
 
 
 def test_size_job_unreadable_archive(tmp_path: Path) -> None:
@@ -893,10 +795,9 @@ def test_size_job_unreadable_archive(tmp_path: Path) -> None:
         log_directory=log_directory,
         output_directory=tmp_path / "output",
         config_path=config_path,
-        core_ceiling=8,
     )
 
-    sized_job, sizing = size_job(job=job_set.jobs[0], core_ceiling=8)
+    sized_job, sizing = size_job(job=job_set.jobs[0])
 
     assert not sizing.modeled
     assert sizing.message_count == 0
@@ -914,12 +815,14 @@ def test_size_job_preserves_descriptor_identity(tmp_path: Path) -> None:
         log_directory=log_directory,
         output_directory=tmp_path / "output",
         config_path=config_path,
-        core_ceiling=8,
     ).jobs[0]
 
-    sized_job, _ = size_job(job=job, core_ceiling=8)
+    sized_job, _ = size_job(job=job)
 
     assert sized_job is not job
+    # The preparation stamps the declared width on every descriptor, so an archive this small proves the sizing pass
+    # replaces that width rather than passing it through.
+    assert job.core_weight == CONTROLLER_EXTRACTION_JOB_CORES
     assert sized_job.core_weight == 1
     assert sized_job.dispatch_key == job.dispatch_key
     for field_name in (
@@ -975,7 +878,6 @@ def test_job_set_resolve_job_empty_set(tmp_path: Path) -> None:
         universe=((CONTROLLER_EXTRACTION_JOB_NAME, "1"),),
         jobs=(),
         skipped_sources=(("1", "The controller's log archive is absent or resolves to more than one file."),),
-        core_ceiling=1,
     )
 
     message = (
@@ -1032,7 +934,6 @@ def test_job_descriptor_round_trips_through_a_mapping(tmp_path: Path) -> None:
         log_directory=log_directory,
         output_directory=tmp_path / "output",
         config_path=config_path,
-        core_ceiling=4,
     ).jobs[0]
 
     assert JobDescriptor.from_mapping(mapping=job.to_mapping()) == job

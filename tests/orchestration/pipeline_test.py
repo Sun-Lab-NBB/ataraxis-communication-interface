@@ -1,6 +1,6 @@
 """Contains tests for the sequential processing pipeline provided by the orchestration/pipeline.py module."""
 
-from typing import Any, NoReturn
+from typing import Any
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +19,7 @@ from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, ProcessingStatus, ProcessingTracker
 
 from ataraxis_communication_interface.communication import SerialPrototypes
-from ataraxis_communication_interface.orchestration import pipeline, discovery
+from ataraxis_communication_interface.orchestration import pipeline
 from ataraxis_communication_interface.microcontroller import (
     ExtractionConfig,
     ModuleSourceData,
@@ -37,7 +37,7 @@ from ataraxis_communication_interface.orchestration.jobs import (
     resolve_output_directory,
 )
 from ataraxis_communication_interface.orchestration.pipeline import run_log_processing_pipeline
-from ataraxis_communication_interface.orchestration.allocation import resolve_core_budget
+from ataraxis_communication_interface.orchestration.allocation import ArchiveFootprint
 
 _MODULE_TYPE: int = 1
 """Stores the type (family) code of the hardware module every synthetic log archive built in this module logs
@@ -315,25 +315,15 @@ def test_run_log_processing_pipeline_resolves_no_job(tmp_path: Path) -> None:
         )
 
 
-def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(
+def test_run_log_processing_pipeline_dispatches_a_named_width_verbatim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verifies that the pipeline dispatches its jobs without opening or sizing a single log archive."""
+    """Verifies that the pipeline runs every job at the width the caller named."""
     log_directory = tmp_path / "logs"
-    log_directory.mkdir(parents=True)
-
-    # Writes unreadable stand-ins for the log archives, so any read before dispatch raises instead of being missed.
-    for source_id in (1, 2):
-        _archive_path(log_directory=log_directory, source_id=source_id).write_bytes(b"not-a-valid-npz-archive")
-        _write_manifest_entry(log_directory=log_directory, source_id=source_id)
+    _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 2))
 
-    def _forbidden_footprint(**arguments: Any) -> NoReturn:
-        message = f"The pipeline sized a job from its archive: {arguments}."
-        raise AssertionError(message)
-
-    monkeypatch.setattr(discovery, "resolve_archive_footprint", _forbidden_footprint)
-    calls = _record_dispatches(monkeypatch=monkeypatch)
+    events, calls = _record_pipeline_calls(monkeypatch=monkeypatch)
 
     output_directory = tmp_path / "output"
     run_log_processing_pipeline(
@@ -344,6 +334,11 @@ def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(
         display_progress=False,
     )
 
+    # The named width settles every job, so each one goes straight to the runner. These archives sit far below the
+    # parallel extraction threshold, which a resolved width would have answered with the sequential shape instead.
+    assert events == ["dispatch:1", "dispatch:2"]
+    assert {call["workers"] for call in calls} == {4}
+
     # Every configured controller reaches the runner, in ascending source identifier order.
     job_ids = generate_job_ids(source_ids=["1", "2"])
     assert [call["source_id"] for call in calls] == ["1", "2"]
@@ -352,10 +347,8 @@ def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(
         _archive_path(log_directory=log_directory, source_id=source_id) for source_id in (1, 2)
     ]
 
-    # Every job is dispatched at the requested ceiling, as narrowing that width is the extraction's own business, and
-    # each one carries the configuration file its body reads its own extraction targets from.
+    # Each job carries the configuration file its body reads its own extraction targets from.
     resolved_output = resolve_output_directory(output_directory=output_directory)
-    assert {call["workers"] for call in calls} == {resolve_core_budget(requested_budget=4)}
     assert {call["output_directory"] for call in calls} == {resolved_output}
     assert {call["config_path"] for call in calls} == {config_path}
     assert {call["display_progress"] for call in calls} == {False}
@@ -363,6 +356,32 @@ def test_run_log_processing_pipeline_reads_no_archive_before_dispatch(
 
     # The preparation still materializes the output layout and registers both jobs on the shared tracker.
     assert sorted(_open_tracker(output_directory=output_directory).snapshot()) == sorted(job_ids.values())
+
+
+def test_run_log_processing_pipeline_resolves_an_unset_width_per_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies that an unset width is resolved from each archive as that job is reached."""
+    log_directory = tmp_path / "logs"
+    _build_controller_logs(log_directory=log_directory, source_ids=(1, 2))
+    config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 2))
+
+    events, calls = _record_pipeline_calls(monkeypatch=monkeypatch)
+
+    run_log_processing_pipeline(
+        log_directory=log_directory,
+        output_directory=tmp_path / "output",
+        config=config_path,
+        workers=-1,
+        display_progress=False,
+    )
+
+    # Each archive is read as its own job is reached rather than in a pass over the whole set.
+    archive_names = [_archive_path(log_directory=log_directory, source_id=source_id).name for source_id in (1, 2)]
+    assert events == [f"size:{archive_names[0]}", "dispatch:1", f"size:{archive_names[1]}", "dispatch:2"]
+
+    # Both archives hold two messages, which is below the parallel extraction threshold and takes the sequential shape.
+    assert {call["workers"] for call in calls} == {1}
 
 
 def _archive_path(log_directory: Path, source_id: int) -> Path:
@@ -466,12 +485,21 @@ def _open_tracker(output_directory: Path) -> ProcessingTracker:
     )
 
 
-def _record_dispatches(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Replaces the single-job runner the pipeline dispatches with a recorder and returns the recorded calls."""
-    calls = []
+def _record_pipeline_calls(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[dict[str, Any]]]:
+    """Wraps the footprint read and replaces the single-job runner, returning one ordered event log and every call."""
+    events: list[str] = []
+    calls: list[dict[str, Any]] = []
+    # Binds the real reader before the patch lands, so the wrapper still performs the read it records.
+    reader = pipeline.resolve_archive_footprint
 
-    def _record(**arguments: Any) -> None:
+    def _record_sizing(archive_path: Path) -> ArchiveFootprint:
+        events.append(f"size:{archive_path.name}")
+        return reader(archive_path=archive_path)
+
+    def _record_dispatch(**arguments: Any) -> None:
+        events.append(f"dispatch:{arguments['source_id']}")
         calls.append(arguments)
 
-    monkeypatch.setattr(pipeline, "execute_job", _record)
-    return calls
+    monkeypatch.setattr(pipeline, "resolve_archive_footprint", _record_sizing)
+    monkeypatch.setattr(pipeline, "execute_job", _record_dispatch)
+    return events, calls

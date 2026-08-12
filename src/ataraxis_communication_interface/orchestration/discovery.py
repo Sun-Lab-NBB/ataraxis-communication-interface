@@ -25,7 +25,6 @@ from .jobs import (
 )
 from .allocation import (
     CONTROLLER_EXTRACTION_JOB_CORES,
-    resolve_core_budget,
     resolve_job_workers,
     estimate_job_memory_mb,
     resolve_archive_footprint,
@@ -97,8 +96,6 @@ class JobSet:
     skipped_sources: tuple[tuple[str, str], ...]
     """Each source that yielded no job, paired with the reason. Always empty under strict sourcing, where a source
     that cannot be prepared raises instead."""
-    core_ceiling: int
-    """The cores any single job of this set may receive."""
 
     def resolve_job(self, job_id: str) -> JobDescriptor:
         """Returns the descriptor of the requested job.
@@ -231,7 +228,6 @@ def prepare_jobs(
     source_ids: Sequence[str] | None = None,
     job_id: str | None = None,
     *,
-    core_ceiling: int = -1,
     strict_sources: bool = True,
 ) -> JobSet:
     """Resolves and registers the microcontroller data extraction jobs of one log directory.
@@ -259,7 +255,6 @@ def prepare_jobs(
             The argument is ignored when a job identifier selects the work.
         job_id: The hexadecimal identifier of the single job to prepare. Leaving this unset prepares every requested
             source.
-        core_ceiling: The cores any single job may receive. A non-positive value resolves the ceiling from the host.
         strict_sources: Determines whether a source that cannot be prepared stops the call. When set, a requested
             source the manifest or the configuration does not register, or one whose archive does not resolve to
             exactly one file, raises. When unset, such a source is recorded in the returned set's skipped sources.
@@ -290,10 +285,6 @@ def prepare_jobs(
     resolved_output = resolve_output_directory(output_directory=output_directory)
     tracker_path = resolve_tracker_path(output_directory=resolved_output)
 
-    # The host budget bounds what the whole recording may claim, and the declared job width bounds what any one job
-    # repays, so a job is dispatched at the smaller of the two.
-    ceiling = min(resolve_core_budget(requested_budget=core_ceiling), CONTROLLER_EXTRACTION_JOB_CORES)
-
     # A tree holding no manifest holds no job this library owns, whatever the configuration declares. Reporting the
     # empty set here keeps the answer the resolution already gave, since weighing the configuration against an
     # unregistered universe would attribute the absent manifest to the controllers the caller asked for.
@@ -305,7 +296,6 @@ def prepare_jobs(
             universe=(),
             jobs=(),
             skipped_sources=(),
-            core_ceiling=ceiling,
         )
 
     configured_ids, unregistered_ids = _resolve_configured_ids(config_path=config_path, registered_ids=registered_ids)
@@ -407,7 +397,7 @@ def prepare_jobs(
             tracker_path=tracker_path,
             source_id=source_id,
             log_directory=log_directory,
-            core_weight=ceiling,
+            core_weight=CONTROLLER_EXTRACTION_JOB_CORES,
         )
         for source_id in prepared_ids
     )
@@ -429,11 +419,10 @@ def prepare_jobs(
         universe=universe.universe,
         jobs=jobs,
         skipped_sources=tuple(sorted(skipped)),
-        core_ceiling=ceiling,
     )
 
 
-def size_job(job: JobDescriptor, core_ceiling: int = -1) -> tuple[JobDescriptor, JobSizing]:
+def size_job(job: JobDescriptor) -> tuple[JobDescriptor, JobSizing]:
     """Sizes one prepared job from the archive it reads.
 
     Notes:
@@ -441,15 +430,12 @@ def size_job(job: JobDescriptor, core_ceiling: int = -1) -> tuple[JobDescriptor,
 
     Args:
         job: The prepared job to size.
-        core_ceiling: The cores this job may receive, which bounds the width its archive resolves to. A non-positive
-            value resolves the ceiling from the host.
 
     Returns:
         The job carrying its resolved width, and the figures the sizing produced.
     """
-    ceiling = resolve_core_budget(requested_budget=core_ceiling) if core_ceiling < 1 else core_ceiling
     footprint = resolve_archive_footprint(archive_path=job.archive_path)
-    core_weight = resolve_job_workers(footprint=footprint, ceiling=ceiling)
+    core_weight = resolve_job_workers(footprint=footprint)
 
     return (
         replace(job, core_weight=core_weight),

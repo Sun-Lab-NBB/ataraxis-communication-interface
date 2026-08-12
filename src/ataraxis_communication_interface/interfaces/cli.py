@@ -260,9 +260,9 @@ def config_show(config_path: Path) -> None:
     type=int,
     default=-1,
     show_default=True,
-    help="The ceiling on the worker processes any single job receives. Set to -1 (default) to resolve the ceiling "
-    "from every available CPU core minus the cores reserved for the host system. The resolved ceiling is capped at "
-    "the declared per-job allocation of 8 cores.",
+    help="The worker processes each job receives. Set to -1 (default) to resolve the width from the archive's "
+    "message count, which yields a single worker for a small archive and the declared per-job allocation of 4 "
+    "cores for a large one.",
 )
 @click.option(
     "-np",

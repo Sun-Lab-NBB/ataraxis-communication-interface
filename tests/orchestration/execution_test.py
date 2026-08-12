@@ -1239,9 +1239,8 @@ def _build_single_job_batch(tmp_path: Path) -> tuple[JobSet, JobDescriptor, JobS
         log_directory=log_directory,
         output_directory=output_directory,
         config_path=config_path,
-        core_ceiling=1,
     )
-    descriptor, sizing = size_job(job=job_set.jobs[0], core_ceiling=1)
+    descriptor, sizing = size_job(job=job_set.jobs[0])
 
     return job_set, descriptor, sizing
 

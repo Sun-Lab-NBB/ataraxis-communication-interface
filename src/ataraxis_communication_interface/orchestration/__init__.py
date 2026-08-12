@@ -28,6 +28,7 @@ from .execution import (
 )
 from .allocation import (
     SPAWNED_CHILD_MEMORY_MB,
+    PARALLEL_EXTRACTION_THRESHOLD,
     CONTROLLER_EXTRACTION_JOB_CORES,
     ArchiveFootprint,
     resolve_pool_size,
@@ -43,6 +44,7 @@ from .allocation import (
 __all__ = [
     "CONTROLLER_EXTRACTION_JOB_CORES",
     "CONTROLLER_EXTRACTION_JOB_NAME",
+    "PARALLEL_EXTRACTION_THRESHOLD",
     "SPAWNED_CHILD_MEMORY_MB",
     "ArchiveFootprint",
     "JobDescriptor",
