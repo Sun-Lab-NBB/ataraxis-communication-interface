@@ -189,23 +189,23 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
     return _apply_tolerance(memory_mb=SPAWNED_CHILD_MEMORY_MB * readers + per_reader * readers)
 
 
-def estimate_archive_job_memory_mb(archive_path: Path, cores: int) -> tuple[int, bool]:
-    """Estimates the memory one extraction job holds, from the archive path alone.
+def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:
+    """Resolves the cores and the memory one extraction job receives, from the archive it reads.
 
     Notes:
-        Reads the archive's size without opening it, costing one stat call. The module defining this estimator imports
-        nothing from its own package, so a scheduler consuming the sizing model takes it alone.
+        Reads the archive once and answers both halves of the sizing model from that read, so a scheduler planning
+        this stage reproduces neither the width rule nor the memory model.
 
     Args:
         archive_path: The path to the .npz log archive the job reads.
-        cores: The cores the job holds.
 
     Returns:
-        The memory the job holds in megabytes, and whether the estimate follows from the archive's own size rather
-        than from the spawned child baseline.
+        The cores the job receives, the memory it holds in megabytes, and whether both figures follow from the
+        archive itself rather than from the spawned child baseline.
     """
-    footprint = resolve_archive_footprint(archive_path=archive_path, read_message_count=False)
-    return estimate_job_memory_mb(footprint=footprint, cores=cores), footprint.modeled
+    footprint = resolve_archive_footprint(archive_path=archive_path)
+    cores = resolve_job_workers(footprint=footprint)
+    return cores, estimate_job_memory_mb(footprint=footprint, cores=cores), footprint.modeled
 
 
 def resolve_core_budget(requested_budget: int) -> int:

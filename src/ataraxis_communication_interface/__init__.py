@@ -16,21 +16,16 @@ from .communication import (
 from .orchestration import (
     CONTROLLER_EXTRACTION_JOB_NAME,
     CONTROLLER_EXTRACTION_JOB_CORES,
-    PARALLEL_EXTRACTION_THRESHOLD,
     JobSource,
     JobUniverse,
-    ArchiveFootprint,
-    resolve_job_workers,
-    estimate_job_memory_mb,
-    resolve_archive_footprint,
     execute_job,
     resolve_jobs,
+    size_archive_job,
     find_module_paths,
     parse_module_path,
     resolve_kernel_path,
     resolve_module_path,
     run_log_processing_pipeline,
-    estimate_archive_job_memory_mb,
 )
 from .microcontroller import (
     MAXIMUM_CUSTOM_STATUS_CODE,
@@ -61,11 +56,6 @@ from .microcontroller import (
 
 __all__ = [
     "CONTROLLER_EXTRACTION_JOB_CORES",
-    "PARALLEL_EXTRACTION_THRESHOLD",
-    "ArchiveFootprint",
-    "resolve_job_workers",
-    "estimate_job_memory_mb",
-    "resolve_archive_footprint",
     "CONTROLLER_EXTRACTION_JOB_NAME",
     "EXTRACTION_CONFIGURATION_FILENAME",
     "MAXIMUM_CUSTOM_STATUS_CODE",
@@ -92,7 +82,6 @@ __all__ = [
     "ModuleStatusCodes",
     "TransportStatusCodes",
     "create_extraction_config",
-    "estimate_archive_job_memory_mb",
     "execute_job",
     "find_module_paths",
     "get_event_data",
@@ -103,5 +92,6 @@ __all__ = [
     "resolve_kernel_path",
     "resolve_module_path",
     "run_log_processing_pipeline",
+    "size_archive_job",
     "write_microcontroller_manifest",
 ]

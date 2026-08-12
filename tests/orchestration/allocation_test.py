@@ -27,6 +27,7 @@ from ataraxis_communication_interface.orchestration.allocation import (
     _POOL_MEMORY_RESERVATION_DIVISOR,
     ArchiveFootprint,
     _apply_tolerance,
+    size_archive_job,
     resolve_pool_size,
     _bytes_to_megabytes,
     resolve_core_budget,
@@ -35,7 +36,6 @@ from ataraxis_communication_interface.orchestration.allocation import (
     resolve_host_memory_mb,
     resolve_memory_budget_mb,
     resolve_archive_footprint,
-    estimate_archive_job_memory_mb,
 )
 
 _MEGABYTE: int = 1024 * 1024
@@ -236,61 +236,6 @@ def test_estimate_job_memory_mb_scales_with_archive_bytes() -> None:
     assert estimates == [_expected_memory_mb(archive_bytes=size, cores=4) for size in archive_sizes]
     assert estimates == [1536, 2304, 9216]
     assert all(estimate % _MEMORY_ROUNDING_QUANTUM_MB == 0 for estimate in estimates)
-
-
-def test_estimate_archive_job_memory_mb_models_real_archive(tmp_path: Path) -> None:
-    """Verifies that estimate_archive_job_memory_mb sizes a job from the archive on disk without opening it."""
-    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
-    _write_archive(archive_path=archive_path)
-    archive_bytes = archive_path.stat().st_size
-
-    memory_mb, modeled = estimate_archive_job_memory_mb(archive_path=archive_path, cores=4)
-
-    assert modeled
-    assert memory_mb == _expected_memory_mb(archive_bytes=archive_bytes, cores=4)
-    # The estimate follows the stat-only footprint, whose message count stays at zero because the archive is not read.
-    assert memory_mb == estimate_job_memory_mb(
-        footprint=_modeled_footprint(message_count=0, archive_bytes=archive_bytes), cores=4
-    )
-    assert memory_mb > _UNMODELED_MEMORY_MB
-
-
-def test_estimate_archive_job_memory_mb_scales_with_cores(tmp_path: Path) -> None:
-    """Verifies that estimate_archive_job_memory_mb charges more memory as the caller widens the job."""
-    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
-    _write_archive(archive_path=archive_path)
-
-    estimates = [
-        estimate_archive_job_memory_mb(archive_path=archive_path, cores=cores)[0]
-        for cores in (1, 2, 4, CONTROLLER_EXTRACTION_JOB_CORES)
-    ]
-
-    assert estimates == sorted(estimates)
-    assert estimates[0] < estimates[-1]
-    assert all(estimate % _MEMORY_ROUNDING_QUANTUM_MB == 0 for estimate in estimates)
-
-
-def test_estimate_archive_job_memory_mb_falls_back_for_missing_archive(tmp_path: Path) -> None:
-    """Verifies that estimate_archive_job_memory_mb reports the baseline floor for an archive that does not exist."""
-    memory_mb, modeled = estimate_archive_job_memory_mb(archive_path=tmp_path / f"1{LOG_ARCHIVE_SUFFIX}", cores=4)
-
-    # The flag is what tells a scheduler the figure is a floor to plan around rather than a measurement.
-    assert not modeled
-    assert memory_mb == _UNMODELED_MEMORY_MB
-    assert memory_mb == 512
-
-
-def test_estimate_archive_job_memory_mb_models_undecodable_archive(tmp_path: Path) -> None:
-    """Verifies that estimate_archive_job_memory_mb sizes a present but undecodable archive from its size."""
-    archive_path = tmp_path / f"2{LOG_ARCHIVE_SUFFIX}"
-    archive_path.write_bytes(b"0" * (4 * _MEGABYTE))
-
-    memory_mb, modeled = estimate_archive_job_memory_mb(archive_path=archive_path, cores=2)
-
-    # The stat call succeeds, so the sizing model never learns the archive cannot be decoded. Sizing a doomed job is
-    # harmless, since the extraction stage is the one that reports the failure.
-    assert modeled
-    assert memory_mb == _expected_memory_mb(archive_bytes=4 * _MEGABYTE, cores=2)
 
 
 def test_resolve_host_memory_mb() -> None:
@@ -495,3 +440,34 @@ def _write_archive(archive_path: Path, source_id: int = 1) -> None:
             ),
         ],
     )
+
+
+def test_size_archive_job_sizes_a_real_archive(tmp_path: Path) -> None:
+    """Verifies that size_archive_job resolves both figures of the sizing model from one readable archive."""
+    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
+    _write_archive(archive_path=archive_path)
+
+    cores, memory_mb, modeled = size_archive_job(archive_path=archive_path)
+
+    # The synthetic archive holds far fewer messages than the threshold, so it takes the sequential shape.
+    footprint = resolve_archive_footprint(archive_path=archive_path)
+    assert modeled
+    assert cores == 1
+    assert cores == resolve_job_workers(footprint=footprint)
+    assert memory_mb == estimate_job_memory_mb(footprint=footprint, cores=cores)
+
+
+def test_size_archive_job_widens_past_the_threshold() -> None:
+    """Verifies that size_archive_job reports the declared allocation for an archive above the threshold."""
+    footprint = _modeled_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
+
+    assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES
+
+
+def test_size_archive_job_falls_back_for_an_unreadable_archive(tmp_path: Path) -> None:
+    """Verifies that size_archive_job reports the baseline floor for an archive it cannot read."""
+    cores, memory_mb, modeled = size_archive_job(archive_path=tmp_path / f"missing{LOG_ARCHIVE_SUFFIX}")
+
+    assert not modeled
+    assert cores == 1
+    assert memory_mb == _UNMODELED_MEMORY_MB
