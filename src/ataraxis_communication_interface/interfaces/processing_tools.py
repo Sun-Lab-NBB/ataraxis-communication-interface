@@ -61,8 +61,8 @@ def prepare_log_processing_batch_tool(
     and initializes a ProcessingTracker with one data-extraction job per source ID for each log directory. The
     configuration path is validated up front and embedded in every job descriptor so that downstream execution
     tools receive a self-contained manifest. Idempotent: if a tracker already exists for a log directory, returns
-    the existing manifest with current job statuses instead of reinitializing. Requires prior discovery, the
-    caller must provide confirmed source IDs rather than relying on implicit archive or manifest discovery.
+    the existing manifest with current job statuses instead of reinitializing. Requires prior discovery. The caller
+    provides confirmed source IDs, since this tool performs no archive or manifest discovery of its own.
 
     Important:
         The AI agent calling this tool MUST run discover_microcontroller_data_tool first to obtain log directory
@@ -230,7 +230,6 @@ def execute_log_processing_jobs_tool(
         'memory_mb', archive 'message_count', and 'modeled' flag, and any invalid jobs. Returns an error dictionary
         when a session is already active, and an error dictionary carrying 'invalid_jobs' when no job is valid.
     """
-    # Enforces single-session constraint.
     existing_state = get_execution_state()
     if (
         existing_state is not None
@@ -332,8 +331,7 @@ def execute_log_processing_jobs_tool(
 def get_log_processing_status_tool() -> dict[str, Any]:
     """Returns the current status of the active log processing execution session.
 
-    Reads ProcessingTracker files from disk for each job to report per-job progress. If no execution session
-    exists, returns an inactive status.
+    Reads ProcessingTracker files from disk for each job to report per-job progress.
 
     Returns:
         A dictionary containing an 'active' flag, a 'canceled' flag, per-job status entries in 'jobs', and a
@@ -514,8 +512,7 @@ def get_log_processing_timing_tool() -> dict[str, Any]:
 def cancel_log_processing_tool() -> dict[str, Any]:
     """Cancels the active log processing execution session.
 
-    Clears the pending job queue so no new jobs are dispatched. Active jobs complete naturally but no new jobs
-    are started.
+    Clears the pending job queue so no new jobs are dispatched. Active jobs complete naturally.
 
     Returns:
         A dictionary containing a 'canceled' flag, a 'message', and 'final_state' with counts for succeeded,
@@ -526,7 +523,6 @@ def cancel_log_processing_tool() -> dict[str, Any]:
     if state is None:
         return {"canceled": False, "message": "No execution session is active."}
 
-    # Sets the canceled flag and clears pending jobs under the lock. Active jobs complete naturally.
     with state.lock:
         state.canceled = True
         cleared_count = len(state.pending_jobs)
@@ -621,7 +617,6 @@ def reset_log_processing_jobs_tool(
     # Resets the targeted jobs back to SCHEDULED under the tracker's lock, leaving every other job untouched.
     tracker.reset_jobs(job_ids=target_ids)
 
-    # Reads back the updated state for the response.
     try:
         updated_status = read_tracker_status(tracker_path=path)
     except Exception:
@@ -665,8 +660,8 @@ def get_batch_status_overview_tool(
         A dictionary carrying 'total_log_directories', an aggregate 'summary' of job counts, and a 'breakdown' of
         directories per status. Adds a 'log_directories' list alongside top-level 'rows', 'matched_rows', 'start_row',
         and 'next_start_row' paging fields whenever a status is named or the listing is requested. Returns an error
-        dictionary if the
-        root directory is missing, is not a directory, cannot be searched, or a status names a value no tracker holds.
+        dictionary if the root directory is missing, is not a directory, cannot be searched, or a status names a
+        value no tracker holds.
     """
     root_path = Path(root_directory)
 

@@ -92,7 +92,8 @@ _ARRAY_COUNTER: itertools.count[int] = itertools.count()
 """Numbers the shared memory buffers the tests create, keeping every buffer name unique within the test process."""
 
 
-# Stays above the tests: line 505 parametrize argvalue runs at import, so a lower class raises NameError at collection.
+# Stays above the tests: test_microcontroller_interface_initialization_invalid_module_interfaces evaluates its
+# parametrize argvalue at import, so a lower class raises NameError at collection.
 class _RecordingModule(ModuleInterface):
     """Records every remote asset and data processing call the communication cycle makes on the interface.
 
@@ -922,7 +923,7 @@ def test_runtime_cycle_raises_when_the_keepalive_goes_unanswered(monkeypatch: py
     monkeypatch.setattr(interface, "SerialCommunication", factory)
     array = _ScriptedTerminatorArray(cycles=2, cycle_delay=_CYCLE_DELAY)
     message = (
-        f"Communication with the microcontroller {_CONTROLLER_ID} is interrupted. The "
+        f"Unable to maintain the communication with the microcontroller {_CONTROLLER_ID}. The "
         f"microcontroller did not respond to the keepalive message within the expected interval "
         f"of 1 milliseconds."
     )
@@ -1118,7 +1119,7 @@ def test_runtime_cycle_reports_asset_initialization_failures(
 def test_runtime_cycle_reports_asset_termination_failures(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Verifies that an interface failing to release its assets does not strand the assets of the interfaces after."""
+    """Verifies that an interface failing to release its assets still releases the assets of the interfaces after it."""
     factory = _StagedCommunicationFactory()
     monkeypatch.setattr(interface, "SerialCommunication", factory)
     failing = _FailingModule(name="failing_module", fail_termination=True)
@@ -1194,9 +1195,9 @@ def test_watchdog_reports_a_prematurely_terminated_process(
     _prepare_shutdown(controller=controller, terminator_array=terminator_array, process=terminated_process)
     observed_flags = _observe_shutdown_flag(process=terminated_process, terminator_array=terminator_array)
     message = (
-        f"The communication process of the MicroControllerInterface with id {_CONTROLLER_ID} has been "
-        f"prematurely shut down. This likely indicates that the process has encountered a runtime error "
-        f"that terminated the process."
+        f"Unable to maintain the communication process of the MicroControllerInterface with id "
+        f"{_CONTROLLER_ID}. The process has been prematurely shut down, which likely indicates that "
+        f"it has encountered a runtime error that terminated it."
     )
 
     with pytest.raises(RuntimeError, match=error_format(message)):
@@ -1272,7 +1273,7 @@ def test_evaluate_port_reports_an_unresponsive_port(monkeypatch: pytest.MonkeyPa
 
 
 def test_evaluate_port_reports_a_connection_failure() -> None:
-    """Verifies that evaluating a port that cannot be opened reports the failure instead of raising."""
+    """Verifies that evaluating a port that cannot be opened reports the failure."""
     identifier, error = evaluate_port(port="/dev/aci_absent_port")
 
     assert identifier == -1
@@ -1375,8 +1376,7 @@ class _ScriptedTerminatorArray:
 
     Notes:
         Reading the shutdown flag reports a running runtime for the requested number of communication cycles and a
-        requested shutdown afterwards, which ends the cycle at a point each test chooses rather than leaving it to a
-        flag a concurrent thread writes.
+        requested shutdown afterwards. That ends the cycle at a point each test chooses.
 
         Each granted cycle spends the configured delay before it reports, which advances the keepalive timer the
         communication cycle reads by the same interval a cycle of a production runtime would.
@@ -1538,7 +1538,7 @@ def _observe_shutdown_flag(process: Process, terminator_array: SharedMemoryArray
     observed: list[int] = []
 
     def join(timeout: float | None = None) -> None:
-        """Records the shutdown flag instead of waiting on a process that already terminated."""
+        """Records the shutdown flag."""
         observed.append(int(terminator_array[0]))
 
     process.join = join  # type: ignore[method-assign]

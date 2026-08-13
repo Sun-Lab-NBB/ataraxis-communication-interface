@@ -56,10 +56,6 @@ class JobDescriptor:
     Notes:
         Every field is a path, a string, or an integer, so an instance pickles into a spawned worker and crosses a
         scheduler boundary or a tool payload unchanged.
-
-        The archive path is resolved rather than optional, so a dispatched job never searches the tree.
-
-        The figures a sizing pass produces live in the paired JobSizing record, which a worker never sees.
     """
 
     log_directory: Path
@@ -69,12 +65,7 @@ class JobDescriptor:
     output_directory: Path
     """The path to the directory this job writes its output files into."""
     config_path: Path
-    """The path to the ExtractionConfig .yaml file naming the events this job extracts.
-
-    Notes:
-        A controller declares its extraction targets in a configuration file rather than in the archive, so the
-        descriptor carries the file the job body reads them from.
-    """
+    """The path to the ExtractionConfig .yaml file naming the events this job extracts."""
     tracker_path: Path
     """The path to the ProcessingTracker file that records this job's outcome."""
     job_name: str
@@ -326,8 +317,7 @@ def parse_module_path(file_path: Path) -> tuple[int, int, int]:
     """Reads the controller source, the module type, and the module identifier a module output filename encodes.
 
     Notes:
-        Inverts resolve_module_path(), so a consumer recovers the identity of the module a file holds from the file
-        alone rather than from the manifest that named it.
+        Inverts resolve_module_path().
 
     Args:
         file_path: The path to the module output file to read the identity of.
@@ -361,8 +351,7 @@ def parse_kernel_path(file_path: Path) -> int:
     """Reads the controller source a kernel output filename encodes.
 
     Notes:
-        Inverts resolve_kernel_path(), so a consumer recovers the identity of the source a file holds from the file
-        alone rather than from the manifest that named it.
+        Inverts resolve_kernel_path().
 
     Args:
         file_path: The path to the kernel output file to read the identity of.

@@ -53,7 +53,7 @@ class MQTTCommunication:
         # inefficiency.
         self._output_queue: Queue = Queue()  # type: ignore[type-arg]  # queue.Queue is not subscriptable at runtime.
 
-        # Initializes the MQTT client. Note, it needs to be connected before it can send and receive messages!
+        # The client sends and receives only after connect() runs.
         self._client: mqtt.Client = mqtt.Client(
             protocol=mqtt.MQTTv5,
             transport="tcp",
@@ -75,8 +75,8 @@ class MQTTCommunication:
         """Connects to the MQTT broker and subscribes to the requested list of monitored topics.
 
         Notes:
-            This method has to be called after class initialization to start the communication process. Any message
-            sent to the MQTT broker from other clients before this method is called may not reach this instance.
+            Any message sent to the MQTT broker from other clients before this method is called may not reach this
+            instance.
 
             If this instance is configured to subscribe (listen) to any topics, it starts a perpetually active thread
             with a listener callback to monitor the incoming traffic.
@@ -87,9 +87,8 @@ class MQTTCommunication:
         if self._connected:
             return
 
-        # Connects to the broker. Newer paho-mqtt versions surface socket-level failures as OSError subclasses instead
-        # of returning an error code, which covers the timed out connection, the refused connection, and the
-        # unresolvable host name.
+        # paho-mqtt surfaces socket-level failures as OSError subclasses, which covers the timed out connection, the
+        # refused connection, and the unresolvable host name.
         failure_reason: str | None = None
         try:
             result = self._client.connect(host=self._ip, port=self._port)
@@ -111,8 +110,6 @@ class MQTTCommunication:
         # methods accurate for publish-only instances as well as for subscribed ones.
         self._client.on_disconnect = self._on_disconnect
 
-        # If the class is configured to connect to any topics, enables the message callback and starts the monitoring
-        # thread.
         if self._monitored_topics:
             self._client.on_message = self._on_message
             self._client.loop_start()
@@ -138,8 +135,8 @@ class MQTTCommunication:
         if not self._connected:
             message = (
                 f"Unable to send data to the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication "
-                f"instance. The MQTTCommunication instance is not connected to the MQTT broker, call connect() method "
-                f"before sending data."
+                f"instance. The instance must be connected to the MQTT broker before data is sent, but connect() "
+                f"has not been called."
             )
             console.error(message=message, error=ConnectionError)
         # The client reports a dropped link through the returned status rather than by raising, so the status is the
@@ -173,8 +170,8 @@ class MQTTCommunication:
         if not self._connected:
             message = (
                 f"Unable to get data from the MQTT broker at {self._ip}:{self._port} via the MQTTCommunication "
-                f"instance. The MQTTCommunication instance is not connected to the MQTT broker, call connect() method "
-                f"before retrieving data."
+                f"instance. The instance must be connected to the MQTT broker before data is retrieved, but "
+                f"connect() has not been called."
             )
             console.error(message=message, error=ConnectionError)
 

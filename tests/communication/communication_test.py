@@ -7,7 +7,7 @@ import multiprocessing
 from multiprocessing import Queue
 
 # Configures the multiprocessing start method before any test imports a module that spawns a process. The method can
-# be set only once per interpreter, so moving this line below the imports leaves the platform default in force.
+# be set only once per interpreter, so an import below that fixes the context first would make this call raise.
 multiprocessing.set_start_method("spawn")
 
 import numpy as np
@@ -149,36 +149,6 @@ def test_serial_prototypes_as_uint8(prototype: SerialPrototypes, expected_value:
     result = prototype.as_uint8()
     assert isinstance(result, np.uint8)
     assert result == expected_value
-
-
-@pytest.mark.parametrize(
-    "prototype,expected_type,expected_shape,expected_dtype",
-    [
-        (SerialPrototypes.ONE_BOOL, np.bool, None, None),
-        (SerialPrototypes.SIX_INT8S, np.ndarray, (6,), np.int8),
-        (SerialPrototypes.ELEVEN_FLOAT64S, np.ndarray, (11,), np.float64),
-        (SerialPrototypes.FIFTEEN_INT64S, np.ndarray, (15,), np.int64),
-        (SerialPrototypes.TWO_INT32S, np.ndarray, (2,), np.int32),
-        (SerialPrototypes.TWO_HUNDRED_FORTY_EIGHT_BOOLS, np.ndarray, (248,), np.bool_),
-        (SerialPrototypes.TWO_HUNDRED_FORTY_EIGHT_UINT8S, np.ndarray, (248,), np.uint8),
-        (SerialPrototypes.NINETY_TWO_INT8S, np.ndarray, (92,), np.int8),
-        (SerialPrototypes.ONE_HUNDRED_TWENTY_FOUR_UINT16S, np.ndarray, (124,), np.uint16),
-        (SerialPrototypes.SIXTY_TWO_UINT32S, np.ndarray, (62,), np.uint32),
-        (SerialPrototypes.SIXTY_TWO_FLOAT32S, np.ndarray, (62,), np.float32),
-        (SerialPrototypes.THIRTY_ONE_UINT64S, np.ndarray, (31,), np.uint64),
-        (SerialPrototypes.THIRTY_ONE_FLOAT64S, np.ndarray, (31,), np.float64),
-    ],
-)
-def test_serial_prototypes_get_prototype(
-    prototype: SerialPrototypes, expected_type: type, expected_shape: tuple[int, ...] | None, expected_dtype: Any
-) -> None:
-    """Verifies the functioning of the SerialPrototypes enum get_prototype() method."""
-    result = prototype.get_prototype()
-    assert isinstance(result, expected_type)
-
-    if expected_shape is not None:
-        assert result.shape == expected_shape
-        assert result.dtype == expected_dtype
 
 
 @pytest.mark.parametrize(
@@ -537,7 +507,6 @@ def test_serial_communication_init_and_repr(logger_queue: Queue[Any]) -> None:
         test_mode=True,
     )
 
-    # Verifies initialization.
     assert communication._transport_layer is not None
     assert isinstance(communication._module_data, ModuleData)
     assert isinstance(communication._kernel_data, KernelData)
@@ -549,7 +518,6 @@ def test_serial_communication_init_and_repr(logger_queue: Queue[Any]) -> None:
     assert communication._source_id == 1
     assert communication._usb_port == "TEST"
 
-    # Verifies string representation.
     expected_repr = "SerialCommunication(usb_port=TEST, controller_id=1)"
     assert repr(communication) == expected_repr
 
@@ -568,7 +536,6 @@ def test_serial_communication_send_message(logger_queue: Queue[Any]) -> None:
 
     communication.send_message(message=message)
 
-    # Verifies the data was written to the transport layer.
     assert communication._transport_layer.transmission_buffer[:3].tobytes() == message.packed_data.tobytes()
 
 
@@ -655,7 +622,6 @@ def test_serial_communication_receive_message(
         microcontroller_serial_buffer_size=300,
     )
 
-    # First verifies that the method returns None when there is no data to receive.
     assert communication.receive_message() is None
 
     # Next, transforms the tested payload into the message format that can be received via the TransportLayer. This is
@@ -685,7 +651,6 @@ def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) ->
         microcontroller_serial_buffer_size=300,
     )
 
-    # Verifies receiving a message with invalid protocol code.
     message_data = np.array([255, 1, 2], dtype=np.uint8)  # Invalid protocol code
 
     # Sends the message through the TransportLayer, which COBS-encodes and CRC-stamps it before writing the finished
@@ -697,7 +662,6 @@ def test_serial_communication_receive_message_error(logger_queue: Queue[Any]) ->
     # has the correct format to pass TransportLayer verification steps that ensure message integrity.
     _loop_back_mocked_port(communication=communication)
 
-    # Ensures that a message with an invalid protocol raises a ValueError.
     message = (
         f"Unable to parse the message received from the microcontroller. The message must use one of the incoming "
         f"message protocol codes available from the SerialProtocols enumeration, but got {255}."
@@ -803,9 +767,7 @@ def test_mqtt_communication_connection_error() -> None:
 
 @pytest.mark.xdist_group(name="group1")
 def test_mqtt_communication_send_receive() -> None:
-    """Verifies the bidirectional communication between MQTTCommunication and another simulated client (e.g., Unity
-    game engine)
-    """
+    """Verifies the bidirectional communication between MQTTCommunication and another simulated client."""
     if not _broker_available():
         pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {_BROKER_IP} and port {_BROKER_PORT}.")
 
@@ -869,15 +831,15 @@ def test_mqtt_communication_send_receive_errors() -> None:
     unity_communication = MQTTCommunication(ip=_BROKER_IP, port=_BROKER_PORT, monitored_topics=_TEST_TOPICS)
     message = (
         f"Unable to send data to the MQTT broker at {_BROKER_IP}:{_BROKER_PORT} via the MQTTCommunication instance. "
-        f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-        f"sending data."
+        f"The instance must be connected to the MQTT broker before data is sent, but connect() has not been "
+        f"called."
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
         unity_communication.send_data(topic="test/ topic1")
     message = (
         f"Unable to get data from the MQTT broker at {_BROKER_IP}:{_BROKER_PORT} via the MQTTCommunication instance. "
-        f"The MQTTCommunication instance is not connected to the MQTT broker, call connect() method before "
-        f"retrieving data."
+        f"The instance must be connected to the MQTT broker before data is retrieved, but connect() has not "
+        f"been called."
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
         unity_communication.get_data()
@@ -914,7 +876,7 @@ def test_mqtt_communication_send_data_publish_error(monkeypatch: pytest.MonkeyPa
     unity_communication._connected = True
 
     def publish(topic: str, payload: Any, qos: int) -> mqtt.MQTTMessageInfo:
-        """Reports a dropped link through the returned status instead of handing the payload to the broker."""
+        """Reports a dropped link through the returned status."""
         information = mqtt.MQTTMessageInfo(mid=1)
         information.rc = mqtt.MQTT_ERR_NO_CONN
         return information

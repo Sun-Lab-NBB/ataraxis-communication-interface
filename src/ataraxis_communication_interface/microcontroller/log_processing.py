@@ -42,8 +42,9 @@ identical cross-platform behavior on all supported platforms."""
 @dataclass(frozen=True, slots=True)
 class ExtractedMessages:
     """Stores the data parsed from a set of incoming messages received by the PC from the microcontroller during
-    runtime, in columnar form. All arrays share the same length, with each index position corresponding to a single
-    message.
+    runtime, in columnar form.
+
+    All arrays share the same length, with each index position corresponding to a single message.
     """
 
     timestamps: NDArray[np.uint64]
@@ -54,13 +55,11 @@ class ExtractedMessages:
     """The event code of each message."""
     dtypes: tuple[str | None, ...]
     """The numpy dtype string for the data payload of each message (e.g., ``'float32'``, ``'uint16'``), or None for
-    state-only messages that carry no data and for data messages whose prototype code this library does not recognize.
-    Combined with the corresponding ``data_payloads`` entry, the stored dtype string allows reconstructing the
-    original numpy array from the payload bytes without any library dependency."""
+    state-only messages that carry no data and for data messages whose prototype code this library does not
+    recognize."""
     data_payloads: tuple[bytes | None, ...]
     """The serialized binary payload of each message, or None for state-only messages and for data messages whose
-    prototype code this library does not recognize. Each entry is the raw byte representation of the numpy data array,
-    decodable via the corresponding ``dtypes`` entry."""
+    prototype code this library does not recognize."""
 
     @property
     def count(self) -> int:
@@ -114,8 +113,7 @@ type _BatchResult = tuple[
     dict[tuple[int, int], _ColumnAccumulator],
     _ColumnAccumulator,
 ]
-"""Describes the return type of _process_message_batch: a module data dictionary mapping (type, id) tuples to
-column accumulators, and a column accumulator for kernel messages."""
+"""Both accumulators hold their messages in chronological order."""
 
 
 def extract_logged_microcontroller_data(
@@ -163,7 +161,7 @@ def extract_logged_microcontroller_data(
             raised if the archive carries no onset timestamp message, and if a data message carries a data payload of
             a different size than its prototype code declares.
     """
-    # Validates the archive path. LogArchiveReader checks existence, but not the .npz suffix or file type.
+    # LogArchiveReader checks existence, but not the .npz suffix or file type.
     if not log_path.exists() or log_path.suffix != ".npz" or not log_path.is_file():
         message = (
             f"Unable to extract microcontroller message data from the log file {log_path}, as it does not exist or "
@@ -171,7 +169,7 @@ def extract_logged_microcontroller_data(
         )
         console.error(message=message, error=ValueError)
 
-    # Creates a reader for the target archive. The reader handles onset timestamp discovery and message key management.
+    # The reader handles onset timestamp discovery and message key management.
     reader = LogArchiveReader(archive_path=log_path)
 
     # An archive holding no data messages yields empty columns for every requested target.
@@ -201,8 +199,8 @@ def extract_logged_microcontroller_data(
             module_filters=module_filters,
         )
 
-    # Resolves the number of workers if not already resolved by the caller. External executors are pre-sized, so
-    # the caller provides a positive workers value that matches the executor's pool size.
+    # External executors are pre-sized, so the caller provides a positive workers value that matches the executor's
+    # pool size.
     if workers < 1:
         workers = resolve_worker_count(requested_workers=workers)
 
@@ -297,7 +295,6 @@ def _run_extraction_batches(
             for index, batch_keys in enumerate(batches)
         }
 
-        # Collects results while maintaining message order.
         results: list[_BatchResult | None] = [None] * len(batches)
 
         if display_progress:
@@ -306,7 +303,7 @@ def _run_extraction_batches(
             ) as progress_bar:
                 for future in as_completed(future_to_index):
                     results[future_to_index[future]] = future.result()
-                    progress_bar.update(1)
+                    progress_bar.update(n=1)
         else:
             for future in as_completed(future_to_index):
                 results[future_to_index[future]] = future.result()
@@ -324,9 +321,7 @@ def _process_message_batch(
     """Processes a batch of messages from a MicroControllerInterface log archive, extracting both hardware module
     and kernel messages in a single pass into columnar accumulators.
 
-    Each message is routed to module or kernel accumulators based on its protocol code, then filtered by per-module
-    event codes. Each module is filtered against its own event code set to prevent off-target extraction across
-    modules. Data payloads are converted to bytes immediately to avoid storing intermediate numpy objects.
+    Data payloads are converted to bytes immediately to avoid storing intermediate numpy objects.
 
     Args:
         log_path: The path to the processed .npz log file.
@@ -337,13 +332,12 @@ def _process_message_batch(
         kernel_event_codes: The event codes to extract for kernel messages, or None to skip kernel extraction.
 
     Returns:
-        A tuple of (module_accumulators, kernel_accumulator). module_accumulators maps module (type, id) tuples
-        to column accumulators. kernel_accumulator stores kernel messages in chronological order.
+        The accumulators of every requested module, keyed by the module type and identifier pair, and the kernel
+        accumulator, both in chronological order.
 
     Raises:
         ValueError: If a data message carries a data payload of a different size than its prototype code declares.
     """
-    # Pre-creates columnar accumulators for each requested module and the kernel.
     extract_modules = module_filters is not None
     extract_kernel = kernel_event_codes is not None
 
@@ -367,22 +361,20 @@ def _process_message_batch(
         payload = log_message.payload
         protocol = payload[0]
 
-        # Routes module messages (MODULE_DATA / MODULE_STATE) through the extraction pipeline.
         if extract_modules and protocol in module_protocols:
             # Reads the header in one pass, since indexing the resulting bytes object yields Python integers while
             # indexing the payload array allocates a NumPy scalar per field. A MODULE_STATE payload carries only the
             # first five of these bytes, and the sixth is read solely under MODULE_DATA.
             header = payload[:6].tobytes()
 
-            # Looks up the per-module event codes and accumulator in a single dict access. Returns None if the module
-            # is not requested, combining module membership and event filter retrieval into one O(1) operation.
+            # Looks up the per-module event codes and accumulator in a single dict access, combining module membership
+            # and event filter retrieval into one O(1) operation.
             current_module = (header[1], header[2])
             target = module_targets.get(current_module)
             if target is None:
                 continue
             module_events, accumulator = target
 
-            # Filters against this specific module's event codes, preventing off-target extraction.
             event_code = header[4]
             if event_code not in module_events:
                 continue
@@ -403,25 +395,21 @@ def _process_message_batch(
                         log_path=log_path,
                     )
 
-            # Appends directly to the module's columnar accumulator.
             accumulator.timestamps.append(int(log_message.timestamp_us))
             accumulator.commands.append(header[3])
             accumulator.events.append(event_code)
             accumulator.dtypes.append(dtype_str)
             accumulator.data_payloads.append(data_payload)
 
-        # Routes kernel messages (KERNEL_DATA / KERNEL_STATE) through the extraction pipeline.
         elif extract_kernel and protocol in kernel_protocols:
             # Reads the header in one pass on the same terms as the module header above. A KERNEL_STATE payload
             # carries only the first three of these bytes, and the fourth is read solely under KERNEL_DATA.
             header = payload[:4].tobytes()
 
-            # Extracts only messages with requested event codes.
             event_code = header[2]
             if event_code not in kernel_event_codes:  # type: ignore[operator]  # narrowed by the extract_kernel flag.
                 continue
 
-            # Resolves the numpy dtype string and extracts the raw data bytes for KERNEL_DATA messages.
             dtype_str = None
             data_payload = None
             if header[0] == SerialProtocols.KERNEL_DATA:
@@ -436,7 +424,6 @@ def _process_message_batch(
                         log_path=log_path,
                     )
 
-            # Appends directly to the kernel's columnar accumulator.
             kernel_accumulator.timestamps.append(int(log_message.timestamp_us))
             kernel_accumulator.commands.append(header[1])
             kernel_accumulator.events.append(event_code)
@@ -525,7 +512,7 @@ def _finalize_accumulator(accumulator: _ColumnAccumulator) -> ExtractedMessages:
         accumulator: The column accumulator to finalize.
 
     Returns:
-        An ExtractedMessages instance with numpy arrays built from the accumulator's lists.
+        The finalized columnar message block.
     """
     return ExtractedMessages(
         timestamps=np.array(accumulator.timestamps, dtype=np.uint64),
@@ -544,8 +531,8 @@ def _finalize_batch(
     """Converts the accumulators of one extraction pass into the finalized controller data.
 
     Notes:
-        Reports a module only when it produced at least one matching message, so a configured module that stayed
-        silent for the whole recording contributes no entry and therefore no output file.
+        Reports a module only when it produced at least one matching message, so a configured module that stayed silent
+        for the whole recording contributes no entry.
 
     Args:
         module_accumulators: The column accumulator of each requested module, keyed by the module type and

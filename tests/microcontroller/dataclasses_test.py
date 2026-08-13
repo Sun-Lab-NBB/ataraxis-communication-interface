@@ -318,9 +318,10 @@ def test_write_microcontroller_manifest_replaces_a_repeated_controller(tmp_path:
     assert loaded.controllers[0].modules[0].name == "lick_sensor"
 
 
+@pytest.mark.xdist_group(name="orchestration")
 def test_write_microcontroller_manifest_serializes_concurrent_processes(tmp_path: Path) -> None:
     """Verifies that controllers registered from separate processes all survive in the manifest."""
-    # Separate processes are what the file lock adds over a thread lock. Each writer reads the manifest, adds its own
+    # The file lock serializes writers across process boundaries. Each writer reads the manifest, adds its own
     # entry, and writes the result back, so a writer that slips past the lock overwrites the entries written between
     # its own read and its own write. The barrier releases every writer into that sequence at once.
     controller_ids = (10, 20, 30, 40, 50, 60)
@@ -344,7 +345,7 @@ def test_write_microcontroller_manifest_serializes_concurrent_processes(tmp_path
 def test_write_microcontroller_manifest_serializes_concurrent_threads(tmp_path: Path) -> None:
     """Verifies that controllers registered from separate threads of one process all survive in the manifest."""
     # The threads that concurrent MCP tool calls run on reach this function as well, so the file lock has to serialize
-    # them the way the thread lock it replaced did.
+    # them too.
     controller_ids = (10, 20, 30, 40, 50, 60)
     barrier = threading.Barrier(parties=len(controller_ids))
     failures: list[Exception] = []

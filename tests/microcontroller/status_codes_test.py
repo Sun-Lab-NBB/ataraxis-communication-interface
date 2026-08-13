@@ -152,7 +152,7 @@ def test_non_fault_module_event_produces_no_description() -> None:
 
 
 def test_every_kernel_fault_code_produces_a_description() -> None:
-    """Verifies that every Kernel fault code resolves to a description naming the code and its response."""
+    """Verifies that every Kernel fault code resolves to a description naming the code and the condition it reports."""
     for code in _KERNEL_ERROR_DESCRIPTIONS:
         description = _describe_kernel(_build_kernel_data(command=1, event=code, payload=np.zeros(2, dtype=np.uint8)))
         assert description is not None

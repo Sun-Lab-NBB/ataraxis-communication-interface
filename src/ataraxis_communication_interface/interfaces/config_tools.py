@@ -19,9 +19,6 @@ from ..microcontroller import (
 def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
     """Reads an extraction configuration from a YAML file and returns its contents.
 
-    Parses the ExtractionConfig file and returns a structured dictionary representation of all controller,
-    module, and kernel extraction settings.
-
     Args:
         config_path: The absolute path to the extraction configuration YAML file.
 
@@ -78,11 +75,6 @@ def read_extraction_config_tool(config_path: str) -> dict[str, Any]:
 @mcp.tool()
 def write_extraction_config_tool(config_path: str, controllers: list[dict[str, Any]]) -> dict[str, Any]:
     """Writes an extraction configuration to a YAML file from structured controller data.
-
-    Accepts a list of controller dictionaries, constructs an ExtractionConfig instance, and serializes it
-    to the specified YAML file path. Each controller dictionary must contain 'controller_id' and 'modules'
-    keys. Each module must have 'module_type' (type code), 'module_id' (ID code), and 'event_codes' keys.
-    An optional 'kernel' key may contain a dictionary with 'event_codes'.
 
     Args:
         config_path: The absolute path where the extraction configuration YAML file will be written.

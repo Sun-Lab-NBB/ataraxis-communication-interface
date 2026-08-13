@@ -166,8 +166,7 @@ def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str,
     """Deletes the microcontroller_data subdirectory under one or more output directories.
 
     Removes each ``microcontroller_data/`` subdirectory and all of its contents, including processed output files
-    and the processing tracker. Uses ``delete_directory`` from ataraxis-data-structures for parallel file deletion
-    with platform-safe retry logic. After cleanup, the output directories can be passed to
+    and the processing tracker. After cleanup, the output directories can be passed to
     prepare_log_processing_batch_tool to reinitialize from scratch. Accepts the same output directory paths that were
     supplied to prepare_log_processing_batch_tool.
 
@@ -185,43 +184,6 @@ def clean_log_processing_output_tool(output_directories: list[str]) -> dict[str,
     total_cleaned = sum(1 for result in results if result.get("cleaned", False))
 
     return {"results": results, "total_cleaned": total_cleaned, "total_directories": len(results)}
-
-
-def _clean_single_output(output_directory: str) -> dict[str, Any]:
-    """Deletes the microcontroller_data subdirectory under a single output directory.
-
-    Args:
-        output_directory: The absolute path to the output directory.
-
-    Returns:
-        A dictionary containing 'output_directory' and a 'cleaned' flag. A successful deletion adds 'data_path', a
-        failed deletion adds both 'data_path' and 'error', a path that does not resolve to a directory adds 'error'
-        alone, and a directory with nothing to clean adds 'message'.
-    """
-    output_path = Path(output_directory)
-
-    if not output_path.exists():
-        return {"output_directory": output_directory, "cleaned": False, "error": "Directory does not exist."}
-
-    if not output_path.is_dir():
-        return {"output_directory": output_directory, "cleaned": False, "error": "Path is not a directory."}
-
-    data_path = output_path / OutputLayout.DIRECTORY_NAME
-
-    if not data_path.exists():
-        return {"output_directory": output_directory, "cleaned": True, "message": "Nothing to clean."}
-
-    try:
-        delete_directory(directory_path=data_path)
-    except Exception as error:
-        return {
-            "output_directory": output_directory,
-            "cleaned": False,
-            "data_path": str(data_path),
-            "error": f"Unable to delete: {error}",
-        }
-
-    return {"output_directory": output_directory, "cleaned": True, "data_path": str(data_path)}
 
 
 def _analyze_single_event_feather(
@@ -348,7 +310,7 @@ def _analyze_single_event_feather(
             "median_ms": median_ms,
         }
 
-    # Builds sample rows with binary data omitted for readability.
+    # The binary payload column is replaced by a presence flag, because a raw buffer is unreadable in a response.
     sample_rows: list[dict[str, Any]] = []
     sample_count = min(max_sample_rows, total_rows)
     sample_dataframe = pl.scan_ipc(source=file_path).head(sample_count).collect()
@@ -375,3 +337,40 @@ def _analyze_single_event_feather(
         "inter_event_timing": inter_event_timing,
         "sample_rows": sample_rows,
     }
+
+
+def _clean_single_output(output_directory: str) -> dict[str, Any]:
+    """Deletes the microcontroller_data subdirectory under a single output directory.
+
+    Args:
+        output_directory: The absolute path to the output directory.
+
+    Returns:
+        A dictionary containing 'output_directory' and a 'cleaned' flag. A successful deletion adds 'data_path', a
+        failed deletion adds both 'data_path' and 'error', a path that does not resolve to a directory adds 'error'
+        alone, and a directory with nothing to clean adds 'message'.
+    """
+    output_path = Path(output_directory)
+
+    if not output_path.exists():
+        return {"output_directory": output_directory, "cleaned": False, "error": "Directory does not exist."}
+
+    if not output_path.is_dir():
+        return {"output_directory": output_directory, "cleaned": False, "error": "Path is not a directory."}
+
+    data_path = output_path / OutputLayout.DIRECTORY_NAME
+
+    if not data_path.exists():
+        return {"output_directory": output_directory, "cleaned": True, "message": "Nothing to clean."}
+
+    try:
+        delete_directory(directory_path=data_path)
+    except Exception as error:
+        return {
+            "output_directory": output_directory,
+            "cleaned": False,
+            "data_path": str(data_path),
+            "error": f"Unable to delete: {error}",
+        }
+
+    return {"output_directory": output_directory, "cleaned": True, "data_path": str(data_path)}

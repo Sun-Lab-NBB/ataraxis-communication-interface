@@ -1,4 +1,4 @@
-"""Contains tests for the classes and functions provided by the jobs.py module."""
+"""Contains tests for the classes and functions provided by the orchestration/jobs.py module."""
 
 import pickle
 from pathlib import Path
@@ -387,7 +387,7 @@ def test_from_mapping_missing_key(tmp_path: Path) -> None:
 
 
 def test_from_mapping_missing_key_reports_every_absent_key(tmp_path: Path) -> None:
-    """Verifies that from_mapping names every absent key in sorted order rather than only the first one."""
+    """Verifies that from_mapping names every absent key in sorted order."""
     job = _build_descriptor(tmp_path=tmp_path)
     payload = job.to_mapping()
     del payload["source_id"]
@@ -403,7 +403,7 @@ def test_from_mapping_missing_key_reports_every_absent_key(tmp_path: Path) -> No
 
 
 def test_from_mapping_empty_mapping() -> None:
-    """Verifies that from_mapping rejects an empty payload instead of building a descriptor from defaults."""
+    """Verifies that from_mapping rejects an empty payload."""
     message = (
         "Unable to read a microcontroller data extraction job descriptor from the supplied mapping. The following "
         "required keys are absent:"
@@ -594,45 +594,6 @@ def test_parse_module_path_rejects_foreign_names(tmp_path: Path, filename: str) 
         parse_module_path(file_path=tmp_path / filename)
 
 
-def _create_archive(directory: Path, source_id: int) -> Path:
-    """Writes a synthetic microcontroller log archive for the target source into the requested directory."""
-    directory.mkdir(parents=True, exist_ok=True)
-    archive_path = directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
-    create_test_archive(
-        archive_path=archive_path,
-        source_id=source_id,
-        messages=[
-            (1000, create_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
-            (2000, create_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
-        ],
-        onset_us=_ONSET_US,
-    )
-    return archive_path
-
-
-def _build_descriptor(tmp_path: Path, source_id: int = 1, core_weight: int = 1) -> JobDescriptor:
-    """Builds a descriptor addressing a real synthetic archive written under the requested temporary directory."""
-    log_directory = tmp_path / "logs"
-    archive_path = _create_archive(directory=log_directory, source_id=source_id)
-    output_directory = resolve_output_directory(output_directory=tmp_path / "output")
-    config_path = write_extraction_config(config_path=tmp_path / "config.yaml", source_id=source_id)
-
-    return JobDescriptor.for_archive(
-        archive_path=archive_path,
-        output_directory=output_directory,
-        config_path=config_path,
-        tracker_path=resolve_tracker_path(output_directory=output_directory),
-        source_id=str(source_id),
-        log_directory=log_directory,
-        core_weight=core_weight,
-    )
-
-
-def _normalize(text: object) -> str:
-    """Collapses the line wrapping the console applies, so a message fragment matches the raised error's text."""
-    return " ".join(str(text).split())
-
-
 def test_find_kernel_paths(tmp_path: Path) -> None:
     """Verifies that find_kernel_paths discovers every kernel output file the directory holds, sorted by path."""
     second = resolve_kernel_path(output_directory=tmp_path, source_id="2")
@@ -694,3 +655,42 @@ def test_parse_kernel_path_rejects_foreign_names(tmp_path: Path, filename: str) 
 
     with pytest.raises(ValueError, match=error_format(message)):
         parse_kernel_path(file_path=tmp_path / filename)
+
+
+def _create_archive(directory: Path, source_id: int) -> Path:
+    """Writes a synthetic microcontroller log archive for the target source into the requested directory."""
+    directory.mkdir(parents=True, exist_ok=True)
+    archive_path = directory / f"{source_id}{LOG_ARCHIVE_SUFFIX}"
+    create_test_archive(
+        archive_path=archive_path,
+        source_id=source_id,
+        messages=[
+            (1000, create_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
+            (2000, create_module_state_payload(module_type=1, module_id=2, command=1, event=10)),
+        ],
+        onset_us=_ONSET_US,
+    )
+    return archive_path
+
+
+def _build_descriptor(tmp_path: Path, source_id: int = 1, core_weight: int = 1) -> JobDescriptor:
+    """Builds a descriptor addressing a real synthetic archive written under the requested temporary directory."""
+    log_directory = tmp_path / "logs"
+    archive_path = _create_archive(directory=log_directory, source_id=source_id)
+    output_directory = resolve_output_directory(output_directory=tmp_path / "output")
+    config_path = write_extraction_config(config_path=tmp_path / "config.yaml", source_id=source_id)
+
+    return JobDescriptor.for_archive(
+        archive_path=archive_path,
+        output_directory=output_directory,
+        config_path=config_path,
+        tracker_path=resolve_tracker_path(output_directory=output_directory),
+        source_id=str(source_id),
+        log_directory=log_directory,
+        core_weight=core_weight,
+    )
+
+
+def _normalize(text: object) -> str:
+    """Collapses the line wrapping the console applies, so a message fragment matches the raised error's text."""
+    return " ".join(str(text).split())

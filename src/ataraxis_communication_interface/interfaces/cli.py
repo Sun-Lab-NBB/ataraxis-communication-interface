@@ -53,7 +53,7 @@ def identify(baudrate: int) -> None:
     """
     available_ports = list_available_ports()
 
-    # Filters out invalid ports (PID == None) - primarily for Linux systems.
+    # Linux enumerates ports that expose no product identifier, which no microcontroller ever answers on.
     valid_ports = [port for port in available_ports if port.pid is not None]
 
     if not valid_ports:
@@ -94,16 +94,14 @@ def identify(baudrate: int) -> None:
             count += 1
 
             if error_message is not None:
-                # Port encountered a connection error.
                 console.echo(
                     message=f"{count}: {port_info.device} -> {port_info.description} "
                     f"[Connection Failed: {error_message}]"
                 )
             elif controller_id == -1:
-                # Port did not respond or is not a valid microcontroller.
+                # Reports the sentinel the evaluator returns for a port that never answered the handshake.
                 console.echo(message=f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
             else:
-                # Port is connected to a valid microcontroller with identified ID.
                 console.echo(
                     message=f"{count}: {port_info.device} -> {port_info.description} "
                     f"[Microcontroller ID: {controller_id}]"
@@ -166,7 +164,7 @@ def config_group() -> None:
     "-o",
     "--output-path",
     required=True,
-    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, writable=True, path_type=Path),
     help="The path to the output .yaml file where to save the generated configuration data.",
 )
 def config_create(manifest_path: Path, output_path: Path) -> None:
@@ -226,7 +224,7 @@ def config_show(config_path: Path) -> None:
     "-od",
     "--output-directory",
     required=True,
-    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    type=click.Path(exists=False, file_okay=False, dir_okay=True, writable=True, path_type=Path),
     help="The path to the directory where processed output files are written. Created automatically if it "
     "does not exist. All processed data is saved under microcontroller_data subdirectory created under this target "
     "output directory.",
@@ -273,7 +271,7 @@ def config_show(config_path: Path) -> None:
     help="Determines whether to suppress the progress bars during data extraction. The progress bars are displayed by "
     "default.",
 )
-def process(
+def process_log_archives(
     log_directory: Path,
     output_directory: Path,
     config: Path,
