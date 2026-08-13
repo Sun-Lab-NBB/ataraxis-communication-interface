@@ -170,12 +170,15 @@ def resolve_jobs(log_directory: Path) -> JobUniverse:
         )
 
     if len(candidates) > 1:
+        # The paths are joined into text because interpolating the collection itself renders it through repr(), which
+        # escapes the separator of every Windows path it holds and reports a path the filesystem does not carry.
+        manifest_paths = ", ".join(str(candidate) for candidate in candidates)
         message = (
             f"Unable to resolve microcontroller data extraction jobs in '{log_directory}'. The directory tree holds "
             f"{len(candidates)} {MICROCONTROLLER_MANIFEST_FILENAME} files, which means it spans several recordings "
-            f"or several DataLogger instances: {[str(candidate) for candidate in candidates]}. One recording writes "
-            f"one MicroControllerInterface set to one logger, so exactly one manifest is supported per invocation. "
-            f"Pass the individual DataLogger output directory of each recording instead."
+            f"or several DataLogger instances: {manifest_paths}. One recording writes one MicroControllerInterface "
+            f"set to one logger, so exactly one manifest is supported per invocation. Pass the individual DataLogger "
+            f"output directory of each recording instead."
         )
         console.error(message=message, error=ValueError)
 
@@ -374,12 +377,15 @@ def prepare_jobs(
     parent_directories = {archives[source_id].parent for source_id in prepared_ids}
 
     if len(parent_directories) > 1:
+        # The paths are joined into text because interpolating the collection itself renders it through repr(), which
+        # escapes the separator of every Windows path it holds and reports a path the filesystem does not carry.
+        archive_directories = ", ".join(sorted(str(parent) for parent in parent_directories))
         message = (
             f"Unable to prepare microcontroller data extraction jobs in '{log_directory}'. The resolved log archives "
-            f"sit in {len(parent_directories)} different directories: "
-            f"{sorted(str(parent) for parent in parent_directories)}. Archives in separate directories were written "
-            f"by separate DataLogger instances, and one recording writes one logger, so this tree holds more than "
-            f"one recording. Each DataLogger output directory must be prepared and processed on its own invocation."
+            f"sit in {len(parent_directories)} different directories: {archive_directories}. Archives in separate "
+            f"directories were written by separate DataLogger instances, and one recording writes one logger, so this "
+            f"tree holds more than one recording. Each DataLogger output directory must be prepared and processed on "
+            f"its own invocation."
         )
         console.error(message=message, error=ValueError)
 
