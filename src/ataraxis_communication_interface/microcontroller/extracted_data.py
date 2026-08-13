@@ -18,12 +18,7 @@ if TYPE_CHECKING:
 
 
 class ExtractedDataColumns(StrEnum):
-    """Defines the columns every extracted message table carries, in the order the table stores them.
-
-    Notes:
-        Each member is a string, so a member indexes a table, names a series, and serializes into a report wherever
-        the raw column name would. Iterating the enumeration yields the complete column set in storage order.
-    """
+    """Defines the columns every extracted message table carries, in the order the table stores them."""
 
     TIMESTAMP = "timestamp_us"
     """Holds the microseconds elapsed since the UTC epoch onset when each message arrived."""
@@ -42,17 +37,11 @@ class ExtractedDataColumns(StrEnum):
 def build_message_dataframe(messages: ExtractedMessages) -> pl.DataFrame:
     """Builds a polars DataFrame from an extracted columnar message block.
 
-    Notes:
-        The dtype column stores the numpy dtype string of each message's data payload, which allows a consumer to
-        reconstruct the original array through ``np.frombuffer(payload, dtype=dtype_str)`` without depending on this
-        library.
-
     Args:
         messages: The columnar message data to serialize.
 
     Returns:
-        A polars DataFrame carrying the extracted message columns, with the timestamp stored as UInt64, the command
-        and the event as UInt8, the dtype as String, and the data as Binary.
+        The extracted message columns in the schema the table stores.
     """
     return pl.DataFrame(
         {
@@ -83,9 +72,6 @@ def partition_events(module_dataframe: pl.DataFrame) -> dict[int, pl.DataFrame]:
 def get_event_timestamps(partition: dict[int, pl.DataFrame], event_code: int) -> NDArray[np.uint64]:
     """Reads the arrival timestamps of every message carrying the target event code.
 
-    Notes:
-        Serves a state-only event, whose messages carry a timestamp alone.
-
     Args:
         partition: The event-code-keyed partition produced by partition_events().
         event_code: The event code to look up.
@@ -111,8 +97,8 @@ def get_event_data[ScalarT: np.generic](
         shares a payload dtype. That lets the payloads of a whole event stream be concatenated and decoded through
         one buffer read rather than one read per message.
 
-        An event code declaring a scalar prototype has its trailing value axis squeezed, so it keeps returning a 1-D
-        array holding one value per timestamp.
+        An event code declaring a scalar prototype has its trailing value axis squeezed, so it returns a 1-D array
+        holding one value per timestamp.
 
     Args:
         partition: The event-code-keyed partition produced by partition_events().

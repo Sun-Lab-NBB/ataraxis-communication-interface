@@ -86,8 +86,8 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
 
     port_names = [port.device for port in valid_ports]
 
-    # Uses ProcessPoolExecutor to evaluate all ports in parallel. The pool is sized to the smaller of the port count
-    # and the host's own budget, so a host with many ports does not spawn a process per port.
+    # The pool is sized to the smaller of the port count and the host's own budget, so a host with many ports does
+    # not spawn a process per port.
     results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
 
     # Pins every worker from both sides for the pool's whole lifetime. The environment limit reaches the backends that
@@ -136,8 +136,7 @@ def list_microcontrollers_tool(baudrate: int = 115200) -> str:
 def check_mqtt_broker_tool(host: str = "127.0.0.1", port: int = 1883) -> str:
     """Checks whether an MQTT broker is reachable at the specified host and port.
 
-    Attempts to connect to the MQTT broker and reports the result. Use this tool to verify MQTT broker availability
-    before running code that depends on MQTT communication.
+    Use this tool to verify MQTT broker availability before running code that depends on MQTT communication.
 
     Args:
         host: The IP address or hostname of the MQTT broker.
@@ -169,12 +168,8 @@ def assemble_log_archives_tool(
 ) -> dict[str, Any]:
     """Consolidates raw .npy log entries in a DataLogger output directory into .npz archives by source ID.
 
-    Assembles the raw .npy files produced by a DataLogger instance into consolidated .npz archives, one per unique
-    source ID. This is required before the log processing pipeline can extract microcontroller data.
-
-    This tool is useful when log archives need to be assembled independently of a runtime stop operation,
-    for example when processing log directories from previous sessions or when the automatic assembly was skipped or
-    failed.
+    Runs ahead of the log processing pipeline, which reads the assembled archives to extract microcontroller data.
+    Serves a log directory from an earlier session, and a directory whose automatic assembly was skipped or failed.
 
     Important:
         The AI agent calling this tool MUST ask the user to provide the log_directory path before calling this
@@ -272,8 +267,7 @@ def write_microcontroller_manifest_tool(
 
     If the manifest already exists (another MicroControllerInterface has already registered), replaces the entry
     registered under the same controller_id or appends a new one when the manifest carries none. Otherwise, creates a
-    new manifest. Each module entry must have 'module_type' (int type code), 'module_id' (int ID code), and 'name'
-    (str) keys.
+    new manifest.
 
     Important:
         The AI agent calling this tool MUST know the controller ID, name, and module details. Do not guess
@@ -376,7 +370,7 @@ def discover_microcontroller_data_tool(
         'next_start_row' paging fields whenever a filter is named or the listing is requested. A scan confirming no
         source returns an empty 'sources' list and an empty 'breakdown' whatever the filters name. Returns an error
         dictionary if the root directory is missing, is not a directory, cannot be searched, or a filter names a value
-        the scan did find no source for.
+        the scan found no source for.
     """
     root_path = Path(root_directory)
 
@@ -437,18 +431,17 @@ def discover_microcontroller_data_tool(
     log_directory_paths = sorted(log_directories_with_archives)
     log_directory_to_root = _resolve_log_directory_roots(log_directory_paths=log_directory_paths)
 
-    sources_output: list[dict[str, Any]] = []
-    for log_directory, source_id, controller_name, archive_path, module_entries in confirmed_sources:
-        sources_output.append(
-            {
-                "recording_root": str(log_directory_to_root[log_directory]),
-                "source_id": str(source_id),
-                "name": controller_name,
-                "log_archive": str(archive_path),
-                "log_directory": str(log_directory),
-                "modules": module_entries,
-            }
-        )
+    sources_output: list[dict[str, Any]] = [
+        {
+            "recording_root": str(log_directory_to_root[log_directory]),
+            "source_id": str(source_id),
+            "name": controller_name,
+            "log_archive": str(archive_path),
+            "log_directory": str(log_directory),
+            "modules": module_entries,
+        }
+        for log_directory, source_id, controller_name, archive_path, module_entries in confirmed_sources
+    ]
 
     response: dict[str, Any] = {
         "log_directories": sorted(str(log_directory) for log_directory in log_directory_paths),

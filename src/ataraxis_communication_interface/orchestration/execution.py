@@ -58,6 +58,12 @@ _MAXIMUM_JOB_REQUEUES: int = 2
 """The times one job is requeued after a break it is provably responsible for. A job running alone when the pool
 broke is the only job a break can be attributed to, so only such a job spends this budget."""
 
+_EXECUTION_LOCK: Lock = Lock()
+"""Serializes the check-and-reserve that admits one batch execution session at a time. The test of the reference below
+and its replacement sit on opposite sides of a bytecode boundary. Two callers finding the slot free would otherwise both
+publish a session, and the second would strand the first session's worker pool beyond the reach of every cancellation
+tool."""
+
 
 @dataclass(slots=True)
 class JobExecutionState:
@@ -111,12 +117,6 @@ class _ActiveJob:
     """The future the pool returned, which carries the job body's outcome."""
 
 
-_execution_lock: Lock = Lock()
-"""Serializes the check-and-reserve that admits one batch execution session at a time. The test of the reference below
-and its replacement sit on opposite sides of a bytecode boundary. Two callers finding the slot free would otherwise both
-publish a session, and the second would strand the first session's worker pool beyond the reach of every cancellation
-tool."""
-
 _execution_state: JobExecutionState | None = None
 """Stores the active execution state for batch log processing jobs, or None when no session exists."""
 
@@ -134,7 +134,7 @@ def set_execution_state(state: JobExecutionState | None) -> None:
     """
     global _execution_state
 
-    with _execution_lock:
+    with _EXECUTION_LOCK:
         _execution_state = state
 
 
@@ -157,7 +157,7 @@ def start_execution_session(state: JobExecutionState) -> bool:
     """
     global _execution_state
 
-    with _execution_lock:
+    with _EXECUTION_LOCK:
         active = _execution_state
         if active is not None and active.manager_thread is not None and active.manager_thread.is_alive():
             return False
@@ -174,9 +174,6 @@ def job_execution_manager(state: JobExecutionState) -> None:
     """Dispatches queued jobs into one shared process pool under the batch's core and memory budgets.
 
     Notes:
-        Serves the MCP server and any external scheduler that drives a batch. The command-line pipeline processes one
-        recording sequentially and never reaches it.
-
         Runs as a daemon thread for the lifetime of one execution session. Creates the pool once and keeps it, so a
         job body starts in a worker that is already alive. A body admitted at more than one core opens its own
         extraction pool at that width.

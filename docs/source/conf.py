@@ -16,7 +16,6 @@ extensions = [
     'sphinx_autodoc_typehints',  # To parse typehints into documentation
 ]
 
-templates_path = ['_templates']
 exclude_patterns = []
 
 # Google-style docstring parsing configuration for napoleon extension

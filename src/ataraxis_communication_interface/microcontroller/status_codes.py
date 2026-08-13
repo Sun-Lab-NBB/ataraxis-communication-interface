@@ -176,117 +176,6 @@ class TransportStatusCodes(IntEnum):
     """The communication interface accepted only a part of the packet."""
 
 
-def describe_kernel_event(
-    message: KernelData | KernelState,
-    controller_id: np.uint8,
-    controller_name: str,
-) -> str | None:
-    """Builds the description of the fault the input Kernel message reports.
-
-    Args:
-        message: The Kernel message received from the microcontroller.
-        controller_id: The identifier code of the microcontroller that sent the message.
-        controller_name: The human-readable name of the microcontroller that sent the message.
-
-    Returns:
-        The description of the reported fault, or None when the message reports an ordinary Kernel state. A code
-        matching no enumeration member yields a description reporting that the code falls outside the resolved range.
-    """
-    # The Kernel reports ordinary progress far more often than it reports a fault, and this runs inside the
-    # communication loop, so the table lookup that rules out a fault precedes every string the description needs.
-    event = int(message.event)
-    description = _KERNEL_ERROR_DESCRIPTIONS.get(event)
-    if description is None and event in _KERNEL_STATUS_VALUES:
-        return None
-
-    context = (
-        f"Microcontroller {controller_id} ('{controller_name}') Kernel status "
-        f"{_format_code(code=event, code_type=KernelStatusCodes)} during Kernel command "
-        f"{_format_code(code=int(message.command), code_type=KernelCommandCodes)}."
-    )
-    if description is None:
-        return _join_sentences(context, _describe_unrecognized_code(code=event, code_type=KernelStatusCodes))
-
-    return _join_sentences(context, description, _describe_kernel_payload(message=message, event=event))
-
-
-def describe_module_event(
-    message: ModuleData | ModuleState,
-    controller_id: np.uint8,
-    controller_name: str,
-    module_name: str,
-) -> str | None:
-    """Builds the description of the fault the input service Module message reports.
-
-    Notes:
-        This function resolves the service status codes the base Module class of the firmware defines, which occupy
-        the event code range below MINIMUM_CUSTOM_STATUS_CODE. Codes at or above that bound belong to the custom
-        hardware module and are resolved by describe_custom_module_error() instead.
-
-    Args:
-        message: The Module message received from the microcontroller.
-        controller_id: The identifier code of the microcontroller that manages the reporting hardware module.
-        controller_name: The human-readable name of the microcontroller that manages the reporting hardware module.
-        module_name: The human-readable name of the hardware module that sent the message.
-
-    Returns:
-        The description of the reported fault, or None when the message reports an ordinary module state. A code
-        matching no enumeration member yields a description reporting that the code falls outside the resolved range.
-    """
-    # Every completed command reaches this function, and it runs inside the communication loop, so the table lookup
-    # that rules out a fault precedes every string the description needs.
-    event = int(message.event)
-    description = _MODULE_ERROR_DESCRIPTIONS.get(event)
-    if description is None and event in _MODULE_STATUS_VALUES:
-        return None
-
-    source = _format_module_context(
-        message=message,
-        controller_id=controller_id,
-        controller_name=controller_name,
-        module_name=module_name,
-    )
-    context = (
-        f"{source} service status {_format_code(code=event, code_type=ModuleStatusCodes)} during command "
-        f"{message.command}."
-    )
-    if description is None:
-        return _join_sentences(context, _describe_unrecognized_code(code=event, code_type=ModuleStatusCodes))
-
-    detail = _describe_serial_failure(message=message) if event == ModuleStatusCodes.TRANSMISSION_ERROR else ""
-    return _join_sentences(context, description, detail)
-
-
-def describe_custom_module_error(
-    message: ModuleData | ModuleState,
-    controller_id: np.uint8,
-    controller_name: str,
-    module_name: str,
-    description: str,
-) -> str:
-    """Builds the description of the custom error the input Module message reports.
-
-    Args:
-        message: The Module message received from the microcontroller.
-        controller_id: The identifier code of the microcontroller that manages the reporting hardware module.
-        controller_name: The human-readable name of the microcontroller that manages the reporting hardware module.
-        module_name: The human-readable name of the hardware module that sent the message.
-        description: The explanation the module interface registered for the message's event code.
-
-    Returns:
-        The description of the reported error.
-    """
-    source = _format_module_context(
-        message=message,
-        controller_id=controller_id,
-        controller_name=controller_name,
-        module_name=module_name,
-    )
-    context = f"{source} error code {message.event} during command {message.command}."
-    payload = f"Data object: {message.data_object}." if isinstance(message, ModuleData) else ""
-    return _join_sentences(context, description, payload)
-
-
 _KERNEL_ERROR_DESCRIPTIONS: dict[int, str] = {
     KernelStatusCodes.STANDBY: "Reserved placeholder code that the Kernel never transmits.",
     KernelStatusCodes.MODULE_SETUP_ERROR: (
@@ -374,6 +263,117 @@ _TRANSPORT_STATUS_MEANINGS: dict[int, str] = {
     TransportStatusCodes.PACKET_PARTIALLY_SENT: "serial interface accepted only part of the outgoing packet",
 }
 """Maps each microcontroller-side TransportLayer status code to the condition it reports."""
+
+
+def describe_kernel_event(
+    message: KernelData | KernelState,
+    controller_id: np.uint8,
+    controller_name: str,
+) -> str | None:
+    """Builds the description of the fault the input Kernel message reports.
+
+    Args:
+        message: The Kernel message received from the microcontroller.
+        controller_id: The identifier code of the microcontroller that sent the message.
+        controller_name: The human-readable name of the microcontroller that sent the message.
+
+    Returns:
+        The description of the reported fault, or None when the message reports an ordinary Kernel state. A code
+        matching no enumeration member yields a description reporting that the code falls outside the resolved range.
+    """
+    # The Kernel reports ordinary progress far more often than it reports a fault, and this runs inside the
+    # communication loop, so the table lookup that rules out a fault precedes every string the description needs.
+    event = int(message.event)
+    description = _KERNEL_ERROR_DESCRIPTIONS.get(event)
+    if description is None and event in _KERNEL_STATUS_VALUES:
+        return None
+
+    context = (
+        f"Microcontroller {controller_id} ('{controller_name}') Kernel status "
+        f"{_format_code(code=event, code_type=KernelStatusCodes)} during Kernel command "
+        f"{_format_code(code=int(message.command), code_type=KernelCommandCodes)}."
+    )
+    if description is None:
+        return _join_sentences(context, _describe_unrecognized_code(code=event, code_type=KernelStatusCodes))
+
+    return _join_sentences(context, description, _describe_kernel_payload(message=message, event=event))
+
+
+def describe_module_event(
+    message: ModuleData | ModuleState,
+    controller_id: np.uint8,
+    controller_name: str,
+    module_name: str,
+) -> str | None:
+    """Builds the description of the fault the input service Module message reports.
+
+    Notes:
+        Resolves the service status codes the base Module class of the firmware defines, which occupy the event code
+        range below MINIMUM_CUSTOM_STATUS_CODE. Codes at or above that bound belong to the custom hardware module and
+        are resolved by describe_custom_module_error() instead.
+
+    Args:
+        message: The Module message received from the microcontroller.
+        controller_id: The identifier code of the microcontroller that manages the reporting hardware module.
+        controller_name: The human-readable name of the microcontroller that manages the reporting hardware module.
+        module_name: The human-readable name of the hardware module that sent the message.
+
+    Returns:
+        The description of the reported fault, or None when the message reports an ordinary module state. A code
+        matching no enumeration member yields a description reporting that the code falls outside the resolved range.
+    """
+    # Every completed command reaches this function, and it runs inside the communication loop, so the table lookup
+    # that rules out a fault precedes every string the description needs.
+    event = int(message.event)
+    description = _MODULE_ERROR_DESCRIPTIONS.get(event)
+    if description is None and event in _MODULE_STATUS_VALUES:
+        return None
+
+    source = _format_module_context(
+        message=message,
+        controller_id=controller_id,
+        controller_name=controller_name,
+        module_name=module_name,
+    )
+    context = (
+        f"{source} service status {_format_code(code=event, code_type=ModuleStatusCodes)} during command "
+        f"{message.command}."
+    )
+    if description is None:
+        return _join_sentences(context, _describe_unrecognized_code(code=event, code_type=ModuleStatusCodes))
+
+    detail = _describe_serial_failure(message=message) if event == ModuleStatusCodes.TRANSMISSION_ERROR else ""
+    return _join_sentences(context, description, detail)
+
+
+def describe_custom_module_error(
+    message: ModuleData | ModuleState,
+    controller_id: np.uint8,
+    controller_name: str,
+    module_name: str,
+    description: str,
+) -> str:
+    """Builds the description of the custom error the input Module message reports.
+
+    Args:
+        message: The Module message received from the microcontroller.
+        controller_id: The identifier code of the microcontroller that manages the reporting hardware module.
+        controller_name: The human-readable name of the microcontroller that manages the reporting hardware module.
+        module_name: The human-readable name of the hardware module that sent the message.
+        description: The explanation the module interface registered for the message's event code.
+
+    Returns:
+        The description of the reported error.
+    """
+    source = _format_module_context(
+        message=message,
+        controller_id=controller_id,
+        controller_name=controller_name,
+        module_name=module_name,
+    )
+    context = f"{source} error code {message.event} during command {message.command}."
+    payload = f"Data object: {message.data_object}." if isinstance(message, ModuleData) else ""
+    return _join_sentences(context, description, payload)
 
 
 def _format_code(code: int, code_type: type[IntEnum]) -> str:

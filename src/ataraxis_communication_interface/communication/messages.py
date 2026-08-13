@@ -25,16 +25,16 @@ is large enough. Boards with smaller buffers cap the payload lower, and the Tran
 """
 
 _ZERO_BYTE: np.uint8 = np.uint8(0)
-"""Default zero value for uint8 fields used across message dataclasses."""
+"""The default zero value for uint8 fields."""
 
 _ZERO_SHORT: np.uint16 = np.uint16(0)
-"""Default zero value for uint16 fields used across message dataclasses."""
+"""The default zero value for uint16 fields."""
 
 _ZERO_LONG: np.uint32 = np.uint32(0)
-"""Default zero value for uint32 fields used across message dataclasses."""
+"""The default zero value for uint32 fields."""
 
 _TRUE: np.bool_ = np.bool_(True)  # noqa: FBT003 - the positional argument is a numpy scalar value, not a flag.
-"""Default boolean true value for noblock fields used across command dataclasses."""
+"""The default true value for noblock fields."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,9 +197,8 @@ class ModuleParameters:
     module_id: np.uint8
     """The ID of the specific module instance within the broader module family."""
     parameter_data: tuple[np.number[Any] | np.bool_, ...]
-    """A tuple of parameter values to send. Each value must be a numpy scalar or numpy boolean (e.g., np.uint8,
-    np.float32), as serialization relies on the numpy itemsize and tobytes() interface. The values must match the type
-    and order of the addressed module's parameter structure on the microcontroller."""
+    """The parameter values, ordered and typed to match the addressed module's parameter structure on the
+    microcontroller. Serialization reads each value through the numpy itemsize and tobytes() interface."""
     return_code: np.uint8 = _ZERO_BYTE
     """The code to use for acknowledging the reception of the message, if set to a non-zero value."""
     packed_data: NDArray[np.uint8] | None = field(init=False, default=None)
@@ -217,8 +216,8 @@ class ModuleParameters:
                 imposes on a single payload. Microcontrollers with small serial buffers cap the size below that
                 ceiling, and the TransportLayer reports the lower bound when the message reaches it.
         """
-        # Calculates the total size of serialized parameters in bytes directly from item sizes. The sum accumulates in
-        # Python integer arithmetic, as a uint8 accumulator silently wraps at the very sizes the guard below rejects.
+        # The sum accumulates in Python integer arithmetic, as a uint8 accumulator silently wraps at the very sizes
+        # the guard below rejects.
         parameters_size = sum(parameter.itemsize for parameter in self.parameter_data)
         if parameters_size > _MAXIMUM_PARAMETERS_SIZE:
             message = (

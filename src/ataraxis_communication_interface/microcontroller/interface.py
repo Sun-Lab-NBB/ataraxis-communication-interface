@@ -93,32 +93,30 @@ class _RuntimeParameters(IntEnum):
 
 
 class ModuleInterface(ABC):
-    """Provides the API used by other library components to interface with the custom hardware module controlled by
-    the companion Arduino or Teensy microcontroller.
+    """Provides the API used to interface with the custom hardware module controlled by the companion Arduino or Teensy
+    microcontroller.
 
-    Any class that inherits from this class gains the API used by the MicroControllerInterface class to bind the
-    interface to the managed hardware module instance running on the companion microcontroller. Also, inheriting from
-    this class provides the user-facing API for sending commands and parameters to the managed hardware module.
+    Inheriting from this class provides the user-facing API for sending commands and parameters to the managed hardware
+    module.
 
     Notes:
-        Every custom hardware module interface has to inherit from this base class. When inheriting from this class,
-        initialize the superclass by calling the 'super().__init__()' during the subclass initialization.
+        Every custom hardware module interface has to inherit from this base class. The subclass initializer has to
+        call 'super().__init__()' during the subclass initialization.
 
-        All data received from or sent to the microcontroller is automatically logged to disk. Only provide additional
-        data and error codes if the interface must carry out 'online' error detection or data processing.
+        All data received from or sent to the microcontroller is automatically logged to disk. Additional data and
+        error codes are only necessary if the interface carries out 'online' error detection or data processing.
 
         Some attributes of this (base) class are assigned by the managing MicroControllerInterface during its
         initialization. Each module interface that inherits from the base ModuleInterface class has to be bound to an
         initialized MicroControllerInterface instance to be fully functional.
 
         Use the utility methods inherited from the base ModuleInterface to send command and parameter messages to the
-        managed hardware module instance. These methods are heavily optimized for runtime efficiency and performance.
+        managed hardware module instance.
 
     Args:
         module_type: The code that identifies the type (family) of the interfaced module.
         module_id: The code that identifies the specific interfaced module instance.
-        name: A colloquial human-readable name for this hardware module (e.g., 'encoder', 'lick_sensor'). Written
-            to the microcontroller manifest file alongside the module's type and id codes to identify this module.
+        name: A colloquial human-readable name for this hardware module (e.g., 'encoder', 'lick_sensor').
         error_codes: An optional mapping of the codes used by the module to communicate runtime errors to the
             explanations surfaced when those errors arrive. Receiving a message with an event-code from this mapping
             raises a RuntimeError that carries the matching explanation and aborts the runtime. Every code must fall
@@ -139,12 +137,8 @@ class ModuleInterface(ABC):
         _input_queue: The multiprocessing queue used to send command and parameter messages to the microcontroller
             communication process.
         _dequeue_command: Stores the instance's DequeueModuleCommand object.
-        _create_command_message: LRU-cached method (maxsize=32) for creating command message objects. Caches up to 32
-            unique command message configurations to avoid redundant object creation and serialization during repeated
-            command operations.
-        _create_parameters_message: LRU-cached method (maxsize=16) for creating parameter message objects. Caches up
-            to 16 unique parameter configurations to avoid redundant object creation and serialization when repeatedly
-            sending the same parameter presets.
+        _create_command_message: Creates the command message objects, caching up to 32 unique configurations.
+        _create_parameters_message: Creates the parameter message objects, caching up to 16 unique configurations.
 
     Raises:
         TypeError: If input arguments are not of the expected type.
@@ -159,7 +153,6 @@ class ModuleInterface(ABC):
         error_codes: dict[np.uint8, str] | None = None,
         data_codes: set[np.uint8] | None = None,
     ) -> None:
-        # Ensures that input byte-codes use valid value ranges.
         if not isinstance(module_type, np.uint8) or not 1 <= module_type <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the ModuleInterface instance for module {module_id} of type {module_type}. "
@@ -224,34 +217,30 @@ class ModuleInterface(ABC):
         self._module_id: np.uint8 = module_id
         self._name: str = name
 
-        # Combines type and ID codes into a 16-bit value. This is used to ensure every module instance has a unique
-        # ID + Type combination. This method is position-aware, so inverse type-id pairs are coded as different
-        # values e.g.: 4-5 != 5-4
+        # Ensures every module instance has a unique ID + Type combination. The combination is position-aware, so
+        # inverse type-id pairs are coded as different values e.g.: 4-5 != 5-4.
         self._type_id: np.uint16 = np.uint16(
             (self._module_type.astype(np.uint16) << 8) | self._module_id.astype(np.uint16)
         )
 
-        # Resolves message codes that require additional (custom) processing.
         self._data_codes: set[np.uint8] = data_codes if data_codes is not None else set()
 
-        # Adds error-handling support. This allows raising errors when the module sends a message with an error code
-        # from the microcontroller to the PC, and surfaces the registered explanation alongside the raised error.
+        # Allows raising errors when the module sends a message with an error code from the microcontroller to the PC,
+        # and surfaces the registered explanation alongside the raised error.
         self._error_codes: dict[np.uint8, str] = error_codes if error_codes is not None else {}
 
-        # This attribute is initialized to a placeholder value. The actual value is assigned by the
-        # MicroControllerInterface class that manages this ModuleInterface. During MicroControllerInterface
-        # initialization, it updates the attribute for all managed interfaces via referencing.
+        # Holds a placeholder value until the managing MicroControllerInterface assigns the actual queue reference
+        # during its own initialization.
         self._input_queue: MPQueue | None = None  # type: ignore[type-arg]  # MPQueue is not generic.
 
-        #  Pre-creates the Dequeue command object, as it does not change throughout runtime.
+        # Pre-creates the Dequeue command object, as it does not change throughout runtime.
         self._dequeue_command = DequeueModuleCommand(
             module_type=self._module_type,
             module_id=self._module_id,
             return_code=_ZERO_BYTE,
         )
 
-        # Binds LRU caches for command and parameter message creation. The LRU cache is used to optimize runtime
-        # performance.
+        # The LRU caches optimize runtime performance.
         self._create_command_message = lru_cache(maxsize=32)(self._create_command_message_implementation)
         self._create_parameters_message = lru_cache(maxsize=16)(self._create_parameters_message_implementation)
 
@@ -281,13 +270,12 @@ class ModuleInterface(ABC):
     def initialize_remote_assets(self) -> None:
         """Initializes the interface instance assets used in the remote microcontroller communication process.
 
-        This method is called during the initial setup sequence of the remote microcontroller communication process,
-        before the PC-microcontroller communication cycle.
+        Runs during the initial setup sequence of the remote microcontroller communication process, before the
+        PC-microcontroller communication cycle.
 
         Notes:
-            This method should instantiate all interface assets that do not support pickling, such as PrecisionTimer
-            or SharedMemoryArray instances. All assets initialized by this method must be destroyed by the
-            terminate_remote_assets() method.
+            Instantiates all interface assets that do not support pickling, such as PrecisionTimer or SharedMemoryArray
+            instances. All assets initialized here must be destroyed by the terminate_remote_assets() method.
         """
         raise NotImplementedError
 
@@ -295,9 +283,8 @@ class ModuleInterface(ABC):
     def terminate_remote_assets(self) -> None:
         """Terminates the interface instance assets used in the remote microcontroller communication process.
 
-        This method is the opposite of the initialize_remote_assets() method. It is called as part of the remote
-        communication process shutdown routine to ensure any resources claimed by the interface are properly
-        released before the communication process terminates.
+        Runs as part of the remote communication process shutdown routine to ensure any resources claimed by the
+        interface are properly released before the communication process terminates.
         """
         raise NotImplementedError
 
@@ -305,12 +292,9 @@ class ModuleInterface(ABC):
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """Processes the input message.
 
-        This method is called during the communication cycle's runtime when the interface instance receives a message
-        from the microcontroller that uses an event code provided at class initialization as 'data_codes' argument.
-
         Notes:
-            This method should implement the custom online data-processing logic associated with each message whose
-            event code is specified in the 'data_codes' argument.
+            Implements the custom online data-processing logic associated with each message whose event code is
+            specified in the 'data_codes' argument.
 
             All incoming message data is automatically cached (saved) to disk at runtime, so this method should NOT be
             used for data saving purposes.
@@ -319,8 +303,7 @@ class ModuleInterface(ABC):
             the data hogs the communication process, reducing its throughput.
 
         Args:
-            message: The ModuleState or ModuleData instance that stores the message data received from the interfaced
-                hardware module instance.
+            message: The message data received from the interfaced hardware module instance.
         """
         raise NotImplementedError
 
@@ -329,8 +312,8 @@ class ModuleInterface(ABC):
         module.
 
         Notes:
-            This method caches up to 32 unique command messages in the instance-specific LRU cache to speed up sending
-            previously created command messages.
+            Caches up to 32 unique command messages in the instance-specific LRU cache to speed up sending previously
+            created command messages.
 
         Args:
             command: The id-code of the command to execute.
@@ -359,13 +342,13 @@ class ModuleInterface(ABC):
         hardware module.
 
         Notes:
-            This method caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending
-            previously created parameter messages.
+            Caches up to 16 unique parameter messages in the instance-specific LRU cache to speed up sending previously
+            created parameter messages.
 
         Args:
-            parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
-                module. Note, the parameters must appear in the same order and use the same data-types as the module's
-                parameter structure on the microcontroller.
+            parameter_data: The values for the PC-addressable parameters of the target hardware module. Note, the
+                parameters must appear in the same order and use the same data-types as the module's parameter
+                structure on the microcontroller.
         """
         # Prevents interfacing with the microcontroller until the communication is initialized.
         if self._input_queue is None or self._create_parameters_message is None:
@@ -377,8 +360,6 @@ class ModuleInterface(ABC):
             )
             console.error(message=message, error=RuntimeError)
 
-        # Creates or queries the command message object from the instance-specific LRU cache and submits it to the
-        # microcontroller.
         self._input_queue.put(self._create_parameters_message(parameter_data=parameter_data))
 
     def reset_command_queue(self) -> None:
@@ -395,7 +376,7 @@ class ModuleInterface(ABC):
         self._input_queue.put(self._dequeue_command)
 
     def set_input_queue(self, input_queue: MPQueue) -> None:  # type: ignore[type-arg]  # MPQueue is not generic.
-        """Overwrites the '_input_queue' instance attribute with the reference to the provided Queue object."""
+        """Overwrites the '_input_queue' instance attribute with the reference to the provided queue."""
         self._input_queue = input_queue
 
     @property
@@ -439,9 +420,6 @@ class ModuleInterface(ABC):
     ) -> OneOffModuleCommand | RepeatedModuleCommand:
         """Creates the command message object using the input parameters.
 
-        This worker method is passed to the LRU cache wrapper to prevent recreating repeatedly used command objects at
-        runtime.
-
         Args:
             command: The id-code of the command to execute.
             noblock: Determines whether the microcontroller managing the hardware module is allowed to concurrently
@@ -471,12 +449,8 @@ class ModuleInterface(ABC):
     ) -> ModuleParameters:
         """Creates the parameter message object using the input parameters.
 
-        This worker method is passed to the LRU cache wrapper to prevent recreating repeatedly used parameter objects at
-        runtime.
-
         Args:
-            parameter_data: A tuple that contains the values for the PC-addressable parameters of the target hardware
-                module.
+            parameter_data: The values for the PC-addressable parameters of the target hardware module.
         """
         return ModuleParameters(
             module_type=self._module_type,
@@ -490,9 +464,9 @@ class MicroControllerInterface:
     """Interfaces with the hardware module instances managed by the Arduino or Teensy microcontroller running the
     ataraxis-micro-controller library.
 
-    This class binds each hardware module managed by the microcontroller to its user-facing interface implemented via
-    this library. It abstracts all necessary steps to bidirectionally communicate with the microcontroller and log the
-    incoming and outgoing message data to disk.
+    Binds each hardware module managed by the microcontroller to its user-facing interface implemented via this
+    library. Abstracts all necessary steps to bidirectionally communicate with the microcontroller and log the incoming
+    and outgoing message data to disk.
 
     Notes:
         An instance of this class has to be instantiated for each microcontroller active at the same time.
@@ -504,27 +478,24 @@ class MicroControllerInterface:
         to the instance during initialization.
 
     Args:
-        controller_id: The unique identifier code of the managed microcontroller. This value is used to identify the
-            microcontroller in all output streams (e.g., log files and terminal messages).
-        data_logger: An initialized DataLogger instance used to log all incoming and outgoing messages handled by
-            this MicroControllerInterface instance.
+        controller_id: The unique identifier code of the managed microcontroller.
+        data_logger: The destination for all incoming and outgoing messages handled by this MicroControllerInterface
+            instance.
         module_interfaces: The custom hardware module interfaces for the hardware module instance managed by the
             microcontroller. Note, each module instance requires a unique interface instance.
         buffer_size: The size, in bytes, of the buffer used by the microcontroller's serial communication interface.
             Usually, this information is available from the microcontroller's manufacturer (UART / USB controller
             specification). Must be at least 9 bytes. The value bounds the size of the payloads the PC transmits,
             while reception is bounded by the 254-byte ceiling the COBS encoding imposes.
-        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'. Use the 'axci id' CLI
-            command to discover the available microcontrollers and their respective communication port names.
-        name: A colloquial human-readable name for this microcontroller (e.g., 'actor_controller'). Written to the
-            microcontroller manifest file alongside the controller_id to identify this controller.
+        port: The name of the serial port to connect to, e.g.: 'COM3' or '/dev/ttyUSB0'.
+        name: A colloquial human-readable name for this microcontroller (e.g., 'actor_controller').
         baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
             the value used by the microcontroller. This parameter is ignored when using the USB interface.
         keepalive_interval: The interval, in milliseconds, at which to send the keepalive messages to the
             microcontroller. Setting this argument to 0 disables keepalive messaging functionality.
 
     Attributes:
-        _started: Tracks whether the communication process has been started.
+        _started: Determines whether the communication process has been started.
         _shutdown_lock: Stores the lock that serializes the shutdown sequence between stop() and the watchdog thread,
             so exactly one of the two retires the instance.
         _controller_id: Stores the id of the managed microcontroller.
@@ -554,8 +525,7 @@ class MicroControllerInterface:
             within the timeout period.
     """
 
-    # Pre-packages the user-addressable Kernel reset command into a class attribute. Since the command is known and
-    # fixed at class initialization, it only needs to be defined once.
+    # Since the reset command is known and fixed at class initialization, it only needs to be defined once.
     _reset_command = KernelCommand(
         command=np.uint8(KernelCommandCodes.RESET_CONTROLLER.value),
         return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
@@ -584,8 +554,7 @@ class MicroControllerInterface:
 
         self._multiprocessing_manager: SyncManager = Manager()  # The manager is terminated by the __del__ method.
 
-        # Ensures that input arguments have valid types. Only checks the arguments that are not verified by downstream
-        # classes.
+        # Only checks the arguments that are not verified by downstream classes.
         if not isinstance(controller_id, np.uint8) or not 1 <= controller_id <= _MAXIMUM_BYTE_VALUE:
             message = (
                 f"Unable to initialize the MicroControllerInterface instance. Expected an unsigned integer value "
@@ -639,7 +608,7 @@ class MicroControllerInterface:
         self._controller_id: np.uint8 = controller_id
         self._name: str = name
 
-        # SerialCommunication parameters. This is used to initialize the communication in the remote process.
+        # Used to initialize the communication in the remote process.
         self._port: str = port
         self._baudrate: int = baudrate
         self._buffer_size: int = buffer_size
@@ -651,26 +620,17 @@ class MicroControllerInterface:
         self._logger_queue: MPQueue = data_logger.input_queue  # type: ignore[type-arg]  # MPQueue is not generic.
         self._log_directory: Path = data_logger.output_directory
 
-        # Sets up the assets used to deploy the communication runtime on a separate core and bidirectionally transfer
-        # data between the communication process and the main process managing the overall runtime. The suppression
-        # below is required because MPQueue is not generic and because the manager returns a queue proxy rather than a
-        # multiprocessing.Queue.
+        # The suppression below is required because MPQueue is not generic and because the manager returns a queue
+        # proxy rather than a multiprocessing.Queue.
         self._input_queue: MPQueue = self._multiprocessing_manager.Queue()  # type: ignore[assignment, type-arg]
         self._terminator_array: SharedMemoryArray | None = None
         self._communication_process: Process | None = None
         self._watchdog_thread: Thread | None = None
 
-        # Initializes class attributes used to track the current microcontroller configuration and communication
-        # runtime parameters.
         self._keepalive_interval = keepalive_interval
 
-        # Verifies that all input ModuleInterface instances have a unique type+id combination and configures each
-        # module to use the input queue instantiated above to submit command and parameter messages to the
-        # microcontroller.
-        processed_type_ids: set[np.uint16] = set()  # This is used to ensure each instance has a unique type+id pair.
+        processed_type_ids: set[np.uint16] = set()
         for module in self._modules:
-            # If the module's combined type + id code is already inside the processed_types_id set, this means another
-            # module with the same exact type and ID combination has already been processed.
             if module.type_id in processed_type_ids:
                 message = (
                     f"Unable to initialize the MicroControllerInterface instance for the microcontroller with "
@@ -682,12 +642,9 @@ class MicroControllerInterface:
 
             processed_type_ids.add(module.type_id)
 
-            # Overwrites the attributes for each processed ModuleInterface with valid data. This effectively binds some
-            # data and functionality realized through the main interface to each module interface.
             module.set_input_queue(input_queue=self._input_queue)
 
-        # Writes the controller and its modules to the manifest file in the DataLogger output directory. This enables
-        # downstream log processing tools to identify which archives were produced by this library.
+        # Enables downstream log processing tools to identify which archives were produced by this library.
         module_sources = tuple(
             ModuleSourceData(module_type=int(module.module_type), module_id=int(module.module_id), name=module.name)
             for module in self._modules
@@ -741,23 +698,20 @@ class MicroControllerInterface:
         Raises:
             RuntimeError: If the instance fails to initialize the communication process.
         """
-        # Prevents restarting an already running communication process
         if self._started:
             return
 
         # This timer is used to forcibly terminate processes that stall at initialization.
         initialization_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
-        # Instantiates the shared memory array used to control the runtime of the communication Process.
-        # Index 0 = terminator, index 1 = initialization status tracker
+        # Index 0 = terminator, index 1 = initialization status tracker.
         self._terminator_array = SharedMemoryArray.create_array(
-            name=f"{self._controller_id}_terminator_array",  # Uses class id with an additional specifier
+            name=f"{self._controller_id}_terminator_array",
             prototype=np.zeros(shape=2, dtype=np.uint8),
-            exists_ok=True,  # Automatically recreates the buffer if it already exists
+            exists_ok=True,
         )
 
-        # Binds runtime arguments to the communication cycle function before passing it to the Process instance.
-        runtime_cycle_with_args = partial(
+        runtime_cycle_with_arguments = partial(
             self._runtime_cycle,
             controller_id=self._controller_id,
             controller_name=self._name,
@@ -771,10 +725,10 @@ class MicroControllerInterface:
             keepalive_interval=self._keepalive_interval,
         )
 
-        # Sets up the communication process. This process continuously cycles through the communication loop until
-        # terminated, enabling bidirectional communication with the controller.
+        # Continuously cycles through the communication loop until terminated, enabling bidirectional communication
+        # with the controller.
         self._communication_process = Process(
-            target=runtime_cycle_with_args,
+            target=runtime_cycle_with_arguments,
             daemon=True,
         )
         self._communication_process.start()
@@ -786,14 +740,11 @@ class MicroControllerInterface:
                 not self._communication_process.is_alive()
                 or initialization_timer.elapsed > _RuntimeParameters.PROCESS_INITIALIZATION_TIMEOUT.value
             ):
-                # Ensures proper resource cleanup before terminating the process runtime, if this error is triggered:
                 self._terminator_array[0] = 1
 
-                # Waits for at most _RuntimeParameters.PROCESS_TERMINATION_TIMEOUT seconds and gives up on the join
-                # once that period elapses, to prevent deadlocks.
+                # Gives up on the join once the timeout period elapses, to prevent deadlocks.
                 self._communication_process.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
-                # Disconnects from the shared memory array and destroys its shared buffer.
                 self._terminator_array.disconnect()
                 self._terminator_array.destroy()
 
@@ -808,8 +759,8 @@ class MicroControllerInterface:
         self._watchdog_thread = Thread(target=self._watchdog, daemon=True)
         self._watchdog_thread.start()
 
-        # Issues the global reset command. This ensures that the controller always starts with 'default' parameters for
-        # Teensy microcontroller boards that do not reset upon communication interface connection cycling.
+        # Ensures that the controller always starts with 'default' parameters for Teensy microcontroller boards that
+        # do not reset upon communication interface connection cycling.
         self.reset_controller()
 
         self._started = True
@@ -831,8 +782,7 @@ class MicroControllerInterface:
             # Resets the microcontroller to ensure all hardware is set to default states that are assumed to be safe.
             self.reset_controller()
 
-            # This inactivates the watchdog thread monitoring, ensuring it does not err when the processes are
-            # terminated.
+            # Inactivates the watchdog thread monitoring, ensuring it does not err when the processes are terminated.
             self._started = False
 
             # Emits the process shutdown signal.
@@ -846,7 +796,6 @@ class MicroControllerInterface:
         if self._watchdog_thread is not None:
             self._watchdog_thread.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
-        # Disconnects from the shared memory array and destroys its shared buffer.
         self._terminator_array.disconnect()
         self._terminator_array.destroy()
 
@@ -865,7 +814,6 @@ class MicroControllerInterface:
 
         # The watchdog function runs until the global shutdown signal is emitted.
         while self._terminator_array is not None and not self._terminator_array[0]:
-            # Checks process state every 20 ms. Releases the GIL while waiting.
             timer.delay(delay=_RuntimeParameters.WATCHDOG_INTERVAL.value, allow_sleep=True, block=False)
 
             # Only monitors the Process state after the communication is initialized via the start() method.
@@ -890,16 +838,15 @@ class MicroControllerInterface:
                     # The process should already be terminated, but there are no downsides to making sure it is dead.
                     self._communication_process.join(timeout=_RuntimeParameters.PROCESS_TERMINATION_TIMEOUT.value)
 
-                    # Disconnects from the shared memory array and destroys its shared buffer.
                     self._terminator_array.disconnect()
                     self._terminator_array.destroy()
 
                 # Raises outside the lock, since a traceback unwinding with the lock held would leave a concurrent
                 # stop() waiting on a lock this thread never releases.
                 message = (
-                    f"The communication process of the MicroControllerInterface with id {self._controller_id} has been "
-                    f"prematurely shut down. This likely indicates that the process has encountered a runtime error "
-                    f"that terminated the process."
+                    f"Unable to maintain the communication process of the MicroControllerInterface with id "
+                    f"{self._controller_id}. The process has been prematurely shut down, which likely indicates that "
+                    f"it has encountered a runtime error that terminated it."
                 )
                 console.error(message=message, error=RuntimeError)
 
@@ -914,18 +861,16 @@ class MicroControllerInterface:
         """Verifies that the managed microcontroller and the interface instance have a matching configuration.
 
         Args:
-            serial_communication: The SerialCommunication instance used to communicate with the microcontroller.
-            timeout_timer: The PrecisionTimer instance used to prevent verification from stalling.
+            serial_communication: Used to communicate with the microcontroller.
+            timeout_timer: Used to prevent the verification from stalling.
             controller_id: The expected ID code of the microcontroller.
             module_interfaces: The interface instances for all managed hardware modules.
-            terminator_array: The SharedMemoryArray instance used to control the runtime of the communication process.
+            terminator_array: Used to control the runtime of the communication process.
 
         Raises:
             RuntimeError: If the method is unable to communicate with the microcontroller.
             ValueError: If the microcontroller and the interface instance do not have matching configurations.
         """
-        # Constructs Kernel-addressed commands used to verify that the interface and the microcontroller have matching
-        # configurations.
         identify_controller_command = KernelCommand(
             command=np.uint8(KernelCommandCodes.IDENTIFY_CONTROLLER.value),
             return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
@@ -935,25 +880,21 @@ class MicroControllerInterface:
             return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
         )
 
-        # Blocks until the microcontroller responds with its identification code.
         attempt = 0
         response = None
         while attempt < _RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value and not isinstance(
             response, ControllerIdentification
         ):
-            # Sends microcontroller identification command. This command requests the microcontroller to return its
-            # id code.
+            # The identification command requests the microcontroller to return its id code.
             serial_communication.send_message(message=identify_controller_command)
             attempt += 1
 
-            # Waits for response with timeout
             timeout_timer.reset()
             while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
                 response = serial_communication.receive_message()
                 if isinstance(response, ControllerIdentification):
                     break
 
-        # If the microcontroller did not respond to the identification request, raises an error.
         if not isinstance(response, ControllerIdentification):
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The "
@@ -962,8 +903,6 @@ class MicroControllerInterface:
             )
             console.error(message=message, error=RuntimeError)
 
-        # If a response is received, but the ID contained in the received message does not match the expected ID,
-        # raises an error
         if response.controller_id != controller_id:
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. Expected "
@@ -972,13 +911,10 @@ class MicroControllerInterface:
             )
             console.error(message=message, error=ValueError)
 
-        # Verifies that the microcontroller manages the hardware module instances expected by the hardware
-        # module interfaces
         serial_communication.send_message(message=identify_modules_command)
         timeout_timer.reset()
         module_type_ids = []
         while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
-            # Receives the message. If the message is a module type+id code, adds it to the storage list
             response = serial_communication.receive_message()
             if isinstance(response, ModuleIdentification):
                 module_type_ids.append(response.module_type_id)
@@ -986,7 +922,6 @@ class MicroControllerInterface:
                 # Keeps the loop running as long as messages keep coming in within expected intervals.
                 timeout_timer.reset()
 
-        # If no response was received from the microcontroller, raises an error
         if not module_type_ids:
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The "
@@ -1004,7 +939,6 @@ class MicroControllerInterface:
             )
             console.error(message=message, error=ValueError)
 
-        # Ensures that all type_id codes are unique on the microcontroller.
         if len(module_type_ids) != len(set(module_type_ids)):
             message = (
                 f"Unable to initialize the communication with the microcontroller {controller_id}. The microcontroller "
@@ -1013,7 +947,6 @@ class MicroControllerInterface:
             )
             console.error(message=message, error=ValueError)
 
-        # Ensures that each module interface has a matching hardware module on the microcontroller
         for module in module_interfaces:
             if module.type_id not in module_type_ids:
                 message = (
@@ -1038,18 +971,18 @@ class MicroControllerInterface:
         Args:
             controller_id: The ID of the interfaced microcontroller.
             controller_name: The human-readable name of the interfaced microcontroller.
-            incoming_data: The KernelState or KernelData message to be parsed.
+            incoming_data: The message to be parsed.
 
         Raises:
             RuntimeError: If the incoming Kernel message carries a status code that reports a fault.
         """
-        description = describe_kernel_event(
+        message = describe_kernel_event(
             message=incoming_data,
             controller_id=controller_id,
             controller_name=controller_name,
         )
-        if description is not None:
-            console.error(message=description, error=RuntimeError)
+        if message is not None:
+            console.error(message=message, error=RuntimeError)
 
     @staticmethod
     def _parse_service_module_data(
@@ -1068,19 +1001,19 @@ class MicroControllerInterface:
             controller_id: The ID of the interfaced microcontroller.
             controller_name: The human-readable name of the interfaced microcontroller.
             module_name: The human-readable name of the hardware module that sent the message.
-            incoming_data: The ModuleState or ModuleData message to be parsed.
+            incoming_data: The message to be parsed.
 
         Raises:
             RuntimeError: If the incoming Module message carries a service status code that reports a fault.
         """
-        description = describe_module_event(
+        message = describe_module_event(
             message=incoming_data,
             controller_id=controller_id,
             controller_name=controller_name,
             module_name=module_name,
         )
-        if description is not None:
-            console.error(message=description, error=RuntimeError)
+        if message is not None:
+            console.error(message=message, error=RuntimeError)
 
     @staticmethod
     def _runtime_cycle(
@@ -1097,8 +1030,7 @@ class MicroControllerInterface:
     ) -> None:
         """Aggregates the logic for bidirectionally communicating with the interfaced microcontroller during runtime.
 
-        This method is designed to run in a remote Process. It encapsulates the steps for sending and receiving the
-        data from the connected microcontroller.
+        Runs in a remote Process.
 
         Args:
             controller_id: The unique identifier of the interfaced microcontroller.
@@ -1106,18 +1038,16 @@ class MicroControllerInterface:
                 error messages this method raises.
             module_interfaces: The custom hardware module interfaces for the hardware module instance managed by the
                 microcontroller.
-            input_queue: The multiprocessing queue used to issue commands to the microcontroller.
-            logger_queue: The multiprocessing queue used to buffer and pipe received and outgoing messages to be
-                logged (saved) to disk to the logger process.
-            terminator_array: The shared memory array used to control the communication process runtime.
+            input_queue: Used to issue commands to the microcontroller.
+            logger_queue: Buffers and pipes the received and the outgoing messages to the logger process.
+            terminator_array: Used to control the communication process runtime.
             port: The serial port to use for communicating with the microcontroller.
             baudrate: The baudrate to use when communicating with microcontrollers using the UART serial interface.
             buffer_size: The size of the microcontroller's serial buffer.
             keepalive_interval: The interval (in milliseconds) at which to send the keepalive messages to the
                 microcontroller.
         """
-        # Constructs Kernel-addressed command used to verify that the microcontroller-PC communication is active during
-        # runtime. This is used to detect communication issues and problems with the microcontroller during runtime.
+        # Used to detect communication issues and problems with the microcontroller during runtime.
         keepalive_command = KernelCommand(
             command=np.uint8(KernelCommandCodes.KEEPALIVE.value),
             return_code=np.uint8(_RuntimeParameters.KEEPALIVE_RETURN_CODE.value),
@@ -1127,12 +1057,9 @@ class MicroControllerInterface:
         # support the keepalive functionality.
         timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-        # Connects to the terminator array. This is done early, as the terminator_array is used to track the
-        # initialization and runtime status of the process.
+        # Connects early, as the terminator_array tracks the initialization and runtime status of the process.
         terminator_array.connect()
 
-        # Pre-creates the assets used to optimize the communication runtime cycling. These assets are filled below to
-        # support efficient interaction between the SerialCommunication instance and the module interface instances.
         processing_map: dict[np.uint16, ModuleInterface] = {}
 
         # Every managed module contributes its name, as service messages identify their sender before the processing
@@ -1147,18 +1074,14 @@ class MicroControllerInterface:
         # after some interfaces have already claimed their remote assets.
         try:
             for module in module_interfaces:
-                # For each module, initializes the assets that need to be configured / created inside the remote
-                # Process.
                 module.initialize_remote_assets()
                 initialized_modules.append(module)
 
-                # If the interface is configured to process incoming data or raise runtime errors, maps its type+id
-                # combined code to the interface instance. This is used to quickly find the module interface instance
-                # addressed by incoming data, so that it can handle the data or error message.
+                # The map is used to quickly find the module interface instance addressed by incoming data, so that it
+                # can handle the data or error message.
                 if module.data_codes or module.error_codes:
                     processing_map[module.type_id] = module
 
-            # Initializes the serial communication class and connects to the target microcontroller.
             serial_communication = SerialCommunication(
                 port=port,
                 controller_id=controller_id,
@@ -1167,8 +1090,6 @@ class MicroControllerInterface:
                 microcontroller_serial_buffer_size=buffer_size,
             )
 
-            # Verifies that the microcontroller and the interface instance are configured correctly to support the
-            # runtime.
             MicroControllerInterface._verify_microcontroller_communication(
                 serial_communication=serial_communication,
                 module_interfaces=module_interfaces,
@@ -1177,25 +1098,19 @@ class MicroControllerInterface:
                 terminator_array=terminator_array,
             )
 
-            # Tracks whether the microcontroller has responded to the last keepalive command sent from the PC.
             keepalive_response_received = True  # Must be initialized to True.
 
-            # Initializes the main communication loop. This loop runs until the exit conditions are encountered.
-            # The exit conditions for the loop require the first variable in the terminator_array to be set to True
-            # and the main input queue of the interface to be empty. This ensures that all queued commands issued from
-            # the central process are fully carried out before the communication is terminated.
+            # Requiring the input queue to be empty ensures that all queued commands issued from the central process
+            # are fully carried out before the communication is terminated.
             timeout_timer.reset()
             while not terminator_array[0] or not input_queue.empty():
-                # Main data sending loop. The method sequentially retrieves the queued messages and sends them to the
-                # microcontroller.
                 while not input_queue.empty():
-                    # Transmits the data to the microcontroller. Expects that the queue always yields valid messages.
+                    # Expects that the queue always yields valid messages.
                     serial_communication.send_message(message=input_queue.get())
 
-                # Keepalive messaging. Sends a keepalive message every keepalive_interval milliseconds to ensure that
-                # the microcontroller-PC communication is functional. Each time a keepalive message is sent, the
-                # keepalive response tracker and the timer are reset to ensure that the microcontroller responds before
-                # the next keepalive cycle iteration.
+                # The keepalive cycle ensures that the microcontroller-PC communication is functional. Resetting the
+                # response tracker and the timer ensures that the microcontroller responds before the next cycle
+                # iteration.
                 if 0 < keepalive_interval <= timeout_timer.elapsed:
                     # If the microcontroller does not respond to the keepalive message, it is likely that the
                     # communication is broken or that the microcontroller has encountered a fatal runtime error.
@@ -1204,20 +1119,18 @@ class MicroControllerInterface:
                         # ending the runtime.
                         serial_communication.send_message(message=MicroControllerInterface._reset_command)
                         message = (
-                            f"Communication with the microcontroller {controller_id} is interrupted. The "
+                            f"Unable to maintain the communication with the microcontroller {controller_id}. The "
                             f"microcontroller did not respond to the keepalive message within the expected interval "
                             f"of {keepalive_interval} milliseconds."
                         )
                         console.error(message=message, error=RuntimeError)
 
-                    # Otherwise, sends another keepalive message and resets the response tracker and the timeout timer.
                     serial_communication.send_message(message=keepalive_command)
                     keepalive_response_received = False
                     timeout_timer.reset()
 
                 incoming_data = serial_communication.receive_message()
 
-                # If no data is available advances to the next cycle iteration
                 if incoming_data is None:
                     continue
 
@@ -1227,11 +1140,8 @@ class MicroControllerInterface:
                     isinstance(incoming_data, ReceptionCode)
                     and incoming_data.reception_code == _RuntimeParameters.KEEPALIVE_RETURN_CODE.value
                 ):
-                    keepalive_response_received = True  # Indicates that the response code was received
+                    keepalive_response_received = True
 
-                # Converts valid KernelData and State messages into errors. This is used to raise runtime errors when
-                # an appropriate error message is transmitted from the microcontroller. This clause does not evaluate
-                # non-error codes.
                 elif isinstance(incoming_data, (KernelData, KernelState)):
                     MicroControllerInterface._parse_kernel_data(
                         incoming_data=incoming_data,
@@ -1239,13 +1149,12 @@ class MicroControllerInterface:
                         controller_name=controller_name,
                     )
 
-                # Handles Module-addressed messages. The event codes below the custom range are reserved for the base
-                # Module class of the firmware and are resolved by this library. The codes at or above that bound are
-                # assigned by module developers to communicate states and errors.
+                # The event codes below the custom range are reserved for the base Module class of the firmware and are
+                # resolved by this library. The codes at or above that bound are assigned by module developers to
+                # communicate states and errors.
                 elif isinstance(incoming_data, (ModuleState, ModuleData)):
-                    # Reads the combined type and id code of the incoming data. This is used to find the specific
-                    # ModuleInterface to which the message is addressed and, if necessary, invoke interface-specific
-                    # additional processing methods.
+                    # Used to find the specific ModuleInterface to which the message is addressed and, if necessary,
+                    # invoke interface-specific additional processing methods.
                     target_type_id: np.uint16 = incoming_data.type_id
 
                     # Binds the event code once, as the branches below test it against three separate collections.
@@ -1259,14 +1168,10 @@ class MicroControllerInterface:
                             module_name=module_names.get(target_type_id, _UNKNOWN_MODULE_NAME),
                         )
                     else:
-                        # If the interface addressed by the message is not configured to raise errors or process
-                        # the data, ends processing. Otherwise, binds the reference to the targeted interface.
                         target_module = processing_map.get(target_type_id)
                         if target_module is None:
                             continue
 
-                        # If the incoming message contains an event code matching one of the interface's error-codes,
-                        # raises an error that carries the explanation the interface registered for that code.
                         explanation = target_module.error_codes.get(event)
                         if explanation is not None:
                             message = describe_custom_module_error(
@@ -1278,25 +1183,19 @@ class MicroControllerInterface:
                             )
                             console.error(message=message, error=RuntimeError)
 
-                        # Otherwise, if the incoming message is not an error and contains an event-code matching
-                        # one of the interface's data-codes, calls the data processing method.
                         if event in target_module.data_codes:
                             target_module.process_received_data(message=incoming_data)
 
-        # If an unknown and unhandled exception occurs, prints and flushes the exception message to the terminal
-        # before re-raising the exception to terminate the process.
         except Exception as runtime_error:
             sys.stderr.write(str(runtime_error))
             sys.stderr.flush()
             raise
 
-        # Ensures that local assets are always properly terminated
         finally:
             terminator_array.disconnect()
 
-            # Terminates the custom assets of every interface that completed its own initialization. Each termination
-            # is guarded, as an interface that raises here would otherwise strand the assets of every interface behind
-            # it and replace the exception that started the shutdown.
+            # Each termination is guarded, as an interface that raises here would otherwise strand the assets of every
+            # interface behind it and replace the exception that started the shutdown.
             for module in initialized_modules:
                 try:
                     module.terminate_remote_assets()
@@ -1320,13 +1219,11 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
         otherwise, paired with an error message string when a connection error occurred or None when no error occurred.
     """
     try:
-        # Initializes a fake multiprocessing queue to initialize communication.
         fake_queue: MPQueue = MPQueue()  # type: ignore[type-arg]  # MPQueue is not generic.
 
         # Initializes a timer to prevent stale identification attempts from running forever.
         timeout_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-        # Opens communication via the target port.
         communication = SerialCommunication(
             controller_id=np.uint8(123),
             microcontroller_serial_buffer_size=8192,
@@ -1335,41 +1232,34 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
             logger_queue=fake_queue,
         )
 
-        # Requests the microcontroller to identify itself. A valid microcontroller would respond with its ID. Any other
-        # asset would either ignore the command or err.
+        # A valid microcontroller responds with its ID. Any other asset either ignores the command or errs.
         identify_controller_command = KernelCommand(
             command=np.uint8(KernelCommandCodes.IDENTIFY_CONTROLLER.value),
             return_code=np.uint8(_RuntimeParameters.DEFAULT_RETURN_CODE.value),
         )
 
-        # Blocks until the microcontroller responds with its identification code.
         attempt = 0
         response = None
         while attempt < _RuntimeParameters.MAXIMUM_COMMUNICATION_ATTEMPTS.value and not isinstance(
             response, ControllerIdentification
         ):
-            # Sends microcontroller identification command. This command requests the microcontroller to return its
-            # id code.
+            # The identification command requests the microcontroller to return its id code.
             communication.send_message(message=identify_controller_command)
             attempt += 1
 
-            # Waits for response with timeout
             timeout_timer.reset()
             while timeout_timer.elapsed < _RuntimeParameters.MICROCONTROLLER_ID_TIMEOUT.value:
                 response = communication.receive_message()
                 if isinstance(response, ControllerIdentification):
                     break
 
-        # If the microcontroller did not respond to the identification request, returns -1 to indicate that the port is
-        # likely not connected to a valid ataraxis microcontroller.
         if not isinstance(response, ControllerIdentification):
             return -1, None
 
         return int(response.controller_id), None
 
     except Exception as connection_error:
-        # Catches any connection-related exceptions and returns an error message instead of propagating the exception.
-        # This prevents individual port failures from aborting the entire evaluation process.
+        # Prevents individual port failures from aborting the entire evaluation process.
         error_type = type(connection_error).__name__
         error_message = str(connection_error) or error_type
         return -1, f"{error_type}: {error_message}"

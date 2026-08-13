@@ -30,17 +30,9 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
     # server runs until the parent process closes stdin. For 'streamable-http', runs an HTTP server that accepts
     # connections until explicitly terminated.
     if transport == "streamable-http":
-        # Frames each response as a single JSON body instead of an event stream. Only the streamable-http transport
-        # accepts this flag, so it stays out of the call below.
+        # Frames each response as a single JSON body. Only the streamable-http transport accepts this flag, so it
+        # stays out of the call below.
         mcp.run(transport=transport, json_response=True)
         return
 
     mcp.run(transport=transport)
-
-
-def run_mcp_server() -> None:
-    """Starts the MCP server with stdio transport.
-
-    Wraps run_server() with the stdio transport protocol recommended for Claude Desktop integration.
-    """
-    run_server(transport="stdio")

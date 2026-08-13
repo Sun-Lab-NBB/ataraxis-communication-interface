@@ -18,13 +18,7 @@ if TYPE_CHECKING:
 _RESERVED_CORES: int = 2
 """The number of CPU cores held back for host-system operations when a core budget auto-resolves. The value reaches
 ``resolve_worker_count``, which applies it only to a non-positive budget and honors an explicit budget up to the
-logical core count.
-
-Notes:
-    The term is private to this module, because it describes how this library resolves its own batch budget rather
-    than how a scheduler resolves the budget it dispatches this stage from. A consumer that runs its own batch holds
-    the reservation it plans against, so exporting this one would offer it a second figure for the same decision.
-"""
+logical core count."""
 
 CONTROLLER_EXTRACTION_JOB_CORES: int = 4
 """The core allocation every parallel microcontroller data extraction job receives.
@@ -54,16 +48,13 @@ enumerate and the variation between archives of the same size. The penalty for u
 batch that overcommits its host swaps or is killed outright, so estimates round up.
 
 Notes:
-    This term and the other memory model constants in this module are empirically derived. A scheduler plans a batch
-    that mixes this stage with the stages the platform's other estimators cover, so the figures have to be read on one
-    scale. A value that drifts makes this stage's jobs admit against a different standard than everything queued beside
-    them.
+    This term and the other memory model constants in this module are empirically derived. A value that drifts makes
+    this stage's jobs admit against a different standard than everything queued beside them.
 """
 
 SPAWNED_CHILD_MEMORY_MB: int = 152
 """The resident memory one spawned child holds before it touches any data, covering the interpreter and the package's
-import graph. The term is charged for each core a job that opens an extraction pool holds, and it is what one warmed
-but idle slot of a batch's shared pool reserves."""
+import graph. The term is charged for each core a job that opens an extraction pool holds."""
 
 _JOB_BODY_MEMORY_MB: int = 180
 """The resident memory one job body holds beyond the archive it reads, covering the interpreter, the package's import
@@ -146,9 +137,8 @@ def resolve_job_workers(footprint: ArchiveFootprint) -> int:
     """Resolves the cores one extraction job receives, from the archive it reads.
 
     Notes:
-        The stage offers no width between the two it emits, because the speedup between one core and the declared
-        allocation is smooth enough that a narrower pool costs a job time without returning a core the batch can
-        place elsewhere.
+        The stage offers no width between the two it emits. The speedup between one core and the declared allocation
+        is smooth enough that a narrower pool costs a job time without returning a core the batch can place elsewhere.
 
     Args:
         footprint: The footprint of the archive this job reads.
@@ -201,8 +191,7 @@ def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:
     """Resolves the cores and the memory one extraction job receives, from the archive it reads.
 
     Notes:
-        Reads the archive once and answers both halves of the sizing model from that read, so a scheduler planning
-        this stage reproduces neither the width rule nor the memory model.
+        Reads the archive once and answers both halves of the sizing model from that read.
 
     Args:
         archive_path: The path to the .npz log archive the job reads.

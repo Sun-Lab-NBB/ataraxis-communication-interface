@@ -28,11 +28,7 @@ def run_extraction_job(job: JobDescriptor) -> None:
     """Runs one microcontroller data extraction job described entirely by its descriptor.
 
     Notes:
-        This is the picklable entry point a process pool submits. It takes one flat descriptor, so the only state
-        crossing the process boundary is paths, strings, and integers.
-
-        Opens the tracker from the descriptor's own path, because the descriptor carries the tracker's path rather
-        than a tracker instance.
+        Takes one flat descriptor, so the only state crossing the process boundary is paths, strings, and integers.
 
     Args:
         job: The descriptor of the job to run.
@@ -89,16 +85,15 @@ def execute_job(
         config_path: The path to the ExtractionConfig .yaml file declaring this controller's extraction targets.
         display_progress: Determines whether to display a progress bar during parallel batch processing. A job that
             runs sequentially displays nothing.
-        executor: When provided, parallel processing reuses this pool instead of creating a new one. The pool is
-            passed through to extract_logged_microcontroller_data to avoid spawning a redundant process pool.
+        executor: When provided, parallel processing reuses this pool instead of creating a new one.
 
     Raises:
         FileNotFoundError: If no file exists at the supplied configuration path.
         ValueError: If the configuration declares no entry for this controller, if it declares a module or a kernel
             entry with empty event codes, or if it declares no extraction targets at all. Also raised if the archive
-            path does not resolve to a readable .npz file, if the archive carries no onset timestamp message, if a data
-            message's payload size disagrees with its prototype code, or if the tracker holds no entry for this job
-            identifier.
+            path does not resolve to a readable .npz file, if the archive carries no onset timestamp message, or if a
+            data message's payload size disagrees with its prototype code. Also raised if the tracker holds no entry
+            for this job identifier.
         TimeoutError: If the tracker's lock cannot be acquired.
     """
     console.echo(message=f"Running '{CONTROLLER_EXTRACTION_JOB_NAME}' job for source '{source_id}' (ID: {job_id})...")

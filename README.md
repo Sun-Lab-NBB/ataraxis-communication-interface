@@ -62,7 +62,7 @@ ___
   - [Custom Module Interfaces](#custom-module-interfaces)
   - [Implementing Custom Module Interfaces](#implementing-custom-module-interfaces)
   - [Error Handling](#error-handling)
-  - [CLI](#cli)
+  - [CLI Commands](#cli-commands)
   - [MCP Server](#mcp-server)
 - [API Documentation](#api-documentation)
 - [Developers](#developers)
@@ -106,10 +106,12 @@ ___
 ## Usage
 
 ### Quickstart
+
 See the [Implementing Custom Module Interfaces](#implementing-custom-module-interfaces) section for instructions on how
 to implement module interface classes. The example below should be run together with the companion
 [microcontroller module](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller#quickstart) example. See the
 [example_runtime.py](./examples/example_runtime.py) for the .py implementation of this example.
+
 ```python
 import tempfile
 from pathlib import Path
@@ -328,8 +330,9 @@ if __name__ == "__main__":
 ```
 
 ### User-Defined Variables
-This library does not hardcode the metadata variables that allow the PC interface to individuate and address the managed
-microcontroller and specific hardware module instances. **Each end user has to manually define these values both for the
+
+The metadata variables that let the PC interface individuate and address the managed microcontroller and its hardware
+module instances come from the end user. **Each end user has to manually define these values both for the
 microcontroller and the PC.**
 
 Two of these variables, the `module_type` and the `module_id` are used by the (base) **ModuleInterface** class. The
@@ -339,9 +342,9 @@ details about each user-defined metadata variable. Typically, these variables ar
 the PC code is adjusted to match the microcontroller code's state.
 
 ### Keepalive
-A major runtime safety feature of this library is the support for keepalive messaging. To work as intended, **both the
-PC (MicroControllerInterface instance) and the microcontroller (Kernel instance) must be configured to use the same
-keepalive interval.**
+
+To work as intended, **both the PC (MicroControllerInterface instance) and the microcontroller (Kernel instance) must be
+configured to use the same keepalive interval.**
 
 When enabled, the MicroControllerInterface instance sends a 'keepalive' command at regular intervals, specified by the
 `keepalive_interval` initialization argument. If the microcontroller does not receive the command for
@@ -361,6 +364,7 @@ a UART communication interface using the baudrate of 115200, the appropriate kee
 in seconds (2 to 5).
 
 ### Communication
+
 During runtime, all communication with the microcontroller is routed via the MicroControllerInterface instance that
 implements the centralized communication and control interface for each microcontroller. To optimize runtime
 performance, the communication is managed by a daemonic process running on a separate CPU core.
@@ -370,6 +374,7 @@ it to the microcontroller. When the data is received from the microcontroller, i
 process, unless the end user implements the logic for routing it to other runtime processes.
 
 ### Data Logging
+
 This library relies on the [DataLogger](https://github.com/Sun-Lab-NBB/ataraxis-data-structures#datalogger) class to
 save all incoming and outgoing messages to disk during PC-microcontroller communication. Each message sent or received
 by the PC is serialized and saved as an uncompressed **.npy** file.
@@ -390,6 +395,7 @@ ataraxis-communication-interface and to resolve source IDs for processing.
 ***Note,*** currently, only the MicroControllerInterface supports logging data to disk.
 
 #### Log Format
+
 Each message is logged as a one-dimensional numpy uint8 array, saved as an .npy file. Inside the array, the data is
 organized in the following order:
 1. The uint8 id of the data source (microcontroller). The ID occupies the first byte of each log entry.
@@ -401,6 +407,7 @@ organized in the following order:
    source ID and the timestamp.
 
 #### Onset Timestamp
+
 Each MicroControllerInterface generates an `onset` timestamp as part of its `start()` method runtime. This log entry
 uses a modified data order and stores the current UTC time, accurate to microseconds, as the total number of
 microseconds elapsed since the UTC epoch onset. All further log entries for the same source use the timestamp section
@@ -451,27 +458,32 @@ than one width chosen for the whole run. The job resolution and the sizing model
 an external scheduler derives the same figures this library dispatches with instead of re-deriving them.
 
 ### Custom Module Interfaces
+
 For this library, an interface is a class that contains the logic for sending the command and parameter data to the
 hardware module and receiving and processing the data sent by the module to the PC. The microcontroller and PC libraries
 ensure that the data is efficiently moved between the module and the interface and saved (logged) to disk. The rest of
 the module-interface interaction is up to the end user (module / interface developer).
 
 ### Implementing Custom Module Interfaces
+
 All module interfaces intended to be accessible through this library have to follow the implementation guidelines
 described in the [example module interface implementation file](./examples/example_interface.py). Specifically,
 **all custom module interfaces have to subclass the ModuleInterface class from this library and implement all abstract
 methods**.
 
 #### Abstract Methods
+
 These methods provide the inherited API used by the centralized microcontroller interface to connect hardware module
 interfaces to their hardware modules managed by the companion microcontroller. Specifically, the
 MicroControllerInterface calls these methods as part of the remote communication process's runtime cycle to work with
 the data sent by the custom hardware module.
 
 #### initialize_remote_assets
+
 This method is called by the MicroControllerInterface once for each ModuleInterface at the beginning of the
 communication cycle. The method should be used to initialize or configure custom assets (queues, shared memory buffers,
 timers, etc.) that need to be processed from the (remote) communication process.
+
 ```python
 def initialize_remote_assets(self) -> None:
     # Connects to the shared memory array from the remote process.
@@ -479,10 +491,12 @@ def initialize_remote_assets(self) -> None:
 ```
 
 #### terminate_remote_assets
+
 This method is the inverse of the initialize_remote_assets() method. It is called by the MicroControllerInterface for
 each ModuleInterface at the end of the communication cycle. This method should be used to clean up (terminate) any
 assets initialized at the beginning of the communication runtime to ensure all resources are released before the process
 is terminated.
+
 ```python
 def terminate_remote_assets(self) -> None:
     # The shared memory array must be manually disconnected from each process that uses it to prevent runtime
@@ -491,6 +505,7 @@ def terminate_remote_assets(self) -> None:
 ```
 
 #### process_received_data
+
 This method allows processing incoming module messages as they are received by the PC. The MicroControllerInterface
 instance calls this method for any ModuleState or ModuleData message received from the hardware module, if the
 event code of the message matches one of the codes in the data_codes attribute of the module's interface instance.
@@ -505,6 +520,7 @@ function: its main goal is to handle the incoming data as quickly as possible an
 for other modules.
 
 This example demonstrates the implementation of the processing method to send the data back to the main process:
+
 ```python
 from ataraxis_communication_interface import ModuleData, ModuleState
 
@@ -541,6 +557,7 @@ def process_received_data(self, message: ModuleData | ModuleState) -> None:
 ```
 
 #### Sending Data to the Microcontroller
+
 In addition to abstract methods, each interface may need to send data to the microcontroller. Broadly, the outgoing
 messages are divided into two categories: **commands** and **parameter updates**. Command messages instruct the module
 to perform a specified action. Parameter updates are used to overwrite the module's runtime parameters to broadly adjust
@@ -556,6 +573,7 @@ functions / methods should be simple wrappers around these inherited methods. Se
 ModuleInterface class for the details about these methods inherited by each child interface class.
 
 ### Error Handling
+
 The microcontroller reports every runtime fault as a byte-code, and the codes come from four families defined across
 the companion microcontroller libraries. The Kernel and the base Module class each define their own status codes, and
 a fault that originates in the serial link carries a second pair of codes from the Communication and TransportLayer
@@ -565,18 +583,20 @@ the condition that code reports, then raises the result as a RuntimeError from t
 The messages state what the reported codes establish and stop there, because a status code records where a fault was
 detected rather than what caused it. A packet corrupted between the microcontroller and the PC surfaces as the
 following, rather than as the raw codes 3, 52, and 19:
+
 ```text
 Microcontroller 3 ('actor_controller') Kernel status RECEPTION_ERROR (code 3) during Kernel command RECEIVE_DATA
 (code 1). Reception failed. Communication RECEPTION_ERROR (code 52): could not read a complete message from the
 serial stream. TransportLayer CRC_CHECK_FAILED (code 19): CRC mismatch, packet bytes likely corrupted in transit.
 ```
 
-A code matching no member of its firmware enumeration reports that it falls outside the range this library resolves,
-rather than passing unnoticed. The KernelStatusCodes, ModuleStatusCodes, CommunicationStatusCodes, and
-TransportStatusCodes enumerations exported by this library mirror the four firmware families, so post-runtime tooling
-reads a logged event code through the same vocabulary.
+A code matching no member of its firmware enumeration reports that it falls outside the range this library resolves. The
+KernelStatusCodes, ModuleStatusCodes, CommunicationStatusCodes, and TransportStatusCodes enumerations exported by this
+library mirror the four firmware families, so post-runtime tooling reads a logged event code through the same
+vocabulary.
 
 #### Custom Module Error Codes
+
 The status codes above are the ones the firmware defines for every module, and they occupy the reserved event code
 range below MINIMUM_CUSTOM_STATUS_CODE. Each custom hardware module assigns its own event codes from the range that
 MINIMUM_CUSTOM_STATUS_CODE and MAXIMUM_CUSTOM_STATUS_CODE bound, and only the module's author knows what those codes
@@ -586,6 +606,7 @@ To surface that knowledge to the operator, pass the `error_codes` argument of th
 dictionary that maps each monitored error code to its explanation. Receiving a message with one of those codes raises
 a RuntimeError carrying the matching explanation alongside the reporting module, the command it was executing, and any
 data object the message contained:
+
 ```python
 import numpy as np
 
@@ -614,7 +635,7 @@ class WaterValveInterface(ModuleInterface):
 below that range through the service code handling described above, so a code declared from there never reaches the
 interface that declared it.
 
-### CLI
+### CLI Commands
 
 This library provides the `axci` CLI that exposes the following commands:
 

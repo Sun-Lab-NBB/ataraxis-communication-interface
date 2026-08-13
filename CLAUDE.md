@@ -44,8 +44,7 @@ stored locally in the same parent directory as this project, reachable as `../` 
 
 ## Available skills
 
-Skills are distributed through the ataraxis marketplace and are loaded into Claude Code via the plugin system. They are
-**not** stored in this repository.
+Skills live in the ataraxis marketplace repository and are loaded into Claude Code via the plugin system.
 
 ### Communication plugin skills (ataraxis/plugins/communication/)
 
@@ -68,9 +67,6 @@ Skills are distributed through the ataraxis marketplace and are loaded into Clau
 | `/firmware-module` | Firmware-side Module subclass implementation, command execution, and SendData |
 
 ### Automation plugin skills (ataraxis/plugins/automation/)
-
-The automation plugin provides cross-cutting development skills, and this table lists the ones relevant to this Python
-library. The C++, C#, and PlatformIO skills serve other project archetypes.
 
 | Skill                   | Description                                                                    |
 |-------------------------|--------------------------------------------------------------------------------|
@@ -99,25 +95,15 @@ archive assembly, recording discovery, manifest management, extraction configura
 output verification, output cleanup, and extracted event querying tools. When working with this project
 or its dependencies, prefer using available MCP tools over direct code execution when appropriate.
 
-**Guidelines for MCP usage:**
-
 1. **Discover available tools**: At the start of a session, check which MCP servers are connected and what tools
    they provide. Use these tools when they offer functionality relevant to the current task.
 
 2. **Prefer MCP for runtime operations**: For operations like microcontroller discovery, MQTT broker verification,
    log archive assembly, extraction configuration management, and batch log processing workflows, use MCP tools
-   rather than writing and executing Python code directly. MCP tools provide:
-   - Consistent, tested interfaces
-   - Proper resource management and cleanup
-   - Formatted output designed for user display
+   rather than writing and executing Python code directly.
 
 3. **Use MCP for cross-library operations**: When dependency libraries (e.g., `ataraxis-data-structures`,
    `ataraxis-time`) provide MCP servers, explore and use their tools for interacting with those libraries.
-
-4. **Fall back to code when necessary**: Use direct code execution when:
-   - No MCP tool exists for the required functionality
-   - The task requires custom logic not covered by available tools
-   - Writing or modifying library source code
 
 ## Companion library synchronization
 
@@ -146,7 +132,7 @@ distributed separately through the [ataraxis](https://github.com/Sun-Lab-NBB/ata
   framework coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
   general-purpose codebase exploration tools.
 
-When modifying skills, edit the SKILL.md files in the ataraxis marketplace repository, not in this repository.
+When modifying skills, edit the SKILL.md files in the ataraxis marketplace repository.
 When modifying the MCP server implementation or library code, edit the source files in this repository.
 
 ## Project context
@@ -168,7 +154,7 @@ data from DataLogger archives.
 | `src/.../microcontroller/log_processing.py` | Log data extraction algorithm and the columnar structures it returns          |
 | `src/.../microcontroller/extracted_data.py` | Extracted message table schema, its writer, and the primitives that read it   |
 | `src/.../orchestration/`                    | Job identity, sizing, discovery, the single-job runner, and execution paths   |
-| `src/.../interfaces/`                       | CLI (`axci`), MCP entry point, shared instance, response machinery, tools    |
+| `src/.../interfaces/`                       | CLI (`axci`), MCP entry point, shared instance, response machinery, tools     |
 | `tests/`                                    | Test suite, grouped into per-package directories mirroring the source layout  |
 | `examples/`                                 | Example ModuleInterface subclass and runtime usage                            |
 | `docs/`                                     | Sphinx API documentation source                                               |
@@ -183,27 +169,27 @@ data from DataLogger archives.
 - **ModuleInterface**: Abstract base class that users subclass to define hardware module behavior. Its three abstract
   methods, `initialize_remote_assets()`, `terminate_remote_assets()`, and `process_received_data()`, run inside the
   communication process, and the `type_id` property combines `(type << 8) | id` for dispatch lookups.
-- **Status Code Resolution**: `microcontroller/status_codes.py` mirrors the four firmware status code families and
+- **Status code resolution**: `microcontroller/status_codes.py` mirrors the four firmware status code families and
   resolves each received code into the description of a fault or an ordinary state. Membership in the private
   description tables defines which codes interrupt the runtime, and a code matching no enumeration member reports that
   it falls outside the resolved range rather than being ignored. The messages state what the reported codes establish
   and prescribe no response, because a status code records where a fault was detected rather than what caused it.
-- **Serial Communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
+- **Serial communication**: `SerialCommunication` wraps `TransportLayer` from `ataraxis-transport-layer-pc` for
   CRC16-CCITT checksummed serial I/O. All received data is timestamped via `PrecisionTimer` and logged to `DataLogger`
   through an `MPQueue`.
-- **MQTT Communication**: `MQTTCommunication` provides publish/subscribe messaging over MQTT via `paho-mqtt`.
-- **Microcontroller Manifest**: `MicroControllerManifest` (`YamlConfig` subclass) associates controller IDs with
+- **MQTT communication**: `MQTTCommunication` provides publish/subscribe messaging over MQTT via `paho-mqtt`.
+- **Microcontroller manifest**: `MicroControllerManifest` (`YamlConfig` subclass) associates controller IDs with
   human-readable names and their module lists in a `microcontroller_manifest.yaml` file alongside DataLogger archives.
-- **Extraction Configuration**: `ExtractionConfig` (`YamlConfig` subclass) specifies which controllers, modules, and
+- **Extraction configuration**: `ExtractionConfig` (`YamlConfig` subclass) specifies which controllers, modules, and
   event codes to extract from log archives.
-- **Log Data Extraction**: `extract_logged_microcontroller_data()` reads a DataLogger `.npz` archive once and returns
+- **Log data extraction**: `extract_logged_microcontroller_data()` reads a DataLogger `.npz` archive once and returns
   the matching module and kernel messages, choosing between the sequential and the `ProcessPoolExecutor` path through
   the `PARALLEL_PROCESSING_THRESHOLD` constant from ataraxis-data-structures.
 - **Orchestration**: The `orchestration/` package owns everything above the extraction algorithm, resolving the job
-  universe from the `microcontroller_manifest.yaml`, sizing each job from the archive it will read, running the
-  shared-pool batch engine that admits jobs against a core and a memory budget, and running one recording sequentially.
-  It writes Feather (Arrow IPC) files through `atomic_write()` into a `microcontroller_data/` subdirectory.
-- **MCP Server**: The tool modules register on the shared `MCPServer` instance from `interfaces/mcp_instance.py` via
+  universe from the `microcontroller_manifest.yaml` and sizing each job from the archive it will read. It runs the
+  shared-pool batch engine that admits jobs against a core and a memory budget, and runs one recording sequentially. It
+  writes Feather (Arrow IPC) files through `atomic_write()` into a `microcontroller_data/` subdirectory.
+- **MCP server**: The tool modules register on the shared `MCPServer` instance from `interfaces/mcp_instance.py` via
   `@mcp.tool()` decorators and are imported for their side effects by the thin `interfaces/mcp_server.py`, whose
   `run_server()` enables JSON responses when it starts the streamable-http transport.
 - **CLI**: Click command group (`axci`) exposing microcontroller discovery, MQTT broker verification, extraction
@@ -211,22 +197,22 @@ data from DataLogger archives.
 
 ### Key patterns
 
-- **Daemon Communication Process**: Construction does not start communication. `start()` spawns the daemon communication
-  process, verifies the controller and module identity, and launches the watchdog thread, and the process requires an
-  explicit `stop()` call. Callers are responsible for setting an appropriate multiprocessing start method if needed.
-- **Message Protocol Stack**: Four levels: `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
+- **Daemon communication process**: `start()` spawns the daemon communication process, verifies the controller and
+  module identity, and launches the watchdog thread, and the process requires an explicit `stop()` call. Callers are
+  responsible for setting an appropriate multiprocessing start method if needed.
+- **Message protocol stack**: Four levels: `SerialCommunication` (USB/UART), `TransportLayer` (CRC checksums,
   frame encoding), message protocols (13 types via `SerialProtocols` enum), and data prototypes (252 numpy types
   via `SerialPrototypes` enum).
-- **LRU Caching**: `ModuleInterface` caches command messages (`maxsize=32`) and parameter messages (`maxsize=16`)
+- **LRU caching**: `ModuleInterface` caches command messages (`maxsize=32`) and parameter messages (`maxsize=16`)
   to avoid redundant serialization during repeated operations.
-- **Type-ID Dispatch**: Received messages are routed to `ModuleInterface` instances via a `(module_type, module_id)`
+- **Type-ID dispatch**: Received messages are routed to `ModuleInterface` instances via a `(module_type, module_id)`
   → `type_id` (`uint16`) lookup, where `type_id = (type << 8) | id`.
-- **Manifest-Based Log Discovery**: `microcontroller_manifest.yaml` files tag DataLogger output directories with
+- **Manifest-based log discovery**: `microcontroller_manifest.yaml` files tag DataLogger output directories with
   source-to-name mappings. Log processing discovery and batch preparation use manifests to identify which archives
   were produced by ataraxis-communication-interface and to route jobs by source ID.
-- **Columnar Data Extraction**: Log processing accumulates data in parallel lists via `_ColumnAccumulator`, converts
+- **Columnar data extraction**: Log processing accumulates data in parallel lists via `_ColumnAccumulator`, converts
   to numpy arrays, then builds Polars DataFrames for efficient Feather output.
-- **Archive-Derived Job Sizing**: Every job is sized before dispatch from the archive it will read.
+- **Archive-derived job sizing**: Every job is sized before dispatch from the archive it will read.
   `resolve_archive_footprint()` reads the `.npz` zip directory and the file size, and `resolve_job_workers()` emits one
   of two shapes and nothing between them: a single core below `PARALLEL_EXTRACTION_THRESHOLD` (15000 data messages) and
   the declared `CONTROLLER_EXTRACTION_JOB_CORES` width (4) at or above it. That threshold is distinct from the
@@ -240,17 +226,16 @@ data from DataLogger archives.
   memory term carry the values the platform's own estimators were calibrated to against measured peaks, so this stage's
   jobs and the stages queued beside them are sized on one scale. Changing a constant here changes how this stage
   competes for admission against every other stage a scheduler plans with it.
-- **Library-Owned Output Contract**: This library owns both directions of the format it writes.
-  `resolve_module_path()` and `resolve_kernel_path()` name the files, `find_module_paths()` and `find_kernel_paths()`
-  discover them, `parse_module_path()` and `parse_kernel_path()` recover the identity each name encodes, all six in
-  `orchestration/jobs.py`, and `partition_events()`, `get_event_timestamps()`, and
-  `get_event_data()` read the table through the `ExtractedDataColumns` enumeration rather than through string
-  literals. A downstream consumer reads the extracted data through these rather than reimplementing the naming
-  convention and the schema.
-- **Frozen Dataclasses**: Inner data classes (`ModuleSourceData`, `MicroControllerSourceData`,
-  `ModuleExtractionConfig`, `KernelExtractionConfig`, `ControllerExtractionConfig`) use `frozen=True` for
-  immutability and `slots=True` for performance. The top-level `MicroControllerManifest` and `ExtractionConfig`
-  classes extend `YamlConfig` and are mutable (not frozen).
+- **Library-owned output contract**: This library owns both directions of the format it writes. `resolve_module_path()`
+  and `resolve_kernel_path()` name the files, `find_module_paths()` and `find_kernel_paths()` discover them,
+  `parse_module_path()` and `parse_kernel_path()` recover the identity each name encodes, all six in
+  `orchestration/jobs.py`. `partition_events()`, `get_event_timestamps()`, and `get_event_data()` read the table through
+  the `ExtractedDataColumns` enumeration rather than through string literals. A downstream consumer reads the extracted
+  data through these rather than reimplementing the naming convention and the schema.
+- **Frozen dataclasses**: Inner data classes (`ModuleSourceData`, `MicroControllerSourceData`, `ModuleExtractionConfig`,
+  `KernelExtractionConfig`, `ControllerExtractionConfig`) use `frozen=True` for immutability and `slots=True` for
+  performance. The top-level `MicroControllerManifest` and `ExtractionConfig` classes extend `YamlConfig` and are
+  mutable.
 
 ### Code standards
 
@@ -260,8 +245,6 @@ data from DataLogger archives.
 - See style skills for complete conventions
 
 ### Workflow guidance
-
-Non-obvious facts for the most common modifications. Read the cited files for full context.
 
 - **MicroControllerInterface** (`microcontroller/interface.py`): the communication loop runs in `_runtime_cycle()`,
   a static method executed in a spawned daemon process, and a watchdog thread in the main process monitors liveness.
@@ -292,17 +275,17 @@ Non-obvious facts for the most common modifications. Read the cited files for fu
   `partition_events()` and then `get_event_timestamps()` or `get_event_data()`. `get_event_data()` decodes a whole
   event stream through one buffer read, which the firmware's one-data-type-per-event-code guarantee permits.
 - **Orchestration** (`orchestration/`): `run_log_processing_pipeline()` runs one recording sequentially, or the single
-  job a caller names by its canonical identifier, and imports no batch engine. The `config` parameter is a `Path`
-  loaded inside the job, and the tracker universe comes from the manifest rather than from the config, so a config
-  requesting a subset never resets its sibling jobs. `execute_job()` wraps the work in `ProcessingTracker.run_job()`,
-  which records the start, the completion, and the failure without a hand-written guard.
+  job a caller names by its canonical identifier. The `config` parameter is a `Path` loaded inside the job, and the
+  tracker universe comes from the manifest rather than from the config, so a config requesting a subset never resets its
+  sibling jobs. `execute_job()` wraps the work in `ProcessingTracker.run_job()`, which records the start, the
+  completion, and the failure.
 - **CLI** (`interfaces/cli.py`): use `console.echo()` for output, including for errors, which are reported at
-  `LogLevel.ERROR` so a failed command exits zero rather than raising. The `config`
-  subgroup demonstrates nested Click command groups.
+  `LogLevel.ERROR` so a failed command exits zero rather than raising. The `config` subgroup demonstrates nested Click
+  command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via
   `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return
-  JSON-serializable `dict[str, Any]`, except the two discovery tools `list_microcontrollers_tool` and
-  `check_mqtt_broker_tool`, which return a preformatted `str`. Execution uses `JobExecutionState`
-  (`orchestration/execution.py`) with host-derived core and memory budgets, against which archive-derived per-job sizes
-  are admitted. A read tool that lists items builds its response through `interfaces/responses.py`, which owns the
-  bare, filtered, and detailed staging and the `rows`, `matched_rows`, `start_row`, and `next_start_row` paging fields.
+  JSON-serializable `dict[str, Any]`. The two discovery tools `list_microcontrollers_tool` and `check_mqtt_broker_tool`
+  return a preformatted `str`. Execution uses `JobExecutionState` (`orchestration/execution.py`) with host-derived core
+  and memory budgets, against which archive-derived per-job sizes are admitted. A read tool that lists items builds its
+  response through `interfaces/responses.py`, which owns the bare, filtered, and detailed staging and the `rows`,
+  `matched_rows`, `start_row`, and `next_start_row` paging fields.

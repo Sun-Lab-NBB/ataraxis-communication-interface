@@ -120,6 +120,13 @@ def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
     assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES
 
 
+def test_resolve_job_workers_at_the_threshold() -> None:
+    """Verifies that resolve_job_workers reports the declared allocation at the parallel extraction threshold."""
+    footprint = _modeled_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
+
+    assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES
+
+
 def test_estimate_job_memory_mb_unmodeled_footprint() -> None:
     """Verifies that estimate_job_memory_mb falls back to the job body baseline for an unmodeled footprint."""
     # The core count does not enter the estimate, since an unmodeled footprint carries no archive to split.
@@ -154,7 +161,7 @@ def test_estimate_job_memory_mb_charges_every_reader_in_parallel() -> None:
     estimate = estimate_job_memory_mb(footprint=footprint, cores=cores)
 
     # The job body holds its own baseline and reader, and each of the four pool children holds a spawned child
-    # baseline and a reader of its own, which is 1653 MB before the tolerance and the rounding lift it to 2048 MB.
+    # baseline and a reader of its own. That is 1653 MB before the tolerance and the rounding lift it to 2048 MB.
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
     assert estimate == _apply_tolerance(
         memory_mb=_JOB_BODY_MEMORY_MB + per_reader + cores * (SPAWNED_CHILD_MEMORY_MB + per_reader)
@@ -352,6 +359,30 @@ def test_apply_tolerance(memory_mb: int, expected: int) -> None:
     assert reportable >= memory_mb
 
 
+def test_size_archive_job_sizes_a_real_archive(tmp_path: Path) -> None:
+    """Verifies that size_archive_job resolves both figures of the sizing model from one readable archive."""
+    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
+    _write_archive(archive_path=archive_path)
+
+    cores, memory_mb, modeled = size_archive_job(archive_path=archive_path)
+
+    # The synthetic archive holds far fewer messages than the threshold, so it takes the sequential shape.
+    footprint = resolve_archive_footprint(archive_path=archive_path)
+    assert modeled
+    assert cores == 1
+    assert cores == resolve_job_workers(footprint=footprint)
+    assert memory_mb == estimate_job_memory_mb(footprint=footprint, cores=cores)
+
+
+def test_size_archive_job_falls_back_for_an_unreadable_archive(tmp_path: Path) -> None:
+    """Verifies that size_archive_job reports the baseline floor for an archive it cannot read."""
+    cores, memory_mb, modeled = size_archive_job(archive_path=tmp_path / f"missing{LOG_ARCHIVE_SUFFIX}")
+
+    assert not modeled
+    assert cores == 1
+    assert memory_mb == _UNMODELED_MEMORY_MB
+
+
 def _modeled_footprint(message_count: int, archive_bytes: int) -> ArchiveFootprint:
     """Builds a modeled footprint carrying the requested message count and on-disk size."""
     return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes, modeled=True)
@@ -409,34 +440,3 @@ def _write_archive(archive_path: Path, source_id: int = 1) -> None:
             ),
         ],
     )
-
-
-def test_size_archive_job_sizes_a_real_archive(tmp_path: Path) -> None:
-    """Verifies that size_archive_job resolves both figures of the sizing model from one readable archive."""
-    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
-    _write_archive(archive_path=archive_path)
-
-    cores, memory_mb, modeled = size_archive_job(archive_path=archive_path)
-
-    # The synthetic archive holds far fewer messages than the threshold, so it takes the sequential shape.
-    footprint = resolve_archive_footprint(archive_path=archive_path)
-    assert modeled
-    assert cores == 1
-    assert cores == resolve_job_workers(footprint=footprint)
-    assert memory_mb == estimate_job_memory_mb(footprint=footprint, cores=cores)
-
-
-def test_resolve_job_workers_at_the_threshold() -> None:
-    """Verifies that resolve_job_workers reports the declared allocation at the parallel extraction threshold."""
-    footprint = _modeled_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
-
-    assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES
-
-
-def test_size_archive_job_falls_back_for_an_unreadable_archive(tmp_path: Path) -> None:
-    """Verifies that size_archive_job reports the baseline floor for an archive it cannot read."""
-    cores, memory_mb, modeled = size_archive_job(archive_path=tmp_path / f"missing{LOG_ARCHIVE_SUFFIX}")
-
-    assert not modeled
-    assert cores == 1
-    assert memory_mb == _UNMODELED_MEMORY_MB

@@ -239,7 +239,6 @@ def test_process_message_batch_unknown_prototype_codes(tmp_path: Path) -> None:
 
 def test_extract_logged_microcontroller_data_invalid_path(tmp_path: Path) -> None:
     """Verifies that extraction rejects paths that do not point to an existing .npz file."""
-    # A path that does not exist at all.
     missing_path = tmp_path / f"{_SOURCE_ID}{LOG_ARCHIVE_SUFFIX}"
     message = (
         f"Unable to extract microcontroller message data from the log file {missing_path}, as it does not exist or "
@@ -250,7 +249,6 @@ def test_extract_logged_microcontroller_data_invalid_path(tmp_path: Path) -> Non
             log_path=missing_path, module_filters=None, kernel_event_codes=frozenset({5})
         )
 
-    # An existing file that does not use the .npz suffix.
     text_path = tmp_path / "controller_log.txt"
     text_path.touch()
     message = (
@@ -260,7 +258,6 @@ def test_extract_logged_microcontroller_data_invalid_path(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match=error_format(message)):
         extract_logged_microcontroller_data(log_path=text_path, module_filters=None, kernel_event_codes=frozenset({5}))
 
-    # A directory that carries the .npz suffix.
     directory_path = tmp_path / f"directory{LOG_ARCHIVE_SUFFIX}"
     directory_path.mkdir()
     message = (

@@ -370,8 +370,8 @@ class SerialProtocols(IntEnum):
     communication.
 
     Notes:
-        The elements in this enumeration should be accessed through their 'as_uint8' method to enforce
-        the type expected by other classes from this library.
+        The elements of this enumeration are accessed through their ``as_uint8`` method, which returns the code in
+        the type the serialized message layout requires.
     """
 
     UNDEFINED = 0
@@ -1035,10 +1035,6 @@ class SerialPrototypes(IntEnum):
         """Returns the enumeration value as a numpy uint8 type."""
         return np.uint8(self.value)
 
-    def get_prototype(self) -> PrototypeType:
-        """Returns the prototype object associated with the prototype enumeration value."""
-        return _PROTOTYPE_FACTORIES[self.value]()
-
     @staticmethod
     def get_prototype_for_code(code: np.uint8) -> PrototypeType | None:
         """Returns the prototype object associated with the input prototype code.
@@ -1049,12 +1045,10 @@ class SerialPrototypes(IntEnum):
             prototype and builds a new object to hold the received data.
 
         Args:
-            code: The prototype code for which to retrieve the prototype object. The code is converted to an integer
-                before lookup.
+            code: The prototype code for which to retrieve the prototype object.
 
         Returns:
-            The prototype object that is either a numpy scalar or shallow array type. If the input code is not one of
-            the supported codes, returns None to indicate a matching error.
+            The prototype object the code declares, or None when the code is not one of the supported codes.
         """
         return _PROTOTYPE_OBJECTS.get(int(code))
 

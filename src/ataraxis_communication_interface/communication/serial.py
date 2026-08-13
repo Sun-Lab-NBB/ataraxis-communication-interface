@@ -34,25 +34,25 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 _PROTOCOL_MODULE_DATA: np.uint8 = SerialProtocols.MODULE_DATA.as_uint8()
-"""Cached uint8 value for the MODULE_DATA protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the MODULE_DATA protocol code."""
 
 _PROTOCOL_KERNEL_DATA: np.uint8 = SerialProtocols.KERNEL_DATA.as_uint8()
-"""Cached uint8 value for the KERNEL_DATA protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the KERNEL_DATA protocol code."""
 
 _PROTOCOL_MODULE_STATE: np.uint8 = SerialProtocols.MODULE_STATE.as_uint8()
-"""Cached uint8 value for the MODULE_STATE protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the MODULE_STATE protocol code."""
 
 _PROTOCOL_KERNEL_STATE: np.uint8 = SerialProtocols.KERNEL_STATE.as_uint8()
-"""Cached uint8 value for the KERNEL_STATE protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the KERNEL_STATE protocol code."""
 
 _PROTOCOL_RECEPTION_CODE: np.uint8 = SerialProtocols.RECEPTION_CODE.as_uint8()
-"""Cached uint8 value for the RECEPTION_CODE protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the RECEPTION_CODE protocol code."""
 
 _PROTOCOL_CONTROLLER_IDENTIFICATION: np.uint8 = SerialProtocols.CONTROLLER_IDENTIFICATION.as_uint8()
-"""Cached uint8 value for the CONTROLLER_IDENTIFICATION protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the CONTROLLER_IDENTIFICATION protocol code."""
 
 _PROTOCOL_MODULE_IDENTIFICATION: np.uint8 = SerialProtocols.MODULE_IDENTIFICATION.as_uint8()
-"""Cached uint8 value for the MODULE_IDENTIFICATION protocol code, used in receive_message dispatch."""
+"""Cached uint8 value for the MODULE_IDENTIFICATION protocol code."""
 
 _PROTOCOL_CODE_PROTOTYPE: np.uint8 = np.uint8(0)
 """The uint8 prototype every reception reads its protocol code into. Sharing one instance is safe because the
@@ -62,10 +62,6 @@ TransportLayer builds a new object to hold the value it reads."""
 class SerialCommunication:
     """Provides methods for bidirectionally communicating with a microcontroller running the ataraxis-micro-controller
     library over the USB or UART serial interface.
-
-    Notes:
-        This class is explicitly designed to be used by other library assets and should not be used directly by end
-        users.
 
     Args:
         controller_id: The identifier code of the microcontroller to communicate with.
@@ -80,7 +76,7 @@ class SerialCommunication:
         baudrate: The baudrate to use for communication if the microcontroller uses the UART interface. Must match
             the value used by the microcontroller. This parameter is ignored when using the USB interface.
         test_mode: Determines whether the instance uses a pySerial (real) or a SerialMock (mocked) communication
-            interface. This flag is used during testing and should be disabled for all production runtimes.
+            interface.
 
     Attributes:
         _transport_layer: The TransportLayer instance that handles the communication.
@@ -189,16 +185,14 @@ class SerialCommunication:
             attributes. It is advised to finish working with the received message data before receiving another message.
 
         Returns:
-            A reference to the parsed message data stored as an instance's attribute, which is one of ModuleData,
-            ModuleState, KernelData, KernelState, ControllerIdentification, ModuleIdentification, or ReceptionCode, or
-            None if no message was received.
+            A reference to the parsed message data stored on the matching instance attribute, or None when no
+            message was received.
 
         Raises:
             ValueError: If the received message uses an invalid (unrecognized) message protocol code. If the received
                 data message uses an unsupported data object prototype code.
 
         """
-        # Receiving no data is a non-error, no-message return case.
         if not self._transport_layer.receive_data():
             return None
 
@@ -211,8 +205,6 @@ class SerialCommunication:
         if protocol == _PROTOCOL_MODULE_DATA:
             self._module_data.message = self._transport_layer.read_data(data_object=self._module_data.message)
 
-            # Resolves the prototype code and uses it to retrieve the prototype object from the SerialPrototypes
-            # lookup table.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._module_data.prototype_code)
 
             if prototype is None:
@@ -231,8 +223,6 @@ class SerialCommunication:
         if protocol == _PROTOCOL_KERNEL_DATA:
             self._kernel_data.message = self._transport_layer.read_data(data_object=self._kernel_data.message)
 
-            # Resolves the prototype code and uses it to retrieve the prototype object from the SerialPrototypes
-            # lookup table.
             prototype = SerialPrototypes.get_prototype_for_code(code=self._kernel_data.prototype_code)
 
             if prototype is None:

@@ -41,7 +41,7 @@ def write_microcontroller_manifest(
         log_directory: The path to the DataLogger output directory where the manifest file is stored.
         controller_id: The controller_id of the MicroControllerInterface instance to register.
         controller_name: The colloquial human-readable name for the microcontroller.
-        modules: A tuple of ModuleSourceData instances describing the hardware modules managed by this controller.
+        modules: The hardware modules managed by this controller.
 
     Raises:
         Timeout: If the manifest's .lock file cannot be acquired within the timeout period.
@@ -52,12 +52,10 @@ def write_microcontroller_manifest(
 
     # The read, the replacement, and the write do not form an atomic sequence on their own. The temporary file
     # atomic_write() opens is named per process, so two threads of one process collide on that name instead of
-    # serializing behind it, while two processes miss each other's name entirely and the second write drops the first
-    # entry. Both the threads that concurrent MCP tool calls run on and the separate processes that construct
+    # serializing behind it. Two processes miss each other's name entirely and the second write drops the first entry.
+    # Both the threads that concurrent MCP tool calls run on and the separate processes that construct
     # MicroControllerInterface instances reach this function, so the lock is a file lock rather than a thread lock.
     with lock.acquire(timeout=_MANIFEST_LOCK_TIMEOUT):
-        # Reads the existing manifest if one has already been written by another MicroControllerInterface instance
-        # sharing this DataLogger.
         manifest = (
             MicroControllerManifest.from_yaml(file_path=manifest_path)
             if manifest_path.exists()
@@ -90,8 +88,7 @@ def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
         manifest_path: The path to the microcontroller_manifest.yaml file.
 
     Returns:
-        An ExtractionConfig instance with all controllers and modules populated but with empty event codes
-        that must be filled in by the user.
+        The configuration covering every controller and module the manifest registers, with empty event codes.
 
     Raises:
         FileNotFoundError: If the manifest file does not exist or does not point to a file.
@@ -114,7 +111,6 @@ def create_extraction_config(manifest_path: Path) -> ExtractionConfig:
 
     controller_configs: list[ControllerExtractionConfig] = []
     for controller in manifest.controllers:
-        # Creates placeholder module configs with empty event codes for the user to fill in.
         module_configs = tuple(
             ModuleExtractionConfig(
                 module_type=source_module.module_type,
@@ -152,7 +148,7 @@ class MicroControllerSourceData:
     """Stores the identification data for a single microcontroller registered in a log manifest.
 
     Each entry corresponds to one MicroControllerInterface instance that logs communication data to the same DataLogger
-    output directory. The ``modules`` tuple enumerates all hardware module interfaces bound to this controller.
+    output directory.
     """
 
     id: int
@@ -167,9 +163,6 @@ class MicroControllerSourceData:
 class MicroControllerManifest(YamlConfig):
     """Stores microcontroller source identification data for all MicroControllerInterface instances sharing a
     DataLogger.
-
-    Each entry in the ``controllers`` list corresponds to one MicroControllerInterface instance that logs data to the
-    same DataLogger output directory.
     """
 
     controllers: list[MicroControllerSourceData]

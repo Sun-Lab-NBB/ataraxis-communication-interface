@@ -21,7 +21,7 @@ def read_tracker_status(tracker_path: Path) -> dict[str, Any]:
         tracker_path: The path to the ProcessingTracker YAML file.
 
     Returns:
-        A dictionary containing per-job status details and summary counts.
+        The per-job status details and the summary counts.
     """
     registry = ProcessingTracker(file_path=tracker_path).snapshot()
 

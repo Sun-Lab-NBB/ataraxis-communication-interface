@@ -233,7 +233,7 @@ def test_resolve_jobs_empty_manifest(tmp_path: Path) -> None:
 
 
 def test_resolve_jobs_ambiguous_log_directory(tmp_path: Path) -> None:
-    """Verifies that resolve_jobs rejects a tree holding several manifests instead of resolving the first one."""
+    """Verifies that resolve_jobs rejects a tree holding several manifests."""
     _build_recording(log_directory=tmp_path / "recording_one", source_ids=(1,))
     _build_recording(log_directory=tmp_path / "recording_two", source_ids=(2,))
 
@@ -542,7 +542,7 @@ def test_prepare_jobs_ambiguous_archive_under_strict_sourcing(tmp_path: Path) ->
 
 
 def test_prepare_jobs_records_skipped_sources_without_strict_sourcing(tmp_path: Path) -> None:
-    """Verifies that lenient sourcing records every unpreparable source with its reason instead of raising."""
+    """Verifies that lenient sourcing records every unpreparable source with its reason."""
     log_directory = tmp_path / "logs"
     _build_recording(log_directory=log_directory, source_ids=(1,))
     _write_manifest_entry(log_directory=log_directory, source_id=2)
@@ -567,7 +567,7 @@ def test_prepare_jobs_records_skipped_sources_without_strict_sourcing(tmp_path: 
 
 
 def test_prepare_jobs_unregistered_controller_without_strict_sourcing(tmp_path: Path) -> None:
-    """Verifies that lenient sourcing records a configured controller the manifest omits instead of raising."""
+    """Verifies that lenient sourcing records a configured controller the manifest omits."""
     log_directory = tmp_path / "logs"
     _build_recording(log_directory=log_directory, source_ids=(1,))
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1, 7))
@@ -726,7 +726,7 @@ def test_prepare_jobs_discards_out_of_universe_tracker_entries(tmp_path: Path) -
 
 
 def test_prepare_jobs_returns_an_empty_set_when_lenient_sourcing_skips_every_source(tmp_path: Path) -> None:
-    """Verifies that a lenient request preparing no job returns a set rather than failing on tracker alignment."""
+    """Verifies that a lenient request preparing no job returns an empty job set."""
     log_directory = tmp_path / "logs"
     _build_recording(log_directory=log_directory, source_ids=(1,))
     _write_manifest_entry(log_directory=log_directory, source_id=2)

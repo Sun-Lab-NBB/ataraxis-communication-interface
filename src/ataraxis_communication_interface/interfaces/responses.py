@@ -12,8 +12,7 @@ _DEFAULT_ITEM_LIMIT: int = 200
 """The items a semi-detail page carries when the caller names no limit."""
 
 _DEFAULT_DETAILED_LIMIT: int = 50
-"""The items a detailed page carries when the caller names no limit. Detail is meant for reading a few items closely,
-so its page is deliberately shorter."""
+"""The items a detailed page carries when the caller names no limit."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,9 +36,6 @@ class PageWindow:
 
 def resolve_page(total: int, limit: int, start_row: int) -> PageWindow:
     """Resolves which slice of a matched item set a response carries.
-
-    Notes:
-        A limit at or below zero lifts the cap and returns every match from the requested start.
 
     Args:
         total: The items matching the caller's filters, before any cap.
@@ -70,7 +66,7 @@ def page_fields(window: PageWindow, total: int, listed: int) -> dict[str, Any]:
         listed: The items the response actually carries.
 
     Returns:
-        A dictionary carrying the listed count, the matched total, the start row, and the next start row.
+        The listed count, the matched total, the start row, and the next start row.
     """
     return {
         "rows": listed,
@@ -105,7 +101,7 @@ def item_breakdown(items: Sequence[dict[str, Any]], axes: tuple[str, ...]) -> di
         axes: The keys to count, which are the keys a caller may filter by.
 
     Returns:
-        A dictionary mapping each present axis to its value counts.
+        Each present axis mapped to its value counts.
     """
     return {
         axis: _count_values(values=[item.get(axis) for item in items])
@@ -173,7 +169,7 @@ def _count_values(values: Iterable[Any]) -> dict[str, int]:
         values: The values to count.
 
     Returns:
-        A dictionary mapping each value to its count, ordered by value.
+        Each value mapped to its count, ordered by value.
     """
     counts: dict[str, int] = {}
     for value in values:
