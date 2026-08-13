@@ -44,7 +44,8 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 # Names the local MQTT broker the tests below use. The MQTT tests that exchange real traffic skip themselves when
-# no broker is reachable at this address, while the callback and publication-status tests run without one.
+# no broker is reachable at this address, while the tests that drive the class through a replaced client run without
+# one, so the whole class stays covered on a host that runs no broker.
 _BROKER_IP: str = "127.0.0.1"
 """The loopback address of the local MQTT broker used by the MQTT communication tests."""
 
@@ -765,6 +766,62 @@ def test_mqtt_communication_connection_error() -> None:
         communication.connect()
 
 
+def test_mqtt_communication_connect_subscribes_to_monitored_topics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that connect() binds the callbacks, starts the listener thread, and subscribes to every topic."""
+    # Replaces the network calls of the client the instance wraps, as the connection sequence is defined by the calls
+    # the instance makes against that client and is therefore verifiable without a broker to accept them.
+    communication = MQTTCommunication(ip=_BROKER_IP, port=_BROKER_PORT, monitored_topics=_TEST_TOPICS)
+
+    subscriptions: list[tuple[str, int]] = []
+    loop_calls: list[str] = []
+
+    def connect(host: str, port: int) -> int:
+        """Reports that the broker accepted the connection."""
+        return mqtt.MQTT_ERR_SUCCESS
+
+    def subscribe(topic: str, qos: int) -> tuple[int, int]:
+        """Records the requested subscription."""
+        subscriptions.append((topic, qos))
+        return mqtt.MQTT_ERR_SUCCESS, 1
+
+    def loop_start() -> None:
+        """Records the start of the listener thread."""
+        loop_calls.append("start")
+
+    def loop_stop() -> None:
+        """Records the stop of the listener thread."""
+        loop_calls.append("stop")
+
+    def disconnect() -> int:
+        """Reports that the client released the connection."""
+        return mqtt.MQTT_ERR_SUCCESS
+
+    monkeypatch.setattr(communication._client, "connect", connect)
+    monkeypatch.setattr(communication._client, "subscribe", subscribe)
+    monkeypatch.setattr(communication._client, "loop_start", loop_start)
+    monkeypatch.setattr(communication._client, "loop_stop", loop_stop)
+    monkeypatch.setattr(communication._client, "disconnect", disconnect)
+
+    communication.connect()
+
+    assert communication._connected
+    assert communication._client.on_message == communication._on_message
+    assert communication._client.on_disconnect == communication._on_disconnect
+    assert subscriptions == [(topic, 0) for topic in _TEST_TOPICS]
+    assert loop_calls == ["start"]
+
+    # The second call returns at the connection guard, so it neither reconnects nor duplicates the subscriptions.
+    communication.connect()
+
+    assert subscriptions == [(topic, 0) for topic in _TEST_TOPICS]
+    assert loop_calls == ["start"]
+
+    communication.disconnect()
+
+    assert not communication._connected
+    assert loop_calls == ["start", "stop"]
+
+
 @pytest.mark.xdist_group(name="group1")
 def test_mqtt_communication_send_receive() -> None:
     """Verifies the bidirectional communication between MQTTCommunication and another simulated client."""
@@ -824,10 +881,8 @@ def test_mqtt_communication_send_receive() -> None:
 
 def test_mqtt_communication_send_receive_errors() -> None:
     """Verifies the error handling behavior of MQTTCommunication's send_data() and get_data() methods."""
-    if not _broker_available():
-        pytest.skip(f"Skipping this test as it requires an MQTT broker at ip {_BROKER_IP} and port {_BROKER_PORT}.")
-
-    # Both methods raise ConnectionErrors if they are called when the class is not connected to the MQTT broker.
+    # Both methods raise ConnectionErrors if they are called when the class is not connected to the MQTT broker, which
+    # is the state a freshly initialized instance already holds, so both guards are reachable without a broker.
     unity_communication = MQTTCommunication(ip=_BROKER_IP, port=_BROKER_PORT, monitored_topics=_TEST_TOPICS)
     message = (
         f"Unable to send data to the MQTT broker at {_BROKER_IP}:{_BROKER_PORT} via the MQTTCommunication instance. "
@@ -890,6 +945,25 @@ def test_mqtt_communication_send_data_publish_error(monkeypatch: pytest.MonkeyPa
     )
     with pytest.raises(ConnectionError, match=error_format(message)):
         unity_communication.send_data(topic=_TEST_TOPICS[0], payload="test message")
+
+
+def test_mqtt_communication_get_data_drains_the_buffer() -> None:
+    """Verifies that get_data() returns the buffered messages and reports None once the buffer empties."""
+    # Marks the instance as connected without contacting a broker, as the buffer is only read past the connection
+    # guard.
+    unity_communication = MQTTCommunication(ip=_BROKER_IP, port=_BROKER_PORT, monitored_topics=_TEST_TOPICS)
+    unity_communication._connected = True
+
+    assert unity_communication.get_data() is None
+
+    # Buffers the message the way the client's listener thread does, which keeps the retrieval verifiable without a
+    # broker to route a real publication through.
+    message = mqtt.MQTTMessage(mid=1, topic=_TEST_TOPICS[0].encode())
+    message.payload = b"test message"
+    unity_communication._on_message(_client=unity_communication._client, _userdata=None, message=message)
+
+    assert unity_communication.get_data() == (_TEST_TOPICS[0], b"test message")
+    assert unity_communication.get_data() is None
 
 
 def test_mqtt_communication_on_message_buffers_the_payload() -> None:
