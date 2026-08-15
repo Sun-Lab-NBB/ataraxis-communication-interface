@@ -11,6 +11,7 @@ from tests.log_archives import (
     create_kernel_state_payload,
     create_module_state_payload,
 )
+from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX
 
 from ataraxis_communication_interface.communication import SerialPrototypes
@@ -42,20 +43,13 @@ from ataraxis_communication_interface.orchestration.allocation import (
 _MEGABYTE: int = 1024 * 1024
 """Stores the bytes one megabyte holds, which sizes the synthetic archives the memory model tests weigh."""
 
-_UNMODELED_FOOTPRINT: ArchiveFootprint = ArchiveFootprint(message_count=0, archive_bytes=0, modeled=False)
-"""Stores the footprint resolve_archive_footprint returns for an archive it cannot read."""
-
-_UNMODELED_MEMORY_MB: int = _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB)
-"""Stores the memory floor every consumer plans around when an archive yields no footprint."""
-
 
 def test_archive_footprint_fields() -> None:
-    """Verifies that ArchiveFootprint stores the message count, the archive size, and the modeled flag."""
-    footprint = ArchiveFootprint(message_count=1500, archive_bytes=4096, modeled=True)
+    """Verifies that ArchiveFootprint stores the message count and the archive size."""
+    footprint = ArchiveFootprint(message_count=1500, archive_bytes=4096)
 
     assert footprint.message_count == 1500
     assert footprint.archive_bytes == 4096
-    assert footprint.modeled
 
     # The dataclass is frozen, so the resolved figures cannot drift after a consumer receives them.
     with pytest.raises(AttributeError):
@@ -69,38 +63,44 @@ def test_resolve_archive_footprint_models_real_archive(tmp_path: Path) -> None:
 
     footprint = resolve_archive_footprint(archive_path=archive_path)
 
-    assert footprint.modeled
     # The onset message is excluded from the count, leaving the four module messages and the two kernel messages.
     assert footprint.message_count == 6
     assert footprint.archive_bytes == archive_path.stat().st_size
     assert footprint.archive_bytes > 0
 
 
-def test_resolve_archive_footprint_falls_back_for_missing_archive(tmp_path: Path) -> None:
-    """Verifies that resolve_archive_footprint returns an unmodeled footprint for an archive that does not exist."""
-    footprint = resolve_archive_footprint(archive_path=tmp_path / f"1{LOG_ARCHIVE_SUFFIX}")
+def test_resolve_archive_footprint_rejects_missing_archive(tmp_path: Path) -> None:
+    """Verifies that resolve_archive_footprint rejects an archive that does not exist."""
+    archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
+    message = (
+        f"Unable to size the microcontroller data extraction job that reads the log archive {archive_path}. The "
+        f"archive cannot be read, so the job reading it cannot run. Verify that the path names a readable .npz "
+        f"log archive."
+    )
 
     # Neither the message count read nor the stat call can resolve a path that does not exist.
-    assert footprint == _UNMODELED_FOOTPRINT
-    assert not footprint.modeled
-    assert footprint.message_count == 0
-    assert footprint.archive_bytes == 0
+    with pytest.raises(FileNotFoundError, match=error_format(message)):
+        resolve_archive_footprint(archive_path=archive_path)
 
 
-def test_resolve_archive_footprint_falls_back_for_corrupt_archive(tmp_path: Path) -> None:
-    """Verifies that resolve_archive_footprint returns an unmodeled footprint for an archive it cannot decode."""
+def test_resolve_archive_footprint_rejects_corrupt_archive(tmp_path: Path) -> None:
+    """Verifies that resolve_archive_footprint rejects an archive it cannot decode."""
     archive_path = tmp_path / f"2{LOG_ARCHIVE_SUFFIX}"
     archive_path.write_text("This is not a valid numpy archive.")
+    message = (
+        f"Unable to size the microcontroller data extraction job that reads the log archive {archive_path}. The "
+        f"archive cannot be read, so the job reading it cannot run. Verify that the path names a readable .npz "
+        f"log archive."
+    )
 
-    footprint = resolve_archive_footprint(archive_path=archive_path)
-
-    assert footprint == _UNMODELED_FOOTPRINT
+    with pytest.raises(FileNotFoundError, match=error_format(message)):
+        resolve_archive_footprint(archive_path=archive_path)
 
 
 @pytest.mark.parametrize("message_count", [0, 1, PARALLEL_EXTRACTION_THRESHOLD - 1])
 def test_resolve_job_workers_below_threshold(message_count: int) -> None:
     """Verifies that resolve_job_workers gives a single core to an archive below the parallel extraction threshold."""
-    footprint = _modeled_footprint(message_count=message_count, archive_bytes=1024)
+    footprint = _build_footprint(message_count=message_count, archive_bytes=1024)
 
     # An archive this small is decoded before a pool repays the children it spawns, so the sequential shape is the
     # only one offered to it whatever the archive weighs on disk.
@@ -113,7 +113,7 @@ def test_resolve_job_workers_below_threshold(message_count: int) -> None:
 )
 def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
     """Verifies that resolve_job_workers gives the declared core allocation to an archive at or above the threshold."""
-    footprint = _modeled_footprint(message_count=message_count, archive_bytes=512 * _MEGABYTE)
+    footprint = _build_footprint(message_count=message_count, archive_bytes=512 * _MEGABYTE)
 
     # The stage emits two job shapes and nothing between them, so a hundredfold larger archive receives the same
     # width as one that only just crossed the threshold.
@@ -122,25 +122,14 @@ def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
 
 def test_resolve_job_workers_at_the_threshold() -> None:
     """Verifies that resolve_job_workers reports the declared allocation at the parallel extraction threshold."""
-    footprint = _modeled_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
+    footprint = _build_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
 
     assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES
 
 
-def test_estimate_job_memory_mb_unmodeled_footprint() -> None:
-    """Verifies that estimate_job_memory_mb falls back to the job body baseline for an unmodeled footprint."""
-    # The core count does not enter the estimate, since an unmodeled footprint carries no archive to split.
-    for cores in (1, 4, CONTROLLER_EXTRACTION_JOB_CORES):
-        estimate = estimate_job_memory_mb(footprint=_UNMODELED_FOOTPRINT, cores=cores)
-
-        assert estimate == _UNMODELED_MEMORY_MB
-        assert estimate == 256
-        assert estimate % _MEMORY_ROUNDING_QUANTUM_MB == 0
-
-
 def test_estimate_job_memory_mb_charges_one_body_and_one_reader_serially() -> None:
     """Verifies that estimate_job_memory_mb charges a single-core job for one job body and one reader."""
-    footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
+    footprint = _build_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
 
     estimate = estimate_job_memory_mb(footprint=footprint, cores=1)
 
@@ -155,7 +144,7 @@ def test_estimate_job_memory_mb_charges_one_body_and_one_reader_serially() -> No
 
 def test_estimate_job_memory_mb_charges_every_reader_in_parallel() -> None:
     """Verifies that estimate_job_memory_mb charges a multi-core job for the job body and every pool child."""
-    footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
+    footprint = _build_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
     cores = 4
 
     estimate = estimate_job_memory_mb(footprint=footprint, cores=cores)
@@ -172,7 +161,7 @@ def test_estimate_job_memory_mb_charges_every_reader_in_parallel() -> None:
 
 def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path() -> None:
     """Verifies that estimate_job_memory_mb charges a two-core job more than the sequential path it leaves behind."""
-    footprint = _modeled_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
+    footprint = _build_footprint(message_count=10_000, archive_bytes=64 * _MEGABYTE)
 
     serial_estimate = estimate_job_memory_mb(footprint=footprint, cores=1)
     parallel_estimate = estimate_job_memory_mb(footprint=footprint, cores=2)
@@ -185,7 +174,7 @@ def test_estimate_job_memory_mb_parallel_path_exceeds_serial_path() -> None:
 
 def test_estimate_job_memory_mb_scales_with_cores() -> None:
     """Verifies that estimate_job_memory_mb grows with the cores a job holds, as every core opens its own reader."""
-    footprint = _modeled_footprint(message_count=1_000_000, archive_bytes=512 * _MEGABYTE)
+    footprint = _build_footprint(message_count=1_000_000, archive_bytes=512 * _MEGABYTE)
     core_counts = (1, 2, CONTROLLER_EXTRACTION_JOB_CORES)
 
     estimates = [estimate_job_memory_mb(footprint=footprint, cores=cores) for cores in core_counts]
@@ -204,7 +193,7 @@ def test_estimate_job_memory_mb_scales_with_archive_bytes() -> None:
     archive_sizes = (1024, 64 * _MEGABYTE, 512 * _MEGABYTE)
 
     estimates = [
-        estimate_job_memory_mb(footprint=_modeled_footprint(message_count=1_000_000, archive_bytes=size), cores=4)
+        estimate_job_memory_mb(footprint=_build_footprint(message_count=1_000_000, archive_bytes=size), cores=4)
         for size in archive_sizes
     ]
 
@@ -364,28 +353,31 @@ def test_size_archive_job_sizes_a_real_archive(tmp_path: Path) -> None:
     archive_path = tmp_path / f"1{LOG_ARCHIVE_SUFFIX}"
     _write_archive(archive_path=archive_path)
 
-    cores, memory_mb, modeled = size_archive_job(archive_path=archive_path)
+    sizing = size_archive_job(archive_path=archive_path)
 
     # The synthetic archive holds far fewer messages than the threshold, so it takes the sequential shape.
     footprint = resolve_archive_footprint(archive_path=archive_path)
-    assert modeled
-    assert cores == 1
-    assert cores == resolve_job_workers(footprint=footprint)
-    assert memory_mb == estimate_job_memory_mb(footprint=footprint, cores=cores)
+    assert sizing.cores == 1
+    assert sizing.cores == resolve_job_workers(footprint=footprint)
+    assert sizing.memory_mb == estimate_job_memory_mb(footprint=footprint, cores=sizing.cores)
 
 
-def test_size_archive_job_falls_back_for_an_unreadable_archive(tmp_path: Path) -> None:
-    """Verifies that size_archive_job reports the baseline floor for an archive it cannot read."""
-    cores, memory_mb, modeled = size_archive_job(archive_path=tmp_path / f"missing{LOG_ARCHIVE_SUFFIX}")
+def test_size_archive_job_rejects_an_unreadable_archive(tmp_path: Path) -> None:
+    """Verifies that size_archive_job rejects an archive it cannot read."""
+    archive_path = tmp_path / f"missing{LOG_ARCHIVE_SUFFIX}"
+    message = (
+        f"Unable to size the microcontroller data extraction job that reads the log archive {archive_path}. The "
+        f"archive cannot be read, so the job reading it cannot run. Verify that the path names a readable .npz "
+        f"log archive."
+    )
 
-    assert not modeled
-    assert cores == 1
-    assert memory_mb == _UNMODELED_MEMORY_MB
+    with pytest.raises(FileNotFoundError, match=error_format(message)):
+        size_archive_job(archive_path=archive_path)
 
 
-def _modeled_footprint(message_count: int, archive_bytes: int) -> ArchiveFootprint:
-    """Builds a modeled footprint carrying the requested message count and on-disk size."""
-    return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes, modeled=True)
+def _build_footprint(message_count: int, archive_bytes: int) -> ArchiveFootprint:
+    """Builds a footprint carrying the requested message count and on-disk size."""
+    return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes)
 
 
 def _expected_memory_mb(archive_bytes: int, cores: int) -> int:

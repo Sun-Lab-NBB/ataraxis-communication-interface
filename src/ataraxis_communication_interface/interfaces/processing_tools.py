@@ -151,12 +151,11 @@ def prepare_log_processing_batch_tool(
         recorded = {entry["job_id"]: entry for entry in tracker_status.get("jobs", [])}
 
         jobs: list[dict[str, Any]] = []
-        for descriptor, sizing in sized_jobs:
+        for descriptor, sizing, footprint in sized_jobs:
             entry: dict[str, Any] = dict(descriptor.to_mapping())
             entry["memory_mb"] = sizing.memory_mb
-            entry["message_count"] = sizing.message_count
-            entry["archive_bytes"] = sizing.archive_bytes
-            entry["modeled"] = sizing.modeled
+            entry["message_count"] = footprint.message_count
+            entry["archive_bytes"] = footprint.archive_bytes
             entry["status"] = recorded.get(descriptor.job_id, {}).get("status", "SCHEDULED")
             error_message = recorded.get(descriptor.job_id, {}).get("error_message")
             if error_message is not None:
@@ -166,7 +165,7 @@ def prepare_log_processing_batch_tool(
         result_log_directories[log_directory_string] = {
             "tracker_path": str(job_set.tracker_path),
             "output_directory": str(job_set.output_directory),
-            "source_ids": [descriptor.source_id for descriptor, _ in sized_jobs],
+            "source_ids": [descriptor.source_id for descriptor, _, _ in sized_jobs],
             "jobs": jobs,
             "summary": tracker_status.get("summary", {}),
             "skipped_sources": [
@@ -218,7 +217,7 @@ def execute_log_processing_jobs_tool(
         jobs: The list of job descriptors from prepare_log_processing_batch_tool, each passed through unchanged.
             Every key listed here is required, and the tool emits additional keys that are ignored. The required
             keys are 'log_directory', 'archive_path', 'output_directory', 'config_path', 'tracker_path', 'job_name',
-            'job_id', 'source_id', 'core_weight', 'message_count', 'archive_bytes', and 'modeled'.
+            'job_id', 'source_id', 'core_weight', 'message_count', and 'archive_bytes'.
         core_budget: The total number of CPU cores available for the execution session. Set to -1 to auto-resolve
             to every available core minus the reserved host cores.
         memory_budget_mb: The total memory in megabytes available for the execution session. Set to -1 to
@@ -227,8 +226,8 @@ def execute_log_processing_jobs_tool(
     Returns:
         A dictionary containing a 'started' flag, 'total_jobs', the resolved 'core_budget', 'memory_budget_mb',
         and 'pool_size', a 'job_allocations' entry per job naming its 'job_id', 'source_id', resolved 'cores',
-        'memory_mb', archive 'message_count', and 'modeled' flag, and any invalid jobs. Returns an error dictionary
-        when a session is already active, and an error dictionary carrying 'invalid_jobs' when no job is valid.
+        'memory_mb', and archive 'message_count', and any invalid jobs. Returns an error dictionary when a session
+        is already active, and an error dictionary carrying 'invalid_jobs' when no job is valid.
     """
     existing_state = get_execution_state()
     if (
@@ -265,7 +264,6 @@ def execute_log_processing_jobs_tool(
             footprint = ArchiveFootprint(
                 message_count=int(job_dict["message_count"]),
                 archive_bytes=int(job_dict["archive_bytes"]),
-                modeled=bool(job_dict["modeled"]),
             )
         except (KeyError, TypeError, ValueError):
             invalid_jobs.append({**job_dict, "error": "Missing or unreadable sizing keys from the prepared manifest."})
@@ -273,12 +271,7 @@ def execute_log_processing_jobs_tool(
 
         core_weight = min(resolve_job_workers(footprint=footprint), resolved_cores)
         descriptor = replace(descriptor, core_weight=core_weight)
-        sizing = JobSizing(
-            memory_mb=estimate_job_memory_mb(footprint=footprint, cores=core_weight),
-            message_count=footprint.message_count,
-            archive_bytes=footprint.archive_bytes,
-            modeled=footprint.modeled,
-        )
+        sizing = JobSizing(cores=core_weight, memory_mb=estimate_job_memory_mb(footprint=footprint, cores=core_weight))
 
         pending.append((descriptor, sizing))
         all_jobs[descriptor.dispatch_key] = descriptor
@@ -286,10 +279,9 @@ def execute_log_processing_jobs_tool(
             {
                 "job_id": descriptor.job_id,
                 "source_id": descriptor.source_id,
-                "cores": core_weight,
+                "cores": sizing.cores,
                 "memory_mb": sizing.memory_mb,
-                "message_count": sizing.message_count,
-                "modeled": sizing.modeled,
+                "message_count": footprint.message_count,
             }
         )
 

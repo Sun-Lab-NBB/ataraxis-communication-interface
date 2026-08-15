@@ -16,6 +16,7 @@ from .communication import (
 from .orchestration import (
     CONTROLLER_EXTRACTION_JOB_NAME,
     CONTROLLER_EXTRACTION_JOB_CORES,
+    JobSizing,
     JobSource,
     JobUniverse,
     execute_job,
@@ -67,6 +68,7 @@ __all__ = [
     "ControllerExtractionConfig",
     "ExtractedDataColumns",
     "ExtractionConfig",
+    "JobSizing",
     "JobSource",
     "JobUniverse",
     "KernelCommandCodes",

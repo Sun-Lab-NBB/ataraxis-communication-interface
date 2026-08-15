@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
 import psutil
-from ataraxis_base_utilities import resolve_worker_count
+from ataraxis_base_utilities import console, resolve_worker_count
 from ataraxis_data_structures import read_archive_message_count
+
+from .jobs import JobSizing
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -106,8 +108,6 @@ class ArchiveFootprint:
     """The number of data messages the archive holds."""
     archive_bytes: int
     """The size of the archive file on disk."""
-    modeled: bool
-    """Determines whether the figures were read from the archive rather than falling back to the job baseline."""
 
 
 def resolve_archive_footprint(archive_path: Path) -> ArchiveFootprint:
@@ -115,22 +115,30 @@ def resolve_archive_footprint(archive_path: Path) -> ArchiveFootprint:
 
     Notes:
         Reads the archive's zip directory and its file metadata alone, so sizing an archive decodes no message and
-        loads no payload. An archive that cannot be read yields an unmodeled footprint, which every consumer treats
-        as a floor rather than as a measurement.
+        loads no payload. An archive the sizing pass cannot read is a runtime failure rather than a modeling one,
+        since the job reading it cannot run either, so sizing it is rejected instead of answered with a floor.
 
     Args:
         archive_path: The path to the .npz log archive to read.
 
     Returns:
         The footprint describing the archive.
+
+    Raises:
+        FileNotFoundError: If the archive cannot be read, in which case the job that reads it cannot run.
     """
     try:
         message_count = read_archive_message_count(archive_path=archive_path)
         archive_bytes = archive_path.stat().st_size
     except Exception:
-        return ArchiveFootprint(message_count=0, archive_bytes=0, modeled=False)
+        message = (
+            f"Unable to size the microcontroller data extraction job that reads the log archive {archive_path}. The "
+            f"archive cannot be read, so the job reading it cannot run. Verify that the path names a readable .npz "
+            f"log archive."
+        )
+        console.error(message=message, error=FileNotFoundError)
 
-    return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes, modeled=True)
+    return ArchiveFootprint(message_count=message_count, archive_bytes=archive_bytes)
 
 
 def resolve_job_workers(footprint: ArchiveFootprint) -> int:
@@ -164,9 +172,6 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
         The body and a pool child carry separate baselines, because a body assembles and writes the extracted output
         while a child returns the messages it decoded and holds nothing else.
 
-        An unmodeled footprint falls back to the job body baseline, which is a floor to plan around rather than a
-        measurement.
-
     Args:
         footprint: The footprint of the archive this job reads.
         cores: The cores this job holds, which is how many extraction pool children it opens once it holds more
@@ -176,9 +181,6 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
         The memory this job holds, in megabytes, carrying the estimate tolerance and rounded up to the reporting
         quantum.
     """
-    if not footprint.modeled:
-        return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB)
-
     per_reader = _bytes_to_megabytes(byte_count=footprint.archive_bytes * _ARCHIVE_DIRECTORY_RATIO)
 
     if cores == 1:
@@ -187,7 +189,7 @@ def estimate_job_memory_mb(footprint: ArchiveFootprint, cores: int) -> int:
     return _apply_tolerance(memory_mb=_JOB_BODY_MEMORY_MB + per_reader + cores * (SPAWNED_CHILD_MEMORY_MB + per_reader))
 
 
-def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:
+def size_archive_job(archive_path: Path) -> JobSizing:
     """Resolves the cores and the memory one extraction job receives, from the archive it reads.
 
     Notes:
@@ -197,12 +199,14 @@ def size_archive_job(archive_path: Path) -> tuple[int, int, bool]:
         archive_path: The path to the .npz log archive the job reads.
 
     Returns:
-        The cores the job receives, the memory it holds in megabytes, and whether both figures follow from the
-        archive itself rather than from the job body baseline.
+        The cores the job occupies and the memory it holds.
+
+    Raises:
+        FileNotFoundError: If the archive cannot be read, in which case the job that reads it cannot run.
     """
     footprint = resolve_archive_footprint(archive_path=archive_path)
     cores = resolve_job_workers(footprint=footprint)
-    return cores, estimate_job_memory_mb(footprint=footprint, cores=cores), footprint.modeled
+    return JobSizing(cores=cores, memory_mb=estimate_job_memory_mb(footprint=footprint, cores=cores))
 
 
 def resolve_core_budget(requested_budget: int) -> int:
