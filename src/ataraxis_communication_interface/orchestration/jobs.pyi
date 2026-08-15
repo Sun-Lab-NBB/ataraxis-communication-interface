@@ -46,10 +46,8 @@ class JobDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class JobSizing:
+    cores: int
     memory_mb: int
-    message_count: int
-    archive_bytes: int
-    modeled: bool
 
 def generate_job_ids(source_ids: Sequence[str]) -> dict[str, str]: ...
 def resolve_output_directory(output_directory: Path) -> Path: ...

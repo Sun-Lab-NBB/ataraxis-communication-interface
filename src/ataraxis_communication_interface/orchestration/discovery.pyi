@@ -12,6 +12,7 @@ from .jobs import (
 )
 from .allocation import (
     CONTROLLER_EXTRACTION_JOB_CORES as CONTROLLER_EXTRACTION_JOB_CORES,
+    ArchiveFootprint as ArchiveFootprint,
     resolve_job_workers as resolve_job_workers,
     estimate_job_memory_mb as estimate_job_memory_mb,
     resolve_archive_footprint as resolve_archive_footprint,
@@ -58,5 +59,5 @@ def prepare_jobs(
     *,
     strict_sources: bool = True,
 ) -> JobSet: ...
-def size_job(job: JobDescriptor) -> tuple[JobDescriptor, JobSizing]: ...
+def size_job(job: JobDescriptor) -> tuple[JobDescriptor, JobSizing, ArchiveFootprint]: ...
 def _resolve_configured_ids(config_path: Path, registered_ids: Sequence[str]) -> tuple[list[str], list[str]]: ...

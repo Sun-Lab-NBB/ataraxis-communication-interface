@@ -195,16 +195,13 @@ class JobDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class JobSizing:
-    """Describes the resource figures one sizing pass resolved for a single extraction job."""
+    """Describes the resources one job receives, as one sizing pass resolved them."""
 
+    cores: int
+    """The CPU cores the job occupies while it runs, which is the width of the extraction pool its body opens once it
+    holds more than one core."""
     memory_mb: int
-    """The memory the job occupies while it runs, estimated from the archive it reads."""
-    message_count: int
-    """The data messages the archive holds, as the sizing pass read them."""
-    archive_bytes: int
-    """The size of the archive on disk, in bytes, as the sizing pass read it."""
-    modeled: bool
-    """Determines whether the figures follow from the archive's own properties rather than from the job baseline."""
+    """The memory the job occupies at its peak, in megabytes."""
 
 
 def generate_job_ids(source_ids: Sequence[str]) -> dict[str, str]:
