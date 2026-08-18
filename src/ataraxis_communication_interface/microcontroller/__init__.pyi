@@ -2,7 +2,6 @@ from .interface import (
     ModuleInterface as ModuleInterface,
     MicroControllerInterface as MicroControllerInterface,
     MicroControllerInformation as MicroControllerInformation,
-    evaluate_port as evaluate_port,
     discover_microcontrollers as discover_microcontrollers,
 )
 from .dataclasses import (
@@ -68,7 +67,6 @@ __all__ = [
     "build_message_dataframe",
     "create_extraction_config",
     "discover_microcontrollers",
-    "evaluate_port",
     "extract_logged_microcontroller_data",
     "get_event_data",
     "get_event_timestamps",

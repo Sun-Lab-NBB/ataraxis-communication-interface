@@ -54,13 +54,7 @@ class JobSource:
     archive_path: Path | None
     """The path to the source's log archive, or None when the tree holds no single archive for it."""
     modules: tuple[ModuleSourceData, ...] = ()
-    """The hardware modules the manifest declares for the source, identified by their type, id, and name.
-
-    Notes:
-        The resolution already reads these declarations while building the source, so carrying them here lets a
-        consumer that only processes the sources declaring a module it recognizes filter the resolved set without
-        opening and parsing the same manifest a second time.
-    """
+    """The hardware modules the manifest declares for the source, identified by their type, id, and name."""
 
 
 @dataclass(frozen=True, slots=True)

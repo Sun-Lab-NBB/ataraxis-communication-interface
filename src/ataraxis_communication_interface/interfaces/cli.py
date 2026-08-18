@@ -41,9 +41,8 @@ def identify(baudrate: int) -> None:
 
     Use this command to identify the hardware available to the local host-machine.
     """
-    # Announced before the scan rather than after it, because probing every port takes seconds and the operator
-    # would otherwise face a silent terminal for the whole scan. The port count is not known until the scan returns,
-    # so the cue names the baudrate alone and the numbered report below carries the count.
+    # Announces the scan before it runs, because probing every port takes seconds and the operator would
+    # otherwise face a silent terminal for the whole scan.
     console.echo(
         message=f"Evaluating serial ports at baudrate {baudrate}, this may take a moment...", level=LogLevel.INFO
     )
