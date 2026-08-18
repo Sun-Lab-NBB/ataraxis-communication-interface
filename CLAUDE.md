@@ -277,15 +277,21 @@ data from DataLogger archives.
 - **Orchestration** (`orchestration/`): `run_log_processing_pipeline()` runs one recording sequentially, or the single
   job a caller names by its canonical identifier. The `config` parameter is a `Path` loaded inside the job, and the
   tracker universe comes from the manifest rather than from the config, so a config requesting a subset never resets its
-  sibling jobs. `execute_job()` wraps the work in `ProcessingTracker.run_job()`, which records the start, the
-  completion, and the failure.
+  sibling jobs. `prepare_jobs()` rejects a tree holding no `microcontroller_manifest.yaml` whatever `strict_sources`
+  is set to, because the absent manifest is a property of the directory rather than of a requested source.
+  `execute_job()` wraps the work in `ProcessingTracker.run_job()`, which records the start, the completion, and the
+  failure. A batch session is live while its manager thread runs, so the ending thread frees the single session slot
+  and `finish_execution_session()` waits for that and reports whether the slot is free.
 - **CLI** (`interfaces/cli.py`): use `console.echo()` for output, including for errors, which are reported at
-  `LogLevel.ERROR` so a failed command exits zero rather than raising. The `config` subgroup demonstrates nested Click
-  command groups.
+  `LogLevel.ERROR` so a failed command exits zero rather than raising. The `_report_command_failure` decorator applies
+  that convention to every command whose body can raise, and it sits closest to `def` so Click wraps the reporting
+  form. The `config` subgroup demonstrates nested Click command groups.
 - **MCP tools** (`interfaces/*_tools.py`): register on the shared instance from `interfaces/mcp_instance.py` via
   `@mcp.tool()`, add new tool modules to the side-effect import list in `interfaces/mcp_server.py`, and return
   JSON-serializable `dict[str, Any]`. The two discovery tools `list_microcontrollers_tool` and `check_mqtt_broker_tool`
   return a preformatted `str`. Execution uses `JobExecutionState` (`orchestration/execution.py`) with host-derived core
-  and memory budgets, against which archive-derived per-job sizes are admitted. A read tool that lists items builds its
-  response through `interfaces/responses.py`, which owns the bare, filtered, and detailed staging and the `rows`,
-  `matched_rows`, `start_row`, and `next_start_row` paging fields.
+  and memory budgets, against which archive-derived per-job sizes are admitted. A tool that consumes a large payload
+  another tool produced also accepts the arguments to rebuild it, as `execute_log_processing_jobs_tool()` does with
+  the preparation's own arguments, which keeps a batch manifest off the tool boundary. A read tool that lists items
+  builds its response through `interfaces/responses.py`, which owns the bare, filtered, and detailed staging and the
+  `rows`, `matched_rows`, `start_row`, and `next_start_row` paging fields.

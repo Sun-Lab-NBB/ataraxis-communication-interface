@@ -5,14 +5,13 @@ each one in a worker of a single shared process pool.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from threading import Lock, Thread
+from threading import Lock, Event, Thread
 import contextlib
 from dataclasses import field, dataclass
 from multiprocessing import get_context
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 
-from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import (
     ProcessingStatus,
@@ -46,8 +45,13 @@ thread."""
 _POOL_WARMUP_TIMEOUT_SECONDS: float = 120.0
 """The time the pool's warm-up allows every worker to spawn and reach the barrier before the creation is abandoned."""
 
-_DISPATCH_POLL_SECONDS: int = 1
-"""The interval at which the manager re-examines the running set for freed capacity."""
+_DISPATCH_POLL_SECONDS: float = 1.0
+"""The interval at which the manager re-examines the running set for freed capacity, when nothing wakes it sooner."""
+
+_SESSION_FINISH_TIMEOUT_SECONDS: float = 30.0
+"""The time a caller finishing a session allows the manager thread to end before it stops waiting. The bound is
+reached whenever the manager sits inside a blocking step, which covers the pool warm-up, a job body, a pool
+rebuild, and the pool shutdown."""
 
 _MAXIMUM_POOL_REBUILDS: int = 3
 """The times one session rebuilds its shared pool before abandoning the batch. A single transient kill is worth
@@ -90,10 +94,18 @@ class JobExecutionState:
     """The job slots the shared pool opens, every one of which is warmed when the pool is created."""
     lock: Lock = field(default_factory=Lock)
     """The lock guarding every mutation of the job queues."""
+    wakeup: Event = field(default_factory=Event)
+    """The signal that ends the manager's wait between dispatch passes. A caller finishing a session sets it, so the
+    manager observes the cleared queue at once rather than after the poll interval."""
     manager_thread: Thread | None = None
     """The background thread running the execution manager, or None before the session starts it."""
     canceled: bool = False
     """Determines whether the execution session has been canceled."""
+    finished_jobs: set[tuple[str, str]] = field(default_factory=set)
+    """The dispatch keys of the jobs this session drove to a terminal outcome, whether the job body reached one or
+    the engine recorded one for it. A tracker records every job that ever wrote to its directory, so a session
+    reports its own outcomes by intersecting the tracker against this set. A job a pool break requeues is recorded
+    only once it stops being retried."""
     pool_broken: bool = False
     """Determines whether the shared pool broke and awaits a rebuild."""
     broken_jobs: list[tuple[JobDescriptor, JobSizing]] = field(default_factory=list)
@@ -146,8 +158,7 @@ def start_execution_session(state: JobExecutionState) -> bool:
     global _execution_state
 
     with _EXECUTION_LOCK:
-        active = _execution_state
-        if active is not None and active.manager_thread is not None and active.manager_thread.is_alive():
+        if session_is_active(state=_execution_state):
             return False
 
         manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
@@ -156,6 +167,46 @@ def start_execution_session(state: JobExecutionState) -> bool:
         manager.start()
 
     return True
+
+
+def session_is_active(state: JobExecutionState | None) -> bool:
+    """Determines whether an execution state is still running its manager thread.
+
+    Notes:
+        A finished session's state stays readable, so a status reader consults it after the batch ends.
+
+    Args:
+        state: The execution state to test, or None when no session exists.
+
+    Returns:
+        True when the state holds a manager thread that has started and has not yet ended.
+    """
+    return state is not None and state.manager_thread is not None and state.manager_thread.is_alive()
+
+
+def finish_execution_session(state: JobExecutionState) -> bool:
+    """Waits for a canceled execution session's manager thread to end.
+
+    Notes:
+        Wakes the manager rather than waiting out its poll interval, so a caller that cleared the queue observes the
+        end of the session as soon as it happens. The wait is bounded, and a manager inside a blocking step can
+        outlast that bound, so the caller reads the returned flag to learn whether the session slot is free.
+
+    Args:
+        state: The execution state whose manager thread is awaited.
+
+    Returns:
+        True when the manager thread ended within the allotted time, and False when it is still running.
+    """
+    state.wakeup.set()
+    manager = state.manager_thread
+
+    if manager is None:
+        return True
+
+    manager.join(timeout=_SESSION_FINISH_TIMEOUT_SECONDS)
+
+    return not manager.is_alive()
 
 
 def group_jobs_by_tracker(state: JobExecutionState) -> dict[Path, list[JobDescriptor]]:
@@ -191,7 +242,6 @@ def _job_execution_manager(state: JobExecutionState) -> None:
     Args:
         state: The active job execution state. Mutated under its own lock as jobs move between the queues.
     """
-    poll_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     executor: ProcessPoolExecutor | None = None
 
     try:
@@ -221,7 +271,10 @@ def _job_execution_manager(state: JobExecutionState) -> None:
                     break
                 continue
 
-            poll_timer.delay(delay=_DISPATCH_POLL_SECONDS, allow_sleep=True)
+            # Waits for the poll interval, or for the shorter time a cancellation takes to arrive. Clearing the
+            # signal after the wait keeps a cancellation that lands mid-pass from being consumed by that pass.
+            state.wakeup.wait(timeout=_DISPATCH_POLL_SECONDS)
+            state.wakeup.clear()
     except Exception as error:
         _abandon_batch(state=state, reason=f"The batch's execution manager stopped: {error}.")
     finally:
@@ -338,7 +391,8 @@ def _warm_pool_worker() -> None:
 
 
 def _reap_finished_jobs(state: JobExecutionState) -> None:
-    """Removes every finished job from the running set and records what a pool break killed.
+    """Removes every finished job from the running set, records what a pool break killed, and records every job it
+    reaped as one this session finished.
 
     Notes:
         A job that raised on its own terms is left to its tracker, which recorded the failure before the exception
@@ -370,6 +424,8 @@ def _reap_finished_jobs(state: JobExecutionState) -> None:
         else:
             _reconcile_unrecorded_job(job=active.job)
 
+        state.finished_jobs.add(dispatch_key)
+
 
 def _admit_pending_jobs(state: JobExecutionState, executor: ProcessPoolExecutor) -> None:
     """Admits every queued job the budgets still allow and submits it to the shared pool.
@@ -396,6 +452,7 @@ def _admit_pending_jobs(state: JobExecutionState, executor: ProcessPoolExecutor)
                 f"physical memory of {host_memory_mb} MB."
             )
             _fail_job(job=job, error_message=message)
+            state.finished_jobs.add(job.dispatch_key)
             continue
         runnable.append((job, sizing))
 
@@ -489,6 +546,7 @@ def _handle_broken_pool(state: JobExecutionState, executor: ProcessPoolExecutor)
                             f"retried again."
                         ),
                     )
+                    state.finished_jobs.add(job.dispatch_key)
                     continue
                 state.requeue_counts[job.dispatch_key] = charged + 1
 
@@ -520,8 +578,10 @@ def _abandon_batch(
         state.canceled = True
         for active in state.active_jobs.values():
             _fail_job(job=active.job, error_message=reason)
+            state.finished_jobs.add(active.job.dispatch_key)
         for job, _ in [*state.pending_jobs, *state.broken_jobs, *orphaned]:
             _fail_job(job=job, error_message=reason)
+            state.finished_jobs.add(job.dispatch_key)
         state.active_jobs.clear()
         state.pending_jobs.clear()
         state.broken_jobs.clear()

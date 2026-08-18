@@ -21,6 +21,7 @@ from ataraxis_data_structures import LOG_ARCHIVE_SUFFIX, ProcessingStatus, Proce
 from ataraxis_communication_interface.communication import SerialPrototypes
 from ataraxis_communication_interface.orchestration import pipeline
 from ataraxis_communication_interface.microcontroller import (
+    MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig,
     ModuleSourceData,
     KernelExtractionConfig,
@@ -290,8 +291,8 @@ def test_run_log_processing_pipeline_missing_log_directory(tmp_path: Path) -> No
     assert not (tmp_path / "output").exists()
 
 
-def test_run_log_processing_pipeline_resolves_no_job(tmp_path: Path) -> None:
-    """Verifies that the pipeline fails loudly when the recording resolves no extraction job to run."""
+def test_run_log_processing_pipeline_rejects_a_tree_holding_no_manifest(tmp_path: Path) -> None:
+    """Verifies that the pipeline fails loudly when the recording's tree holds no microcontroller manifest."""
     log_directory = tmp_path / "logs"
     log_directory.mkdir()
     # A tree holding archives and a valid configuration, but no manifest, owns no job this library processes.
@@ -300,9 +301,10 @@ def test_run_log_processing_pipeline_resolves_no_job(tmp_path: Path) -> None:
     write_extraction_config(config_path=config_path, source_id=1)
 
     message = (
-        f"Unable to process microcontroller log archives in '{log_directory}'. The recording resolved no extraction "
-        f"job. Its tree holds no microcontroller manifest, or the extraction config declares no controller whose log "
-        f"archive resolves to exactly one file beneath it."
+        f"Unable to prepare microcontroller data extraction jobs in '{log_directory}'. Its tree holds no "
+        f"{MICROCONTROLLER_MANIFEST_FILENAME}, so no controller in it is registered and no requested source can be "
+        f"prepared. The archives beneath it were not produced by ataraxis-communication-interface, or the recording "
+        f"was logged without a manifest."
     )
 
     with pytest.raises(FileNotFoundError, match=error_format(message)):

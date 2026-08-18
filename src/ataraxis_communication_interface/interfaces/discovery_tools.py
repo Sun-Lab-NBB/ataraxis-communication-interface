@@ -95,13 +95,17 @@ def check_mqtt_broker_tool(host: str = "127.0.0.1", port: int = 1883) -> str:
         port: The socket port used by the MQTT broker.
 
     Returns:
-        A message indicating whether the MQTT broker is reachable at the specified host and port.
+        A message indicating whether the MQTT broker is reachable at the specified host and port, or naming the
+        address the client rejected before any connection was attempted.
     """
-    mqtt_client = MQTTCommunication(ip=host, port=port)
-
     try:
+        mqtt_client = MQTTCommunication(ip=host, port=port)
         mqtt_client.connect()
         mqtt_client.disconnect()
+    except ValueError as error:
+        # An address the client rejects never reaches a socket, so it is reported as the caller error it is rather
+        # than as an unreachable broker, which would send the caller looking for a broker to start.
+        return f"Unable to check an MQTT broker at {host}:{port}. {error}"
     except ConnectionError:
         return (
             f"MQTT broker at {host}:{port} is not reachable. Ensure the broker is running and the host/port "

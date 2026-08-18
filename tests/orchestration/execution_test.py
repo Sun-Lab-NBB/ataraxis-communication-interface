@@ -28,6 +28,7 @@ from ataraxis_communication_interface.orchestration.execution import (
     _fail_job,
     _reset_job,
     _abandon_batch,
+    session_is_active,
     _job_is_unrecorded,
     _admit_pending_jobs,
     _handle_broken_pool,
@@ -37,6 +38,7 @@ from ataraxis_communication_interface.orchestration.execution import (
     _job_execution_manager,
     _select_admissible_jobs,
     start_execution_session,
+    finish_execution_session,
     _reconcile_unrecorded_job,
 )
 from ataraxis_communication_interface.orchestration.allocation import (
@@ -376,6 +378,62 @@ def test_start_execution_session_replaces_a_dead_session(session_manager: "_Stan
     session_manager.settle()
 
     assert session_manager.sessions == [incumbent, replacement]
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_session_is_active_reads_the_manager_thread(session_manager: "_StandInManager") -> None:
+    """Verifies that liveness follows the manager thread rather than the presence of the state."""
+    assert not session_is_active(state=None)
+
+    state = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+
+    # A state that never started a session carries no thread, so it reads as idle rather than as a live session.
+    assert not session_is_active(state=state)
+    assert start_execution_session(state=state)
+    assert session_is_active(state=state)
+
+    session_manager.settle()
+
+    # The state stays readable once the batch ends, so a status reader still reaches it while the slot is free.
+    assert not session_is_active(state=state)
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_finish_execution_session_waits_out_a_released_session(session_manager: "_StandInManager") -> None:
+    """Verifies that finishing a session sets the wakeup signal and reports the ended thread."""
+    state = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+
+    assert start_execution_session(state=state)
+    session_manager.release.set()
+
+    assert finish_execution_session(state=state)
+    assert state.wakeup.is_set()
+    assert not state.manager_thread.is_alive()
+
+    # The slot the finished session held is free, which is what lets a cancellation be followed by a new batch.
+    assert not session_is_active(state=state)
+
+
+@pytest.mark.xdist_group(name="orchestration")
+def test_finish_execution_session_reports_a_running_session(
+    session_manager: "_StandInManager", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies that a session still running its manager is reported as unfinished rather than waited out."""
+    monkeypatch.setattr(execution, "_SESSION_FINISH_TIMEOUT_SECONDS", 0.1)
+    state = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+
+    assert start_execution_session(state=state)
+
+    assert not finish_execution_session(state=state)
+    assert state.manager_thread.is_alive()
+
+
+def test_finish_execution_session_without_a_manager_thread() -> None:
+    """Verifies that a state carrying no manager thread reports the session as already finished."""
+    state = JobExecutionState(core_budget=4, memory_budget_mb=4096)
+
+    assert finish_execution_session(state=state)
+    assert state.wakeup.is_set()
 
 
 @pytest.mark.xdist_group(name="orchestration")

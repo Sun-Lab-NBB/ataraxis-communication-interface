@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from pathlib import Path
+from functools import wraps
 
 import click
 from ataraxis_base_utilities import LogLevel, console
@@ -13,10 +14,39 @@ from ..communication import MQTTCommunication
 from ..orchestration import run_log_processing_pipeline
 from ..microcontroller import ExtractionConfig, create_extraction_config, discover_microcontrollers
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 console.enable()
 
 _CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
+
+
+# Defined above the commands because a decorator is resolved where it is applied rather than where the module ends.
+def _report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]:
+    """Reports the failure of a command through the console instead of an interpreter traceback.
+
+    Notes:
+        A traceback buries the message under a stack the user of a command line tool cannot act on.
+
+        Click validates the parameters before the wrapped body runs, so a missing or malformed option still exits 2.
+
+    Args:
+        command: The command function to wrap.
+
+    Returns:
+        The wrapped command, which reports any exception its body raises and returns normally.
+    """
+
+    @wraps(command)
+    def report(*args: P.args, **kwargs: P.kwargs) -> None:
+        try:
+            command(*args, **kwargs)
+        except Exception as error:
+            console.echo(message=str(error), level=LogLevel.ERROR)
+
+    return report
 
 
 @click.group("axci", context_settings=_CONTEXT_SETTINGS)
@@ -36,6 +66,7 @@ def axci_cli() -> None:
     help="The baudrate to use for communication during identification. Only used by microcontrollers that communicate "
     "via the UART serial interface, and ignored by microcontrollers that use the USB interface.",
 )
+@_report_command_failure
 def identify(baudrate: int) -> None:
     """Discovers all connected Arduino or Teensy microcontrollers running the ataraxis-micro-controller library.
 
@@ -84,6 +115,7 @@ def identify(baudrate: int) -> None:
     show_default=True,
     help="The socket port used by the MQTT broker.",
 )
+@_report_command_failure
 def check_mqtt(host: str, port: int) -> None:
     """Checks whether an MQTT broker is reachable at the specified host and port.
 
@@ -126,6 +158,7 @@ def config_group() -> None:
     type=click.Path(exists=False, file_okay=True, dir_okay=False, writable=True, path_type=Path),
     help="The path to the output .yaml file where to save the generated configuration data.",
 )
+@_report_command_failure
 def config_create(manifest_path: Path, output_path: Path) -> None:
     """Generates a precursor extraction configuration from a microcontroller manifest.
 
@@ -150,6 +183,7 @@ def config_create(manifest_path: Path, output_path: Path) -> None:
     type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path),
     help="The path to the extraction configuration .yaml file to display.",
 )
+@_report_command_failure
 def config_show(config_path: Path) -> None:
     """Displays the contents of an extraction configuration file.
 
@@ -230,6 +264,7 @@ def config_show(config_path: Path) -> None:
     help="Determines whether to suppress the progress bars during data extraction. The progress bars are displayed by "
     "default.",
 )
+@_report_command_failure
 def process_log_archives(
     log_directory: Path,
     output_directory: Path,
@@ -269,6 +304,7 @@ def process_log_archives(
     help="The transport protocol to use for MCP communication. Use 'stdio' for standard input/output communication "
     "(default, recommended for Claude Desktop integration) or 'streamable-http' for HTTP-based communication.",
 )
+@_report_command_failure
 def run_mcp_server(transport: Literal["stdio", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic interaction with the library.
 
