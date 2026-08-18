@@ -454,8 +454,9 @@ output directory.
 
 Each job targets exactly one log archive. A caller that weighs jobs against a budget sizes each one from its own
 archive. A batch mixing a long recording with a short one therefore gives each the width its own archive earns rather
-than one width chosen for the whole run. The job resolution and the sizing model are exported as callable functions, so
-an external scheduler derives the same figures this library dispatches with instead of re-deriving them.
+than one width chosen for the whole run. The job resolution, the identifier generation, and the sizing model are
+exported as callable functions, so an external scheduler derives the same values this library dispatches with instead
+of re-deriving them.
 
 ### Custom Module Interfaces
 
