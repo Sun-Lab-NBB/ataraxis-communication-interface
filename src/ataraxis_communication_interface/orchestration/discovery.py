@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Sequence
 
+    from ..microcontroller import ModuleSourceData
+
 
 @dataclass(frozen=True, slots=True)
 class JobSource:
@@ -51,6 +53,14 @@ class JobSource:
     """The colloquial name the manifest records for the source."""
     archive_path: Path | None
     """The path to the source's log archive, or None when the tree holds no single archive for it."""
+    modules: tuple[ModuleSourceData, ...] = ()
+    """The hardware modules the manifest declares for the source, identified by their type, id, and name.
+
+    Notes:
+        The resolution already reads these declarations while building the source, so carrying them here lets a
+        consumer that only processes the sources declaring a module it recognizes filter the resolved set without
+        opening and parsing the same manifest a second time.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +195,7 @@ def resolve_jobs(log_directory: Path) -> JobUniverse:
 
     manifest_path = candidates[0]
     manifest = MicroControllerManifest.from_yaml(file_path=manifest_path)
-    entries = {str(controller.id): controller.name for controller in manifest.controllers}
+    entries = {str(controller.id): controller for controller in manifest.controllers}
 
     if not entries:
         message = (
@@ -208,8 +218,9 @@ def resolve_jobs(log_directory: Path) -> JobUniverse:
     sources = tuple(
         JobSource(
             source_id=source_id,
-            name=entries[source_id],
+            name=entries[source_id].name,
             archive_path=matches[source_id][0] if len(matches[source_id]) == 1 else None,
+            modules=entries[source_id].modules,
         )
         for source_id in source_ids
     )

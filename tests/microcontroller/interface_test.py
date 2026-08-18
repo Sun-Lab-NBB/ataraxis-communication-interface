@@ -5,19 +5,21 @@ from __future__ import annotations
 import os
 from queue import Queue
 import pickle
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 import itertools
 from threading import Thread
 from multiprocessing import (
     Queue as MPQueue,
     Process,
 )
+from concurrent.futures import Future
 
 import numpy as np
 import pytest
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import DataLogger, SharedMemoryArray
+from serial.tools.list_ports_common import ListPortInfo
 
 from ataraxis_communication_interface.communication import (
     ModuleData,
@@ -34,6 +36,7 @@ from ataraxis_communication_interface.microcontroller.interface import (
     ModuleInterface,
     MicroControllerInterface,
     evaluate_port,
+    discover_microcontrollers,
 )
 from ataraxis_communication_interface.microcontroller.status_codes import (
     MAXIMUM_CUSTOM_STATUS_CODE,
@@ -44,7 +47,7 @@ from ataraxis_communication_interface.microcontroller.status_codes import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence, Generator
+    from collections.abc import Callable, Sequence, Generator
 
     from numpy.typing import NDArray
 
@@ -1278,6 +1281,129 @@ def test_evaluate_port_reports_a_connection_failure() -> None:
 
     assert identifier == -1
     assert error is not None
+
+
+def test_discover_microcontrollers_skips_the_ports_without_a_product_identifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies that discovery evaluates no port when every enumerated port lacks a product identifier."""
+
+    def forbidden_pool(**_kwargs: Any) -> None:
+        message = "Discovery spawned an evaluation pool for the ports it reports no microcontroller for."
+        raise AssertionError(message)
+
+    monkeypatch.setattr(interface, "list_available_ports", lambda: (_build_port(device="/dev/ttyS0", pid=None),))
+    monkeypatch.setattr(interface, "ProcessPoolExecutor", forbidden_pool)
+
+    assert discover_microcontrollers() == ()
+
+
+def test_discover_microcontrollers_reports_every_evaluated_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that discovery reports one entry per evaluable port, in the order the host enumerates the ports."""
+    evaluations = {
+        "/dev/ttyACM0": (int(_CONTROLLER_ID), None),
+        "/dev/ttyACM1": (-1, None),
+        "/dev/ttyACM2": (-1, "OSError: port busy"),
+    }
+    ports = tuple(_build_port(device=device, pid=index) for index, device in enumerate(evaluations))
+
+    def evaluate(port: str, baudrate: int) -> tuple[int, str | None]:
+        assert baudrate == 9600
+        return evaluations[port]
+
+    pools: list[_InlineExecutor] = []
+    monkeypatch.setattr(interface, "list_available_ports", lambda: ports)
+    monkeypatch.setattr(interface, "evaluate_port", evaluate)
+    monkeypatch.setattr(interface, "ProcessPoolExecutor", _build_inline_pool(pools=pools))
+
+    discovered = discover_microcontrollers(baudrate=9600)
+
+    # The pool answers in whatever order the ports respond in, so the reported order is checked against the enumeration
+    # order every caller that renumbers the ports depends on.
+    assert [controller.port for controller in discovered] == list(evaluations)
+    assert [controller.description for controller in discovered] == ["port 0", "port 1", "port 2"]
+    # The evaluator's sentinel reaches the caller as an absent identifier rather than as a negative code.
+    assert [controller.controller_id for controller in discovered] == [int(_CONTROLLER_ID), None, None]
+    assert [controller.error_message for controller in discovered] == [None, None, "OSError: port busy"]
+
+
+def test_discover_microcontrollers_pins_every_evaluation_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that discovery hands the pool the thread pinning each port evaluation worker starts with."""
+    ports = (_build_port(device="/dev/ttyACM0", pid=0),)
+    pools: list[_InlineExecutor] = []
+
+    monkeypatch.setattr(interface, "list_available_ports", lambda: ports)
+    monkeypatch.setattr(interface, "evaluate_port", lambda **_kwargs: (-1, None))
+    monkeypatch.setattr(interface, "ProcessPoolExecutor", _build_inline_pool(pools=pools))
+
+    discover_microcontrollers()
+
+    assert len(pools) == 1
+    # A worker waits on one serial port, so the pool it belongs to pins the numeric backends of every worker to a
+    # single thread.
+    assert pools[0].initializer is interface.initialize_worker_threads
+    assert pools[0].initargs == (interface._WORKER_THREAD_CEILING,)
+    # The pool never outgrows the port count, which is what keeps a host with many ports from spawning a process per
+    # port.
+    assert pools[0].max_workers == 1
+
+
+def _build_port(device: str, pid: int | None) -> ListPortInfo:
+    """Builds the serial port record the host enumeration hands to discovery."""
+    port = ListPortInfo(device=device, skip_link_detection=True)
+    port.pid = pid
+    port.description = f"port {pid}"
+    return port
+
+
+def _build_inline_pool(pools: list[_InlineExecutor]) -> Callable[..., _InlineExecutor]:
+    """Builds the process pool factory that records every pool discovery creates."""
+
+    def build(max_workers: int, initializer: Callable[[int], None], initargs: tuple[int, ...]) -> _InlineExecutor:
+        """Creates the recorded pool."""
+        pool = _InlineExecutor(max_workers=max_workers, initializer=initializer, initargs=initargs)
+        pools.append(pool)
+        return pool
+
+    return build
+
+
+class _InlineExecutor:
+    """Evaluates every submitted port in the calling process, standing in for the pool discovery fans out over.
+
+    Notes:
+        The initializer is recorded rather than called, as running the thread pinning of a spawned worker inside the
+        test process would reconfigure the numeric backends of the whole test session.
+
+    Args:
+        max_workers: The worker count discovery sized the pool to.
+        initializer: The callable discovery pins each spawned worker with.
+        initargs: The arguments discovery passes to the initializer.
+
+    Attributes:
+        max_workers: The worker count discovery sized the pool to.
+        initializer: The callable discovery pins each spawned worker with.
+        initargs: The arguments discovery passes to the initializer.
+    """
+
+    def __init__(self, max_workers: int, initializer: Callable[[int], None], initargs: tuple[int, ...]) -> None:
+        self.max_workers = max_workers
+        self.initializer = initializer
+        self.initargs = initargs
+
+    def __enter__(self) -> Self:
+        """Returns the pool to the discovery context."""
+        return self
+
+    def __exit__(self, *_details: object) -> bool:
+        """Releases the pool without suppressing the exceptions raised inside the discovery context."""
+        return False
+
+    def submit(self, function: Callable[..., Any], /, **kwargs: Any) -> Future[Any]:
+        """Evaluates the submitted port immediately and reports the result through a resolved future."""
+        future: Future[Any] = Future()
+        future.set_result(function(**kwargs))
+        return future
 
 
 class _FailingModule(_RecordingModule):

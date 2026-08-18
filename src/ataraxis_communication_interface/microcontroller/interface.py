@@ -1,7 +1,7 @@
 """Provides the ModuleInterface and MicroControllerInterface classes that aggregate the methods allowing Python PC
 clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers. It also
-provides the evaluate_port() function, which determines whether a serial port is connected to an Ataraxis
-microcontroller.
+provides the discover_microcontrollers() and evaluate_port() functions, which report the microcontrollers reachable
+through the host-machine's serial ports.
 """
 
 from __future__ import annotations
@@ -12,16 +12,24 @@ from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 from functools import partial, lru_cache
 from threading import Lock, Thread
+from dataclasses import dataclass
 from multiprocessing import (
     Queue as MPQueue,
     Manager,
     Process,
 )
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from ataraxis_base_utilities import console
-from ataraxis_data_structures import DataLogger, SharedMemoryArray
+from ataraxis_base_utilities import console, resolve_worker_count
+from ataraxis_data_structures import (
+    DataLogger,
+    SharedMemoryArray,
+    limit_worker_threads,
+    initialize_worker_threads,
+)
+from ataraxis_transport_layer_pc import list_available_ports
 
 from .dataclasses import ModuleSourceData, write_microcontroller_manifest
 from .status_codes import (
@@ -52,6 +60,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from multiprocessing.managers import SyncManager
 
+    from serial.tools.list_ports_common import ListPortInfo
+
 _MAXIMUM_BYTE_VALUE: int = 255
 """The maximum valid uint8 byte value, used to validate that byte-codes fall within the allowed range."""
 _MINIMUM_SERIAL_BUFFER_SIZE: int = 9
@@ -65,6 +75,27 @@ _ZERO_LONG: np.uint32 = np.uint32(0)
 _UNKNOWN_MODULE_NAME: str = "unregistered module"
 """The name used to identify the sender of a message that no managed module interface claims, which happens when the
 microcontroller manages more hardware modules than the interfaces passed to the MicroControllerInterface."""
+_UNIDENTIFIED_CONTROLLER_ID: int = -1
+"""The identifier code the port evaluator returns for a serial port that answers no identification request, which
+discovery translates into the absent controller identifier it reports for such a port."""
+_WORKER_THREAD_CEILING: int = 1
+"""The number of threads each port evaluation worker pins its numeric backends to. A worker spends its runtime waiting
+on one serial port, so the backends it imports repay no pool wider than a single thread."""
+
+
+@dataclass(frozen=True, slots=True)
+class MicroControllerInformation:
+    """Stores descriptive information about a serial port evaluated for the presence of an Ataraxis microcontroller."""
+
+    port: str
+    """The name of the evaluated serial port, such as '/dev/ttyACM0' on Linux or 'COM3' on Windows."""
+    description: str
+    """The description the host operating system reports for the port."""
+    controller_id: int | None = None
+    """The unique identifier code of the microcontroller connected to the port, or None when the port answered no
+    identification request, which is also the case for every port whose connection failed."""
+    error_message: str | None = None
+    """The error encountered while connecting to the port, or None when the connection succeeded."""
 
 
 class _RuntimeParameters(IntEnum):
@@ -1207,6 +1238,73 @@ class MicroControllerInterface:
                     sys.stderr.flush()
 
 
+def discover_microcontrollers(baudrate: int = 115200) -> tuple[MicroControllerInformation, ...]:
+    """Evaluates every serial port available to the host-machine and reports what each port is connected to.
+
+    Queries the ports in parallel across a pool sized to the smaller of the port count and the host's worker budget.
+
+    Notes:
+        Ports that expose no product identifier are skipped, as no microcontroller ever answers on them.
+
+    Args:
+        baudrate: The baudrate to use for communication during identification. The same baudrate value is used to
+            evaluate all available ports. The baudrate is only used by microcontrollers that communicate via the UART
+            serial interface and is ignored by microcontrollers that use the USB interface.
+
+    Returns:
+        A tuple of MicroControllerInformation instances, one for each evaluated port, ordered the way the host-machine
+        enumerates its ports. Returns an empty tuple when the host-machine exposes no evaluable port.
+    """
+    available_ports = list_available_ports()
+
+    # Linux enumerates ports that expose no product identifier, which no microcontroller ever answers on.
+    valid_ports = [port for port in available_ports if port.pid is not None]
+
+    if not valid_ports:
+        return ()
+
+    port_names = [port.device for port in valid_ports]
+
+    results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
+
+    # Pins every worker from both sides for the pool's whole lifetime. The environment limit reaches the backends that
+    # size their pool while importing, which a worker does after it is spawned, and the initializer reaches the ones
+    # that read their width the first time they are asked to do work.
+    with (
+        limit_worker_threads(thread_count=_WORKER_THREAD_CEILING),
+        ProcessPoolExecutor(
+            max_workers=min(len(valid_ports), resolve_worker_count()),
+            initializer=initialize_worker_threads,
+            initargs=(_WORKER_THREAD_CEILING,),
+        ) as executor,
+    ):
+        future_to_port = {
+            executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
+            for port_name, port_info in zip(port_names, valid_ports, strict=True)
+        }
+
+        for future in as_completed(future_to_port):
+            port_name, port_info = future_to_port[future]
+            controller_id, error_message = future.result()
+            results[port_name] = (port_info, controller_id, error_message)
+
+    # Reads the results back in enumeration order, since the pool completes the ports in the order they answer and a
+    # caller that renumbers or tabulates the ports depends on the order the host reports them in.
+    evaluations = (results[port_name] for port_name in port_names)
+
+    return tuple(
+        MicroControllerInformation(
+            port=port_info.device,
+            description=port_info.description,
+            # Trades the evaluator's sentinel for an absent identifier, so that the missing microcontroller is carried
+            # by the type instead of by a magic number every caller has to recognize.
+            controller_id=None if controller_id == _UNIDENTIFIED_CONTROLLER_ID else controller_id,
+            error_message=error_message,
+        )
+        for port_info, controller_id, error_message in evaluations
+    )
+
+
 def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
     """Determines whether the target serial port is connected to an Ataraxis MicroController.
 
@@ -1254,7 +1352,7 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
                     break
 
         if not isinstance(response, ControllerIdentification):
-            return -1, None
+            return _UNIDENTIFIED_CONTROLLER_ID, None
 
         return int(response.controller_id), None
 
@@ -1262,4 +1360,4 @@ def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
         # Prevents individual port failures from aborting the entire evaluation process.
         error_type = type(connection_error).__name__
         error_message = str(connection_error) or error_type
-        return -1, f"{error_type}: {error_message}"
+        return _UNIDENTIFIED_CONTROLLER_ID, f"{error_type}: {error_message}"

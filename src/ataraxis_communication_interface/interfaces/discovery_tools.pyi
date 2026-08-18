@@ -15,12 +15,10 @@ from ..microcontroller import (
     MICROCONTROLLER_MANIFEST_FILENAME as MICROCONTROLLER_MANIFEST_FILENAME,
     ModuleSourceData as ModuleSourceData,
     MicroControllerManifest as MicroControllerManifest,
-    evaluate_port as evaluate_port,
+    discover_microcontrollers as discover_microcontrollers,
     write_microcontroller_manifest as write_microcontroller_manifest,
 )
 
-_UNIDENTIFIED_CONTROLLER_ID: int
-_WORKER_THREAD_CEILING: int
 _SOURCE_AXES: tuple[str, ...]
 _SOURCE_SEMI_DETAIL_FIELDS: tuple[str, ...]
 _SOURCE_DETAIL_FIELDS: tuple[str, ...]

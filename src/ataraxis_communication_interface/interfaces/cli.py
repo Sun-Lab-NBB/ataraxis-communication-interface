@@ -2,31 +2,21 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-if TYPE_CHECKING:
-    from serial.tools.list_ports_common import ListPortInfo
 
 import click
-from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
-from ataraxis_data_structures import limit_worker_threads, initialize_worker_threads
-from ataraxis_transport_layer_pc import list_available_ports
+from ataraxis_base_utilities import LogLevel, console
 
 from .mcp_server import run_server as run_mcp
 from ..communication import MQTTCommunication
 from ..orchestration import run_log_processing_pipeline
-from ..microcontroller import ExtractionConfig, evaluate_port, create_extraction_config
+from ..microcontroller import ExtractionConfig, create_extraction_config, discover_microcontrollers
 
 console.enable()
 
 _CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
-
-_WORKER_THREAD_CEILING: int = 1
-"""The number of threads each port evaluation worker pins its numeric backends to. A worker spends its runtime waiting
-on one serial port, so the backends it imports repay no pool wider than a single thread."""
 
 
 @click.group("axci", context_settings=_CONTEXT_SETTINGS)
@@ -51,61 +41,31 @@ def identify(baudrate: int) -> None:
 
     Use this command to identify the hardware available to the local host-machine.
     """
-    available_ports = list_available_ports()
+    # Announced before the scan rather than after it, because probing every port takes seconds and the operator
+    # would otherwise face a silent terminal for the whole scan. The port count is not known until the scan returns,
+    # so the cue names the baudrate alone and the numbered report below carries the count.
+    console.echo(
+        message=f"Evaluating serial ports at baudrate {baudrate}, this may take a moment...", level=LogLevel.INFO
+    )
+    controllers = discover_microcontrollers(baudrate=baudrate)
 
-    # Linux enumerates ports that expose no product identifier, which no microcontroller ever answers on.
-    valid_ports = [port for port in available_ports if port.pid is not None]
-
-    if not valid_ports:
+    if not controllers:
         console.echo(message="No valid serial ports detected.")
         return
 
-    console.echo(message=f"Evaluating {len(valid_ports)} serial port(s) at baudrate {baudrate}...")
-
-    port_names = [port.device for port in valid_ports]
-
-    results: dict[str, tuple[ListPortInfo, int, str | None]] = {}
-
-    # Pins every worker from both sides for the pool's whole lifetime. The environment limit reaches the backends that
-    # size their pool while importing, which a worker does after it is spawned, and the initializer reaches the ones
-    # that read their width the first time they are asked to do work.
-    with (
-        limit_worker_threads(thread_count=_WORKER_THREAD_CEILING),
-        ProcessPoolExecutor(
-            max_workers=min(len(valid_ports), resolve_worker_count()),
-            initializer=initialize_worker_threads,
-            initargs=(_WORKER_THREAD_CEILING,),
-        ) as executor,
-    ):
-        future_to_port = {
-            executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
-            for port_name, port_info in zip(port_names, valid_ports, strict=True)
-        }
-
-        for future in as_completed(future_to_port):
-            port_name, port_info = future_to_port[future]
-            controller_id, error_message = future.result()
-            results[port_name] = (port_info, controller_id, error_message)
-
-    count = 0
-    for port_name in port_names:
-        if port_name in results:
-            port_info, controller_id, error_message = results[port_name]
-            count += 1
-
-            if error_message is not None:
-                console.echo(
-                    message=f"{count}: {port_info.device} -> {port_info.description} "
-                    f"[Connection Failed: {error_message}]"
-                )
-            elif controller_id == -1:
-                # Reports the sentinel the evaluator returns for a port that never answered the handshake.
-                console.echo(message=f"{count}: {port_info.device} -> {port_info.description} [No microcontroller]")
-            else:
-                console.echo(
-                    message=f"{count}: {port_info.device} -> {port_info.description} "
-                    f"[Microcontroller ID: {controller_id}]"
-                )
+    for count, controller in enumerate(controllers, start=1):
+        if controller.error_message is not None:
+            console.echo(
+                message=f"{count}: {controller.port} -> {controller.description} "
+                f"[Connection Failed: {controller.error_message}]"
+            )
+        elif controller.controller_id is None:
+            console.echo(message=f"{count}: {controller.port} -> {controller.description} [No microcontroller]")
+        else:
+            console.echo(
+                message=f"{count}: {controller.port} -> {controller.description} "
+                f"[Microcontroller ID: {controller.controller_id}]"
+            )
 
 
 @axci_cli.command("mqtt")
