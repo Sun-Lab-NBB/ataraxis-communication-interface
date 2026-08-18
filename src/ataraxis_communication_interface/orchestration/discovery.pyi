@@ -29,7 +29,7 @@ class JobSource:
     source_id: str
     name: str
     archive_path: Path | None
-    modules: tuple[ModuleSourceData, ...] = ()
+    modules: tuple[ModuleSourceData, ...] = ...
 
 @dataclass(frozen=True, slots=True)
 class JobUniverse:

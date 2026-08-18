@@ -1,6 +1,6 @@
 """Provides the ModuleInterface and MicroControllerInterface classes that aggregate the methods allowing Python PC
 clients to bidirectionally interface with custom hardware modules managed by Arduino or Teensy microcontrollers. It also
-provides the discover_microcontrollers() and evaluate_port() functions, which report the microcontrollers reachable
+provides the discover_microcontrollers() function, which reports the microcontrollers reachable
 through the host-machine's serial ports.
 """
 
@@ -1243,17 +1243,13 @@ def discover_microcontrollers(baudrate: int = 115200) -> tuple[MicroControllerIn
 
     Queries the ports in parallel across a pool sized to the smaller of the port count and the host's worker budget.
 
-    Notes:
-        Ports that expose no product identifier are skipped, as no microcontroller ever answers on them.
-
     Args:
-        baudrate: The baudrate to use for communication during identification. The same baudrate value is used to
-            evaluate all available ports. The baudrate is only used by microcontrollers that communicate via the UART
-            serial interface and is ignored by microcontrollers that use the USB interface.
+        baudrate: The baudrate to use for communication during identification. Only used by microcontrollers that
+            communicate via the UART serial interface, and ignored by microcontrollers that use the USB interface.
 
     Returns:
-        A tuple of MicroControllerInformation instances, one for each evaluated port, ordered the way the host-machine
-        enumerates its ports. Returns an empty tuple when the host-machine exposes no evaluable port.
+        One entry for each evaluated port, ordered the way the host-machine enumerates its ports. Returns an empty
+        tuple when the host-machine exposes no evaluable port.
     """
     available_ports = list_available_ports()
 
@@ -1279,7 +1275,7 @@ def discover_microcontrollers(baudrate: int = 115200) -> tuple[MicroControllerIn
         ) as executor,
     ):
         future_to_port = {
-            executor.submit(evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
+            executor.submit(_evaluate_port, port=port_name, baudrate=baudrate): (port_name, port_info)
             for port_name, port_info in zip(port_names, valid_ports, strict=True)
         }
 
@@ -1305,7 +1301,7 @@ def discover_microcontrollers(baudrate: int = 115200) -> tuple[MicroControllerIn
     )
 
 
-def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
+def _evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]:
     """Determines whether the target serial port is connected to an Ataraxis MicroController.
 
     Args:

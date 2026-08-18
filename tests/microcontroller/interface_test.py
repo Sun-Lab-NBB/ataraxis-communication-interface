@@ -35,7 +35,7 @@ from ataraxis_communication_interface.microcontroller import interface
 from ataraxis_communication_interface.microcontroller.interface import (
     ModuleInterface,
     MicroControllerInterface,
-    evaluate_port,
+    _evaluate_port,
     discover_microcontrollers,
 )
 from ataraxis_communication_interface.microcontroller.status_codes import (
@@ -1257,27 +1257,27 @@ def test_watchdog_waits_out_the_communication_process_startup(logger: DataLogger
     assert not controller._started
 
 
-def test_evaluate_port_reports_the_microcontroller_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_port_evaluator_reports_the_microcontroller_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that evaluating a port connected to a microcontroller reports the identifier it answers with."""
     factory = _StagedCommunicationFactory(
         payloads=[_build_controller_identification(controller_id=int(_CONTROLLER_ID))]
     )
     monkeypatch.setattr(interface, "SerialCommunication", factory)
 
-    assert evaluate_port(port="TEST") == (int(_CONTROLLER_ID), None)
+    assert _evaluate_port(port="TEST") == (int(_CONTROLLER_ID), None)
 
 
 @pytest.mark.usefixtures("short_identification_timeout")
-def test_evaluate_port_reports_an_unresponsive_port(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_port_evaluator_reports_an_unresponsive_port(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that evaluating a port that never answers the identification request reports no microcontroller."""
     monkeypatch.setattr(interface, "SerialCommunication", _StagedCommunicationFactory())
 
-    assert evaluate_port(port="TEST") == (-1, None)
+    assert _evaluate_port(port="TEST") == (-1, None)
 
 
-def test_evaluate_port_reports_a_connection_failure() -> None:
+def test_the_port_evaluator_reports_a_connection_failure() -> None:
     """Verifies that evaluating a port that cannot be opened reports the failure."""
-    identifier, error = evaluate_port(port="/dev/aci_absent_port")
+    identifier, error = _evaluate_port(port="/dev/aci_absent_port")
 
     assert identifier == -1
     assert error is not None
@@ -1313,7 +1313,7 @@ def test_discover_microcontrollers_reports_every_evaluated_port(monkeypatch: pyt
 
     pools: list[_InlineExecutor] = []
     monkeypatch.setattr(interface, "list_available_ports", lambda: ports)
-    monkeypatch.setattr(interface, "evaluate_port", evaluate)
+    monkeypatch.setattr(interface, "_evaluate_port", evaluate)
     monkeypatch.setattr(interface, "ProcessPoolExecutor", _build_inline_pool(pools=pools))
 
     discovered = discover_microcontrollers(baudrate=9600)
@@ -1333,7 +1333,7 @@ def test_discover_microcontrollers_pins_every_evaluation_worker(monkeypatch: pyt
     pools: list[_InlineExecutor] = []
 
     monkeypatch.setattr(interface, "list_available_ports", lambda: ports)
-    monkeypatch.setattr(interface, "evaluate_port", lambda **_kwargs: (-1, None))
+    monkeypatch.setattr(interface, "_evaluate_port", lambda **_kwargs: (-1, None))
     monkeypatch.setattr(interface, "ProcessPoolExecutor", _build_inline_pool(pools=pools))
 
     discover_microcontrollers()
@@ -1341,11 +1341,11 @@ def test_discover_microcontrollers_pins_every_evaluation_worker(monkeypatch: pyt
     assert len(pools) == 1
     # A worker waits on one serial port, so the pool it belongs to pins the numeric backends of every worker to a
     # single thread.
-    assert pools[0].initializer is interface.initialize_worker_threads
-    assert pools[0].initargs == (interface._WORKER_THREAD_CEILING,)
+    assert pools[0]._initializer is interface.initialize_worker_threads
+    assert pools[0]._initargs == (interface._WORKER_THREAD_CEILING,)
     # The pool never outgrows the port count, which is what keeps a host with many ports from spawning a process per
     # port.
-    assert pools[0].max_workers == 1
+    assert pools[0]._max_workers == 1
 
 
 def _build_port(device: str, pid: int | None) -> ListPortInfo:
@@ -1381,15 +1381,15 @@ class _InlineExecutor:
         initargs: The arguments discovery passes to the initializer.
 
     Attributes:
-        max_workers: The worker count discovery sized the pool to.
-        initializer: The callable discovery pins each spawned worker with.
-        initargs: The arguments discovery passes to the initializer.
+        _max_workers: Cached worker count.
+        _initializer: Cached worker initializer.
+        _initargs: Cached initializer arguments.
     """
 
     def __init__(self, max_workers: int, initializer: Callable[[int], None], initargs: tuple[int, ...]) -> None:
-        self.max_workers = max_workers
-        self.initializer = initializer
-        self.initargs = initargs
+        self._max_workers = max_workers
+        self._initializer = initializer
+        self._initargs = initargs
 
     def __enter__(self) -> Self:
         """Returns the pool to the discovery context."""
