@@ -5,12 +5,11 @@ from ..communication import MQTTCommunication as MQTTCommunication
 from ..orchestration import run_log_processing_pipeline as run_log_processing_pipeline
 from ..microcontroller import (
     ExtractionConfig as ExtractionConfig,
-    evaluate_port as evaluate_port,
     create_extraction_config as create_extraction_config,
+    discover_microcontrollers as discover_microcontrollers,
 )
 
 _CONTEXT_SETTINGS: dict[str, int]
-_WORKER_THREAD_CEILING: int
 
 def axci_cli() -> None: ...
 def identify(baudrate: int) -> None: ...

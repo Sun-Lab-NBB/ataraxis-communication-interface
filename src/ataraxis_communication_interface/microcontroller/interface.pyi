@@ -4,6 +4,7 @@ from enum import IntEnum
 from typing import Any
 from pathlib import Path
 from threading import Lock, Thread
+from dataclasses import dataclass
 from multiprocessing import (
     Queue as MPQueue,
     Process,
@@ -48,6 +49,15 @@ _MINIMUM_SERIAL_BUFFER_SIZE: int
 _ZERO_BYTE: np.uint8
 _ZERO_LONG: np.uint32
 _UNKNOWN_MODULE_NAME: str
+_UNIDENTIFIED_CONTROLLER_ID: int
+_WORKER_THREAD_CEILING: int
+
+@dataclass(frozen=True, slots=True)
+class MicroControllerInformation:
+    port: str
+    description: str
+    controller_id: int | None = ...
+    error_message: str | None = ...
 
 class _RuntimeParameters(IntEnum):
     DEFAULT_RETURN_CODE = 0
@@ -182,4 +192,5 @@ class MicroControllerInterface:
         keepalive_interval: int,
     ) -> None: ...
 
+def discover_microcontrollers(baudrate: int = 115200) -> tuple[MicroControllerInformation, ...]: ...
 def evaluate_port(port: str, baudrate: int = 115200) -> tuple[int, str | None]: ...

@@ -90,6 +90,11 @@ def test_resolve_jobs_resolves_manifest_sources(tmp_path: Path) -> None:
     assert all(isinstance(specifier, str) for _, specifier in universe.universe)
     assert [source.source_id for source in universe.sources] == ["1", "10", "2"]
     assert [source.name for source in universe.sources] == ["controller1", "controller10", "controller2"]
+    # The declared modules ride along with each source, so a consumer filters by them without rereading the manifest.
+    assert all(
+        source.modules == (ModuleSourceData(module_type=_MODULE_TYPE, module_id=_MODULE_ID, name="test_module"),)
+        for source in universe.sources
+    )
 
 
 def test_resolve_jobs_archives_property(tmp_path: Path) -> None:

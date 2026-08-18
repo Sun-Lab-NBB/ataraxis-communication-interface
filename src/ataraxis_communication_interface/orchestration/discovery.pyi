@@ -20,6 +20,7 @@ from .allocation import (
 from ..microcontroller import (
     MICROCONTROLLER_MANIFEST_FILENAME as MICROCONTROLLER_MANIFEST_FILENAME,
     ExtractionConfig as ExtractionConfig,
+    ModuleSourceData as ModuleSourceData,
     MicroControllerManifest as MicroControllerManifest,
 )
 
@@ -28,6 +29,7 @@ class JobSource:
     source_id: str
     name: str
     archive_path: Path | None
+    modules: tuple[ModuleSourceData, ...] = ()
 
 @dataclass(frozen=True, slots=True)
 class JobUniverse:

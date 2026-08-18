@@ -1,6 +1,8 @@
 from .communication import (
     ModuleData as ModuleData,
     ModuleState as ModuleState,
+    SerialProtocols as SerialProtocols,
+    SerialPrototypes as SerialPrototypes,
     MQTTCommunication as MQTTCommunication,
 )
 from .orchestration import (
@@ -40,10 +42,12 @@ from .microcontroller import (
     MicroControllerInterface as MicroControllerInterface,
     MicroControllerSourceData as MicroControllerSourceData,
     ControllerExtractionConfig as ControllerExtractionConfig,
+    MicroControllerInformation as MicroControllerInformation,
     get_event_data as get_event_data,
     partition_events as partition_events,
     get_event_timestamps as get_event_timestamps,
     create_extraction_config as create_extraction_config,
+    discover_microcontrollers as discover_microcontrollers,
     write_microcontroller_manifest as write_microcontroller_manifest,
 )
 
@@ -65,6 +69,7 @@ __all__ = [
     "KernelExtractionConfig",
     "KernelStatusCodes",
     "MQTTCommunication",
+    "MicroControllerInformation",
     "MicroControllerInterface",
     "MicroControllerManifest",
     "MicroControllerSourceData",
@@ -74,8 +79,11 @@ __all__ = [
     "ModuleSourceData",
     "ModuleState",
     "ModuleStatusCodes",
+    "SerialProtocols",
+    "SerialPrototypes",
     "TransportStatusCodes",
     "create_extraction_config",
+    "discover_microcontrollers",
     "execute_job",
     "find_kernel_paths",
     "find_module_paths",

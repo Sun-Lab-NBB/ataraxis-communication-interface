@@ -11,6 +11,8 @@ Authors: Ivan Kondratyev (Inkaros), Jacob Groner (Jgroner11)
 from .communication import (
     ModuleData,
     ModuleState,
+    SerialProtocols,
+    SerialPrototypes,
     MQTTCommunication,
 )
 from .orchestration import (
@@ -50,10 +52,12 @@ from .microcontroller import (
     MicroControllerInterface,
     MicroControllerSourceData,
     ControllerExtractionConfig,
+    MicroControllerInformation,
     get_event_data,
     partition_events,
     get_event_timestamps,
     create_extraction_config,
+    discover_microcontrollers,
     write_microcontroller_manifest,
 )
 
@@ -75,6 +79,7 @@ __all__ = [
     "KernelExtractionConfig",
     "KernelStatusCodes",
     "MQTTCommunication",
+    "MicroControllerInformation",
     "MicroControllerInterface",
     "MicroControllerManifest",
     "MicroControllerSourceData",
@@ -84,8 +89,11 @@ __all__ = [
     "ModuleSourceData",
     "ModuleState",
     "ModuleStatusCodes",
+    "SerialProtocols",
+    "SerialPrototypes",
     "TransportStatusCodes",
     "create_extraction_config",
+    "discover_microcontrollers",
     "execute_job",
     "find_kernel_paths",
     "find_module_paths",
