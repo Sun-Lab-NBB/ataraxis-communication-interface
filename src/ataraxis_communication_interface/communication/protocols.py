@@ -39,6 +39,11 @@ type PrototypeType = (
     | NDArray[np.float32]
     | NDArray[np.float64]
 )
+"""The union of every data object type this library can transmit to and receive from a microcontroller.
+
+Each serialized prototype code resolves to one member of this union, so the data object of any received ModuleData or
+KernelData message is an instance of one of these types.
+"""
 
 _PROTOTYPE_FACTORIES: dict[int, Callable[[], PrototypeType]] = {
     # 1 byte total

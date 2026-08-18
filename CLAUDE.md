@@ -214,7 +214,7 @@ data from DataLogger archives.
   to numpy arrays, then builds Polars DataFrames for efficient Feather output.
 - **Archive-derived job sizing**: Every job is sized before dispatch from the archive it will read.
   `resolve_archive_footprint()` reads the `.npz` zip directory and the file size, and `resolve_job_workers()` emits one
-  of two shapes and nothing between them: a single core below `PARALLEL_EXTRACTION_THRESHOLD` (15000 data messages) and
+  of two shapes and nothing between them: a single core below `_PARALLEL_EXTRACTION_THRESHOLD` (15000 data messages) and
   the declared `CONTROLLER_EXTRACTION_JOB_CORES` width (4) at or above it. That threshold is distinct from the
   `PARALLEL_PROCESSING_THRESHOLD` governing message batching inside the archive reader. The width follows from the
   archive alone, so admission rather than the resolver holds a job to the cores its batch can spare.

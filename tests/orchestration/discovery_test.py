@@ -26,7 +26,7 @@ from ataraxis_communication_interface.orchestration.discovery import (
     resolve_jobs,
 )
 from ataraxis_communication_interface.orchestration.allocation import (
-    PARALLEL_EXTRACTION_THRESHOLD,
+    _PARALLEL_EXTRACTION_THRESHOLD,
     CONTROLLER_EXTRACTION_JOB_CORES,
     resolve_job_workers,
     estimate_job_memory_mb,
@@ -54,7 +54,7 @@ _MODULE_ID: int = 2
 _EVENT_CODES: tuple[int, ...] = (10, 20)
 """Stores the event codes every synthetic extraction configuration declares for its module."""
 
-_WIDE_ARCHIVE_MESSAGES: int = PARALLEL_EXTRACTION_THRESHOLD
+_WIDE_ARCHIVE_MESSAGES: int = _PARALLEL_EXTRACTION_THRESHOLD
 """Stores the message count of the archive used to exercise the multi-core branch of the sizing model."""
 
 

@@ -27,7 +27,7 @@ _EXECUTION_LOCK: Lock
 class JobExecutionState:
     all_jobs: dict[tuple[str, str], JobDescriptor] = field(default_factory=dict)
     pending_jobs: list[tuple[JobDescriptor, JobSizing]] = field(default_factory=list)
-    active_jobs: dict[tuple[str, str], _ActiveJob] = field(default_factory=dict)
+    active_jobs: dict[tuple[str, str], ActiveJob] = field(default_factory=dict)
     core_budget: int = ...
     memory_budget_mb: int = ...
     pool_size: int = ...
@@ -40,7 +40,7 @@ class JobExecutionState:
     requeue_counts: dict[tuple[str, str], int] = field(default_factory=dict)
 
 @dataclass(slots=True)
-class _ActiveJob:
+class ActiveJob:
     job: JobDescriptor
     sizing: JobSizing
     future: Future[None]
@@ -48,10 +48,9 @@ class _ActiveJob:
 _execution_state: JobExecutionState | None
 
 def get_execution_state() -> JobExecutionState | None: ...
-def set_execution_state(state: JobExecutionState | None) -> None: ...
 def start_execution_session(state: JobExecutionState) -> bool: ...
-def job_execution_manager(state: JobExecutionState) -> None: ...
 def group_jobs_by_tracker(state: JobExecutionState) -> dict[Path, list[JobDescriptor]]: ...
+def _job_execution_manager(state: JobExecutionState) -> None: ...
 def _select_admissible_jobs(
     pending: Sequence[tuple[JobDescriptor, JobSizing]],
     core_budget: int,

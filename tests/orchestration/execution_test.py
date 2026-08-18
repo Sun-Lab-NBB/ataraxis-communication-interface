@@ -23,9 +23,9 @@ from ataraxis_communication_interface.orchestration.discovery import JobSet, siz
 from ataraxis_communication_interface.orchestration.execution import (
     _MAXIMUM_JOB_REQUEUES,
     _MAXIMUM_POOL_REBUILDS,
+    ActiveJob,
     JobExecutionState,
     _fail_job,
-    _ActiveJob,
     _reset_job,
     _abandon_batch,
     _job_is_unrecorded,
@@ -33,9 +33,8 @@ from ataraxis_communication_interface.orchestration.execution import (
     _handle_broken_pool,
     _reap_finished_jobs,
     get_execution_state,
-    set_execution_state,
     group_jobs_by_tracker,
-    job_execution_manager,
+    _job_execution_manager,
     _select_admissible_jobs,
     start_execution_session,
     _reconcile_unrecorded_job,
@@ -66,7 +65,7 @@ _MODULE_ID: int = 2
 def execution_state_guard() -> Generator[None, None, None]:
     """Clears the module-global execution state after every test, so no session leaks into the next test."""
     yield
-    set_execution_state(state=None)
+    _set_execution_state(state=None)
 
 
 @pytest.fixture
@@ -88,7 +87,7 @@ def session_manager(monkeypatch: pytest.MonkeyPatch) -> Generator["_StandInManag
     """Points a started session at a stand-in manager, then releases and joins every thread that session started."""
     manager = _StandInManager()
     monkeypatch.setattr(execution, "Thread", manager.build_thread)
-    monkeypatch.setattr(execution, "job_execution_manager", manager.run_session)
+    monkeypatch.setattr(execution, "_job_execution_manager", manager.run_session)
 
     yield manager
 
@@ -102,7 +101,7 @@ def test_active_job_fields(tmp_path: Path) -> None:
     sizing = _build_sizing(memory_mb=1024)
     future = Future()
 
-    active = _ActiveJob(job=job, sizing=sizing, future=future)
+    active = ActiveJob(job=job, sizing=sizing, future=future)
 
     assert active.job is job
     assert active.sizing is sizing
@@ -319,23 +318,6 @@ def test_job_execution_state_defaults() -> None:
     assert state.broken_jobs == []
     assert state.pool_rebuilds == 0
     assert state.requeue_counts == {}
-
-
-@pytest.mark.xdist_group(name="orchestration")
-def test_execution_state_round_trip() -> None:
-    """Verifies that the stored execution state is returned unchanged and can be cleared back to None."""
-    assert get_execution_state() is None
-
-    state = JobExecutionState(core_budget=4, memory_budget_mb=4096)
-    set_execution_state(state=state)
-    assert get_execution_state() is state
-
-    replacement = JobExecutionState(core_budget=2, memory_budget_mb=2048)
-    set_execution_state(state=replacement)
-    assert get_execution_state() is replacement
-
-    set_execution_state(state=None)
-    assert get_execution_state() is None
 
 
 @pytest.mark.xdist_group(name="orchestration")
@@ -638,7 +620,7 @@ def test_reap_finished_jobs_keeps_a_running_job(tmp_path: Path) -> None:
     sizing = _build_sizing(memory_mb=1024)
 
     state = JobExecutionState()
-    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=sizing, future=Future())
+    state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=sizing, future=Future())
 
     _reap_finished_jobs(state=state)
 
@@ -655,7 +637,7 @@ def test_reap_finished_jobs_reconciles_an_unrecorded_return(tmp_path: Path) -> N
     future.set_result(None)
 
     state = JobExecutionState()
-    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
+    state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
 
     _reap_finished_jobs(state=state)
 
@@ -682,7 +664,7 @@ def test_reap_finished_jobs_keeps_an_externally_reset_job(tmp_path: Path) -> Non
     future.set_result(None)
 
     state = JobExecutionState()
-    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
+    state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
 
     _reap_finished_jobs(state=state)
 
@@ -700,7 +682,7 @@ def test_reap_finished_jobs_keeps_a_recorded_failure(tmp_path: Path) -> None:
     future.set_exception(RuntimeError("The archive is empty."))
 
     state = JobExecutionState()
-    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
+    state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
 
     _reap_finished_jobs(state=state)
 
@@ -722,7 +704,7 @@ def test_reap_finished_jobs_records_a_pool_break(tmp_path: Path) -> None:
     future.set_exception(BrokenProcessPool("A worker process terminated abruptly."))
 
     state = JobExecutionState()
-    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=sizing, future=future)
+    state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=sizing, future=future)
 
     _reap_finished_jobs(state=state)
 
@@ -744,7 +726,7 @@ def test_reap_finished_jobs_ignores_a_break_after_a_recorded_outcome(tmp_path: P
     future.set_exception(BrokenProcessPool("A worker process terminated abruptly."))
 
     state = JobExecutionState()
-    state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
+    state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=_build_sizing(memory_mb=1024), future=future)
 
     _reap_finished_jobs(state=state)
 
@@ -836,7 +818,7 @@ def test_abandon_batch_fails_every_unfinished_job(tmp_path: Path) -> None:
 
     sizing = _build_sizing(memory_mb=1024)
     state = JobExecutionState()
-    state.active_jobs[active_job.dispatch_key] = _ActiveJob(job=active_job, sizing=sizing, future=Future())
+    state.active_jobs[active_job.dispatch_key] = ActiveJob(job=active_job, sizing=sizing, future=Future())
     state.pending_jobs.append((pending_job, sizing))
     state.broken_jobs.append((broken_job, sizing))
 
@@ -888,9 +870,9 @@ def test_job_execution_manager_runs_a_prepared_batch(tmp_path: Path) -> None:
         memory_budget_mb=8192,
         pool_size=1,
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -916,9 +898,9 @@ def test_job_execution_manager_cancellation_skips_dispatch(tmp_path: Path) -> No
         pool_size=1,
         canceled=True,
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -943,9 +925,9 @@ def test_job_execution_manager_rebuilds_a_broken_pool(tmp_path: Path) -> None:
         pool_size=1,
         pool_broken=True,
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -976,9 +958,9 @@ def test_job_execution_manager_fails_a_job_past_the_requeue_ceiling(tmp_path: Pa
         pool_broken=True,
         requeue_counts={descriptor.dispatch_key: _MAXIMUM_JOB_REQUEUES},
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -1004,9 +986,9 @@ def test_job_execution_manager_abandons_past_the_rebuild_ceiling(tmp_path: Path)
         pool_broken=True,
         pool_rebuilds=_MAXIMUM_POOL_REBUILDS,
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -1048,9 +1030,9 @@ def test_job_execution_manager_abandons_when_the_pool_cannot_be_rebuilt(
         pool_size=1,
         pool_broken=True,
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -1075,9 +1057,9 @@ def test_job_execution_manager_abandons_when_the_pool_cannot_be_created(tmp_path
         memory_budget_mb=8192,
         pool_size=0,
     )
-    set_execution_state(state=state)
+    _set_execution_state(state=state)
 
-    manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+    manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
     manager.start()
     manager.join(timeout=_MANAGER_TIMEOUT_SECONDS)
 
@@ -1188,6 +1170,20 @@ class _StandInManager:
         self.release.set()
         for thread in self.threads:
             thread.join(timeout=_MANAGER_TIMEOUT_SECONDS)
+
+
+def _set_execution_state(state: JobExecutionState | None) -> None:
+    """Publishes one execution state as the module-global session of record, or clears it when passed None.
+
+    The library writes that global only through start_execution_session(), which also starts a manager thread for the
+    state it publishes. Tests that need a session in place without a live manager, and the guard that clears the
+    global between tests, write it here instead, taking the same lock the library takes.
+
+    Args:
+        state: The execution state to publish, or None to clear the active session.
+    """
+    with execution._EXECUTION_LOCK:
+        execution._execution_state = state
 
 
 def _build_descriptor(directory: Path, source_id: str, core_weight: int = 1) -> JobDescriptor:

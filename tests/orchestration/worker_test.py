@@ -39,7 +39,7 @@ from ataraxis_communication_interface.orchestration.jobs import (
 from ataraxis_communication_interface.orchestration.worker import (
     execute_job,
     run_extraction_job,
-    resolve_controller_config,
+    _resolve_controller_config,
 )
 from ataraxis_communication_interface.microcontroller.dataclasses import (
     ExtractionConfig,
@@ -609,10 +609,10 @@ def test_run_extraction_job_runs_inside_a_process_pool(tmp_path: Path) -> None:
 
 
 def test_resolve_controller_config_returns_the_requested_entry(tmp_path: Path) -> None:
-    """Verifies that resolve_controller_config returns the entry the config declares for the requested controller."""
+    """Verifies that _resolve_controller_config returns the entry the config declares for the requested controller."""
     config_path = _write_config(config_path=tmp_path / "config.yaml", kernel_event_codes=_KERNEL_EVENT_CODES)
 
-    controller_config = resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
+    controller_config = _resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
 
     # The source identifier is a string everywhere in the job layer, while the config stores it as an integer.
     assert controller_config.controller_id == int(_SOURCE_ID)
@@ -623,7 +623,7 @@ def test_resolve_controller_config_returns_the_requested_entry(tmp_path: Path) -
 
 
 def test_resolve_controller_config_unconfigured_controller(tmp_path: Path) -> None:
-    """Verifies that resolve_controller_config raises ValueError naming every controller the config declares."""
+    """Verifies that _resolve_controller_config raises ValueError naming every controller the config declares."""
     config_path = tmp_path / "config.yaml"
     ExtractionConfig(
         controllers=[
@@ -642,16 +642,16 @@ def test_resolve_controller_config_unconfigured_controller(tmp_path: Path) -> No
         f"'{config_path}' declares no entry for that controller. Configured controller IDs: 2, 3."
     )
     with pytest.raises(ValueError, match=error_format(message)):
-        resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
+        _resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
 
 
 def test_resolve_controller_config_missing_config_file(tmp_path: Path) -> None:
-    """Verifies that resolve_controller_config raises FileNotFoundError when the configuration file is absent."""
+    """Verifies that _resolve_controller_config raises FileNotFoundError when the configuration file is absent."""
     config_path = tmp_path / "missing_config.yaml"
     assert not config_path.exists()
 
     with pytest.raises(FileNotFoundError):
-        resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
+        _resolve_controller_config(config_path=config_path, source_id=_SOURCE_ID)
 
 
 class _CountingExecutor(ProcessPoolExecutor):

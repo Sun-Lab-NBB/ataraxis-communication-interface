@@ -31,7 +31,7 @@ Notes:
     cores a wider job holds would otherwise admit a second job that repays them in full.
 """
 
-PARALLEL_EXTRACTION_THRESHOLD: int = 15_000
+_PARALLEL_EXTRACTION_THRESHOLD: int = 15_000
 """The number of data messages an archive has to hold before an extraction job opens a pool to read it.
 
 Notes:
@@ -154,7 +154,7 @@ def resolve_job_workers(footprint: ArchiveFootprint) -> int:
     Returns:
         The cores this job receives, which is one or the declared allocation.
     """
-    if footprint.message_count < PARALLEL_EXTRACTION_THRESHOLD:
+    if footprint.message_count < _PARALLEL_EXTRACTION_THRESHOLD:
         return 1
 
     return CONTROLLER_EXTRACTION_JOB_CORES

@@ -1,6 +1,7 @@
 from .communication import (
     ModuleData as ModuleData,
     ModuleState as ModuleState,
+    PrototypeType as PrototypeType,
     SerialProtocols as SerialProtocols,
     SerialPrototypes as SerialPrototypes,
     MQTTCommunication as MQTTCommunication,
@@ -81,6 +82,7 @@ __all__ = [
     "ModuleState",
     "ModuleStatusCodes",
     "OutputLayout",
+    "PrototypeType",
     "SerialProtocols",
     "SerialPrototypes",
     "TransportStatusCodes",

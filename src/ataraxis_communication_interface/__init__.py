@@ -11,6 +11,7 @@ Authors: Ivan Kondratyev (Inkaros), Jacob Groner (Jgroner11)
 from .communication import (
     ModuleData,
     ModuleState,
+    PrototypeType,
     SerialProtocols,
     SerialPrototypes,
     MQTTCommunication,
@@ -91,6 +92,7 @@ __all__ = [
     "ModuleState",
     "ModuleStatusCodes",
     "OutputLayout",
+    "PrototypeType",
     "SerialProtocols",
     "SerialPrototypes",
     "TransportStatusCodes",
