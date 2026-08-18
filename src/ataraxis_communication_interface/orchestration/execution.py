@@ -80,7 +80,7 @@ class JobExecutionState:
     """Every submitted job, keyed by its dispatch key."""
     pending_jobs: list[tuple[JobDescriptor, JobSizing]] = field(default_factory=list)
     """Jobs awaiting admission, each paired with the figures it was sized at."""
-    active_jobs: dict[tuple[str, str], _ActiveJob] = field(default_factory=dict)
+    active_jobs: dict[tuple[str, str], ActiveJob] = field(default_factory=dict)
     """Jobs currently executing, keyed by dispatch key so a broken future is matched to its descriptor."""
     core_budget: int = 1
     """The cores the batch may commit across all concurrently running jobs."""
@@ -106,7 +106,7 @@ class JobExecutionState:
 
 
 @dataclass(slots=True)
-class _ActiveJob:
+class ActiveJob:
     """Tracks one job executing in a worker of the shared job pool."""
 
     job: JobDescriptor
@@ -124,18 +124,6 @@ _execution_state: JobExecutionState | None = None
 def get_execution_state() -> JobExecutionState | None:
     """Returns the active batch log processing execution state, or None when no session exists."""
     return _execution_state
-
-
-def set_execution_state(state: JobExecutionState | None) -> None:
-    """Stores the active batch log processing execution state, replacing any existing session reference.
-
-    Args:
-        state: The execution state to store, or None to clear the active session.
-    """
-    global _execution_state
-
-    with _EXECUTION_LOCK:
-        _execution_state = state
 
 
 def start_execution_session(state: JobExecutionState) -> bool:
@@ -162,7 +150,7 @@ def start_execution_session(state: JobExecutionState) -> bool:
         if active is not None and active.manager_thread is not None and active.manager_thread.is_alive():
             return False
 
-        manager = Thread(target=job_execution_manager, kwargs={"state": state}, daemon=True)
+        manager = Thread(target=_job_execution_manager, kwargs={"state": state}, daemon=True)
         state.manager_thread = manager
         _execution_state = state
         manager.start()
@@ -170,7 +158,24 @@ def start_execution_session(state: JobExecutionState) -> bool:
     return True
 
 
-def job_execution_manager(state: JobExecutionState) -> None:
+def group_jobs_by_tracker(state: JobExecutionState) -> dict[Path, list[JobDescriptor]]:
+    """Groups every job in an execution state by the tracker file that records it.
+
+    Batches the jobs sharing a tracker so each tracker file is deserialized once when iterating over the groups.
+
+    Args:
+        state: The active job execution state holding the job registry.
+
+    Returns:
+        The jobs recorded by each tracker, keyed by that tracker's path.
+    """
+    tracker_jobs: dict[Path, list[JobDescriptor]] = {}
+    for job in state.all_jobs.values():
+        tracker_jobs.setdefault(job.tracker_path, []).append(job)
+    return tracker_jobs
+
+
+def _job_execution_manager(state: JobExecutionState) -> None:
     """Dispatches queued jobs into one shared process pool under the batch's core and memory budgets.
 
     Notes:
@@ -222,23 +227,6 @@ def job_execution_manager(state: JobExecutionState) -> None:
     finally:
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
-
-
-def group_jobs_by_tracker(state: JobExecutionState) -> dict[Path, list[JobDescriptor]]:
-    """Groups every job in an execution state by the tracker file that records it.
-
-    Batches the jobs sharing a tracker so each tracker file is deserialized once when iterating over the groups.
-
-    Args:
-        state: The active job execution state holding the job registry.
-
-    Returns:
-        The jobs recorded by each tracker, keyed by that tracker's path.
-    """
-    tracker_jobs: dict[Path, list[JobDescriptor]] = {}
-    for job in state.all_jobs.values():
-        tracker_jobs.setdefault(job.tracker_path, []).append(job)
-    return tracker_jobs
 
 
 def _select_admissible_jobs(
@@ -429,7 +417,7 @@ def _admit_pending_jobs(state: JobExecutionState, executor: ProcessPoolExecutor)
             state.pool_broken = True
             deferred.extend(admitted[index:])
             break
-        state.active_jobs[job.dispatch_key] = _ActiveJob(job=job, sizing=sizing, future=future)
+        state.active_jobs[job.dispatch_key] = ActiveJob(job=job, sizing=sizing, future=future)
 
     state.pending_jobs = deferred
 

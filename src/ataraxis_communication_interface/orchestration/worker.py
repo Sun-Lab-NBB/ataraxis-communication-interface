@@ -99,7 +99,7 @@ def execute_job(
     console.echo(message=f"Running '{CONTROLLER_EXTRACTION_JOB_NAME}' job for source '{source_id}' (ID: {job_id})...")
 
     with tracker.run_job(job_id=job_id):
-        controller_config = resolve_controller_config(config_path=config_path, source_id=source_id)
+        controller_config = _resolve_controller_config(config_path=config_path, source_id=source_id)
         module_filters, kernel_event_codes = _resolve_event_filters(
             controller_config=controller_config, source_id=source_id
         )
@@ -131,7 +131,7 @@ def execute_job(
             )
 
 
-def resolve_controller_config(config_path: Path, source_id: str) -> ControllerExtractionConfig:
+def _resolve_controller_config(config_path: Path, source_id: str) -> ControllerExtractionConfig:
     """Reads the extraction configuration and returns the entry declaring the target controller's targets.
 
     Args:

@@ -24,7 +24,7 @@ from ataraxis_communication_interface.orchestration.allocation import (
     _ARCHIVE_DIRECTORY_RATIO,
     _MINIMUM_MEMORY_BUDGET_MB,
     _MEMORY_ROUNDING_QUANTUM_MB,
-    PARALLEL_EXTRACTION_THRESHOLD,
+    _PARALLEL_EXTRACTION_THRESHOLD,
     CONTROLLER_EXTRACTION_JOB_CORES,
     _POOL_MEMORY_RESERVATION_DIVISOR,
     ArchiveFootprint,
@@ -97,7 +97,7 @@ def test_resolve_archive_footprint_rejects_corrupt_archive(tmp_path: Path) -> No
         resolve_archive_footprint(archive_path=archive_path)
 
 
-@pytest.mark.parametrize("message_count", [0, 1, PARALLEL_EXTRACTION_THRESHOLD - 1])
+@pytest.mark.parametrize("message_count", [0, 1, _PARALLEL_EXTRACTION_THRESHOLD - 1])
 def test_resolve_job_workers_below_threshold(message_count: int) -> None:
     """Verifies that resolve_job_workers gives a single core to an archive below the parallel extraction threshold."""
     footprint = _build_footprint(message_count=message_count, archive_bytes=1024)
@@ -109,7 +109,7 @@ def test_resolve_job_workers_below_threshold(message_count: int) -> None:
 
 @pytest.mark.parametrize(
     "message_count",
-    [PARALLEL_EXTRACTION_THRESHOLD, PARALLEL_EXTRACTION_THRESHOLD + 1, PARALLEL_EXTRACTION_THRESHOLD * 100],
+    [_PARALLEL_EXTRACTION_THRESHOLD, _PARALLEL_EXTRACTION_THRESHOLD + 1, _PARALLEL_EXTRACTION_THRESHOLD * 100],
 )
 def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
     """Verifies that resolve_job_workers gives the declared core allocation to an archive at or above the threshold."""
@@ -122,7 +122,7 @@ def test_resolve_job_workers_at_or_above_threshold(message_count: int) -> None:
 
 def test_resolve_job_workers_at_the_threshold() -> None:
     """Verifies that resolve_job_workers reports the declared allocation at the parallel extraction threshold."""
-    footprint = _build_footprint(message_count=PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
+    footprint = _build_footprint(message_count=_PARALLEL_EXTRACTION_THRESHOLD, archive_bytes=64 * _MEGABYTE)
 
     assert resolve_job_workers(footprint=footprint) == CONTROLLER_EXTRACTION_JOB_CORES
 
