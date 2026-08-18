@@ -940,21 +940,31 @@ def test_job_descriptor_round_trips_through_a_mapping(tmp_path: Path) -> None:
     assert JobDescriptor.from_mapping(mapping=job.to_mapping()) == job
 
 
-def test_prepare_jobs_prepares_nothing_when_the_tree_holds_no_manifest(tmp_path: Path) -> None:
-    """Verifies that a tree holding no manifest prepares no job whatever the configuration declares."""
+def test_prepare_jobs_rejects_a_tree_holding_no_manifest(tmp_path: Path) -> None:
+    """Verifies that a tree holding no manifest raises under either sourcing mode."""
     log_directory = tmp_path / "logs"
     _build_archive(directory=log_directory, source_id=1)
     config_path = _write_config(config_path=tmp_path / "config.yaml", source_ids=(1,))
     output_directory = tmp_path / "output"
 
-    job_set = prepare_jobs(
-        log_directory=log_directory,
-        output_directory=output_directory,
-        config_path=config_path,
+    message = (
+        f"Unable to prepare microcontroller data extraction jobs in '{log_directory}'. Its tree holds no "
+        f"{MICROCONTROLLER_MANIFEST_FILENAME}, so no controller in it is registered and no requested source can be "
+        f"prepared. The archives beneath it were not produced by ataraxis-communication-interface, or the recording "
+        f"was logged without a manifest."
     )
 
-    assert job_set.jobs == ()
-    assert job_set.universe == ()
+    # The absent manifest is a property of the directory, so both sourcing modes report it the same way.
+    for strict_sources in (True, False):
+        with pytest.raises(FileNotFoundError, match=error_format(message)):
+            prepare_jobs(
+                log_directory=log_directory,
+                output_directory=output_directory,
+                config_path=config_path,
+                strict_sources=strict_sources,
+            )
+
+    # The unregistered directory is reported before anything is written, so the caller's output path is untouched.
     assert not resolve_output_directory(output_directory=output_directory).exists()
 
 

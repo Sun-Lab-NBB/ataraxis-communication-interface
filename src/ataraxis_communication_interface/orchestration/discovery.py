@@ -163,8 +163,8 @@ def resolve_jobs(log_directory: Path) -> JobUniverse:
     candidates = discover_marker_files(directory=log_directory, marker_name=MICROCONTROLLER_MANIFEST_FILENAME)
 
     # A tree holding no microcontroller manifest holds no extraction jobs, which is an answer rather than a failure.
-    # A caller walking many recordings reads the empty universe and moves on, while a caller that asked for work to
-    # be done raises on the empty result itself.
+    # A caller walking many recordings reads the empty universe and moves on, while prepare_jobs rejects a directory
+    # holding no manifest.
     if not candidates:
         return JobUniverse(
             log_directory=log_directory,
@@ -249,8 +249,8 @@ def prepare_jobs(
         Reads no archive. Every job carries the declared allocation as its width, which the sizing pass replaces with
         the width the job's own archive resolves to.
 
-        A tree holding no manifest prepares no job whatever the configuration declares, matching the empty universe
-        the resolution reports for it.
+        A tree holding no manifest is rejected whatever the configuration declares and whatever the sourcing mode,
+        because the absent manifest is a property of the directory rather than of any one requested source.
 
         The extraction configuration declares which controllers this stage processes, so it bounds the requested set
         the same way the manifest bounds the universe.
@@ -271,8 +271,8 @@ def prepare_jobs(
         The prepared job set.
 
     Raises:
-        FileNotFoundError: If the log directory or the configuration file does not exist, or if a requested source's
-            archive is absent under strict sourcing.
+        FileNotFoundError: If the log directory or the configuration file does not exist, if the log directory's tree
+            holds no microcontroller manifest, or if a requested source's archive is absent under strict sourcing.
         ValueError: If the tree holds more than one manifest, if a manifest registers no sources, if the configuration
             declares no controllers, or if a job identifier matches no configured controller. Also raised if a
             requested source is absent from the microcontroller manifest or from the extraction configuration under
@@ -293,18 +293,15 @@ def prepare_jobs(
     resolved_output = resolve_output_directory(output_directory=output_directory)
     tracker_path = resolve_tracker_path(output_directory=resolved_output)
 
-    # A tree holding no manifest holds no job this library owns, whatever the configuration declares. Reporting the
-    # empty set here keeps the answer the resolution already gave, since weighing the configuration against an
-    # unregistered universe would attribute the absent manifest to the controllers the caller asked for.
+    # Reported before the configuration is read, so the directory itself carries the reason.
     if universe.manifest_path is None:
-        return JobSet(
-            log_directory=log_directory,
-            output_directory=resolved_output,
-            tracker_path=tracker_path,
-            universe=(),
-            jobs=(),
-            skipped_sources=(),
+        message = (
+            f"Unable to prepare microcontroller data extraction jobs in '{log_directory}'. Its tree holds no "
+            f"{MICROCONTROLLER_MANIFEST_FILENAME}, so no controller in it is registered and no requested source can "
+            f"be prepared. The archives beneath it were not produced by ataraxis-communication-interface, or the "
+            f"recording was logged without a manifest."
         )
+        console.error(message=message, error=FileNotFoundError)
 
     configured_ids, unregistered_ids = _resolve_configured_ids(config_path=config_path, registered_ids=registered_ids)
 

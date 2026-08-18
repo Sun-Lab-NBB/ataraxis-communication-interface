@@ -68,8 +68,8 @@ Notes:
 """
 
 _POOL_MEMORY_RESERVATION_DIVISOR: int = 2
-"""The share of the memory budget the shared pool's warmed job bodies may claim, expressed as a divisor. The
-remainder covers the work those bodies perform."""
+"""The share of the memory budget the shared pool's warmed children may claim, expressed as a divisor. The remainder
+covers the bodies those children run."""
 
 _ARCHIVE_DIRECTORY_RATIO: float = 2.7
 """The resident memory a log archive reader holds per byte of archive on disk. Reading an archive builds one
@@ -245,7 +245,8 @@ def resolve_pool_size(job_count: int, core_budget: int, memory_budget_mb: int) -
     Notes:
         A slot holds a job rather than a core, so the count covers the widest running set admission can produce.
         Every slot is warmed at creation and holds a spawned child's baseline memory for the whole session, so the
-        count is held to the bodies half the memory budget can hold.
+        count is held to the spawned children half the memory budget can hold. The other half covers what each
+        running body holds beyond the slot it occupies.
 
     Args:
         job_count: The jobs the batch holds.
@@ -255,8 +256,8 @@ def resolve_pool_size(job_count: int, core_budget: int, memory_budget_mb: int) -
     Returns:
         The job slots the shared pool opens, always at least one.
     """
-    affordable_bodies = (memory_budget_mb // _POOL_MEMORY_RESERVATION_DIVISOR) // SPAWNED_CHILD_MEMORY_MB
-    return max(1, min(job_count, core_budget, affordable_bodies))
+    affordable_children = (memory_budget_mb // _POOL_MEMORY_RESERVATION_DIVISOR) // SPAWNED_CHILD_MEMORY_MB
+    return max(1, min(job_count, core_budget, affordable_children))
 
 
 def resolve_host_memory_mb() -> int:

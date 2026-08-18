@@ -64,8 +64,8 @@ def run_log_processing_pipeline(
             runs sequentially displays nothing.
 
     Raises:
-        FileNotFoundError: If the log directory or the configuration file does not exist, if a requested controller's
-            archive is absent, or if the recording resolves no job to run.
+        FileNotFoundError: If the log directory or the configuration file does not exist, if the log directory's tree
+            holds no microcontroller manifest, or if a requested controller's archive is absent.
         ValueError: If the tree holds more than one microcontroller manifest, if a manifest registers no controllers,
             if the configuration declares no controllers, if a requested controller or job identifier is not
             registered, or if the resolved archives span several directories. Also raised once a job runs, if a
@@ -76,6 +76,8 @@ def run_log_processing_pipeline(
         TimeoutError: If the processing tracker's lock cannot be acquired, which a batch running concurrently over
             the same output directory can cause.
     """
+    # Strict sourcing raises on every source it cannot prepare and on a tree holding no manifest, so the returned set
+    # holds at least one job.
     job_set = prepare_jobs(
         log_directory=log_directory,
         output_directory=output_directory,
@@ -83,16 +85,6 @@ def run_log_processing_pipeline(
         source_ids=source_ids,
         job_id=job_id,
     )
-
-    # A caller reaching this function asked for work to be carried out, so resolving nothing is a failure here even
-    # though the resolution itself reports a recording holding no microcontroller data as an ordinary answer.
-    if not job_set.jobs:
-        message = (
-            f"Unable to process microcontroller log archives in '{log_directory}'. The recording resolved no "
-            f"extraction job. Its tree holds no microcontroller manifest, or the extraction config declares no "
-            f"controller whose log archive resolves to exactly one file beneath it."
-        )
-        console.error(message=message, error=FileNotFoundError)
 
     console.echo(
         message=(

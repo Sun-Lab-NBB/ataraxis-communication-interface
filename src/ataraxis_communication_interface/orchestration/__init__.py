@@ -21,9 +21,11 @@ from .discovery import JobSet, JobSource, JobUniverse, size_job, prepare_jobs, r
 from .execution import (
     ActiveJob,
     JobExecutionState,
+    session_is_active,
     get_execution_state,
     group_jobs_by_tracker,
     start_execution_session,
+    finish_execution_session,
 )
 from .allocation import (
     CONTROLLER_EXTRACTION_JOB_CORES,
@@ -52,6 +54,7 @@ __all__ = [
     "execute_job",
     "find_kernel_paths",
     "find_module_paths",
+    "finish_execution_session",
     "generate_job_ids",
     "get_execution_state",
     "group_jobs_by_tracker",
@@ -66,6 +69,7 @@ __all__ = [
     "resolve_module_path",
     "resolve_pool_size",
     "run_log_processing_pipeline",
+    "session_is_active",
     "size_archive_job",
     "size_job",
     "start_execution_session",

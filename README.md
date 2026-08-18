@@ -649,7 +649,12 @@ This library provides the `axci` CLI that exposes the following commands:
 | `process`       | Processes log archives to extract hardware module and kernel event data  |
 | `mcp`           | Starts the MCP server for AI agent integration                           |
 
-Use `axci --help` or `axci COMMAND --help` for detailed usage information.
+Use `axci --help` or `axci COMMAND --help` for detailed usage information. A command whose execution fails reports the
+reason through the console at the error level and exits zero, so a shell driving the CLI reads the reported message
+rather than an interpreter traceback. Click rejects a missing or malformed option before the command runs and exits 2.
+
+***Note,*** a script chaining commands with `set -e` or `&&` therefore continues past a failed command. Such a script
+reads the reported output to decide whether the command succeeded.
 
 A CLI-driven extraction generates the configuration from the manifest and then processes the archives that manifest
 tags:
@@ -688,7 +693,7 @@ axci mcp
 | `write_extraction_config_tool`        | Writes an extraction configuration to a YAML file from structured data       |
 | `validate_extraction_config_tool`     | Validates an extraction config against a manifest for completeness           |
 | `prepare_log_processing_batch_tool`   | Prepares a batch of log processing jobs across multiple directories          |
-| `execute_log_processing_jobs_tool`    | Executes prepared log processing jobs against a core and a memory budget     |
+| `execute_log_processing_jobs_tool`    | Prepares and executes log processing jobs against a core and a memory budget |
 | `get_log_processing_status_tool`      | Returns the current status of the active log processing session              |
 | `get_log_processing_timing_tool`      | Returns timing information for all jobs in the active session                |
 | `cancel_log_processing_tool`          | Cancels the active log processing execution session                          |
