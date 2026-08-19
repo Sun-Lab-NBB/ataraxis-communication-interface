@@ -23,26 +23,29 @@ _CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 
-# Defined above the commands because a decorator is resolved where it is applied rather than where the module ends.
 def _report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]:
     """Reports the failure of a command through the console instead of an interpreter traceback.
 
     Notes:
         A traceback buries the message under a stack the user of a command line tool cannot act on.
 
-        Click validates the parameters before the wrapped body runs, so a missing or malformed option still exits 2.
+        A Click exception passes through, so the usage errors a command body raises keep the usage banner and the
+        exit status Click gives its own parameter validation. A caller therefore reads one exit status for every
+        malformed invocation, whether Click or a command body detected it.
 
     Args:
         command: The command function to wrap.
 
     Returns:
-        The wrapped command, which reports any exception its body raises and returns normally.
+        The wrapped command, which reports any other exception its body raises and returns normally.
     """
 
     @wraps(command)
     def report(*args: P.args, **kwargs: P.kwargs) -> None:
         try:
             command(*args, **kwargs)
+        except click.ClickException:
+            raise
         except Exception as error:
             console.echo(message=str(error), level=LogLevel.ERROR)
 

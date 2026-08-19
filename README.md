@@ -651,10 +651,11 @@ This library provides the `axci` CLI that exposes the following commands:
 
 Use `axci --help` or `axci COMMAND --help` for detailed usage information. A command whose execution fails reports the
 reason through the console at the error level and exits zero, so a shell driving the CLI reads the reported message
-rather than an interpreter traceback. Click rejects a missing or malformed option before the command runs and exits 2.
+rather than an interpreter traceback. A malformed invocation exits 2 instead, whether Click rejects the option itself
+or the command body raises a usage error.
 
-***Note,*** a script chaining commands with `set -e` or `&&` therefore continues past a failed command. Such a script
-reads the reported output to decide whether the command succeeded.
+***Note,*** a script chaining commands with `set -e` or `&&` therefore continues past a failed command. The console
+writes to the standard error stream, so such a script captures that stream to decide whether the command succeeded.
 
 A CLI-driven extraction generates the configuration from the manifest and then processes the archives that manifest
 tags:

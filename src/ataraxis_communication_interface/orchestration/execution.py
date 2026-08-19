@@ -50,7 +50,7 @@ _DISPATCH_POLL_SECONDS: float = 1.0
 
 _SESSION_FINISH_TIMEOUT_SECONDS: float = 30.0
 """The time a caller finishing a session allows the manager thread to end before it stops waiting. The bound is
-reached whenever the manager sits inside a blocking step, which covers the pool warm-up, a job body, a pool
+reached whenever the manager sits inside a blocking step, which is the pool warm-up, whether at creation or at a
 rebuild, and the pool shutdown."""
 
 _MAXIMUM_POOL_REBUILDS: int = 3
@@ -189,14 +189,15 @@ def finish_execution_session(state: JobExecutionState) -> bool:
 
     Notes:
         Wakes the manager rather than waiting out its poll interval, so a caller that cleared the queue observes the
-        end of the session as soon as it happens. The wait is bounded, and a manager inside a blocking step can
-        outlast that bound, so the caller reads the returned flag to learn whether the session slot is free.
+        end of the session as soon as it happens. The wait is bounded, and a manager inside the pool's warm-up or
+        its shutdown can outlast that bound, so the caller reads the returned flag to learn whether the slot is free.
 
     Args:
         state: The execution state whose manager thread is awaited.
 
     Returns:
-        True when the manager thread ended within the allotted time, and False when it is still running.
+        True when the state holds no manager thread or its manager thread ended within the allotted time, and
+        False when it is still running.
     """
     state.wakeup.set()
     manager = state.manager_thread
@@ -236,8 +237,9 @@ def _job_execution_manager(state: JobExecutionState) -> None:
 
         Cancellation stops new admissions and lets the running jobs finish.
 
-        Every exit path leaves each job it dispatched in a terminal tracker state, since the tracker is the only
-        channel a status reader consults. A canceled batch's queued jobs stay scheduled and remain re-runnable.
+        Every job this manager dispatched ends in a terminal tracker state, since the tracker is the only channel
+        a status reader consults. A canceled batch's queued jobs are cleared before they are dispatched, so they
+        stay scheduled and remain re-runnable.
 
     Args:
         state: The active job execution state. Mutated under its own lock as jobs move between the queues.
