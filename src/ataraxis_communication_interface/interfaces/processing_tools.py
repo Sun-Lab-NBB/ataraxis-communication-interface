@@ -262,7 +262,7 @@ def execute_log_processing_jobs_tool(
         return {"error": _SESSION_ACTIVE_ERROR}
 
     preparation: dict[str, Any] = {}
-    if jobs is None:
+    if not jobs:
         if not log_directories or not output_directories or config_path is None:
             return {
                 "error": (
@@ -354,7 +354,7 @@ def execute_log_processing_jobs_tool(
     )
 
     if not start_execution_session(state=state):
-        return {"error": _SESSION_ACTIVE_ERROR}
+        return {"error": _SESSION_ACTIVE_ERROR, **_preparation_notes(preparation)}
 
     result: dict[str, Any] = {
         "started": True,
@@ -596,7 +596,7 @@ def cancel_log_processing_tool() -> dict[str, Any]:
     for tracker_path, path_jobs in group_jobs_by_tracker(state=state).items():
         try:
             registry = ProcessingTracker(file_path=tracker_path).snapshot()
-        except Exception:  # noqa: S112 - a tracker that cannot be read contributes no counts, so the loop skips it.
+        except Exception:  # noqa: S112 - A tracker that cannot be read contributes no counts, so the loop skips it.
             continue
 
         for job in path_jobs:
@@ -834,8 +834,8 @@ def _preparation_notes(preparation: dict[str, Any]) -> dict[str, Any]:
 
     skipped = [
         {"log_directory": log_directory, **entry}
-        for log_directory, directory in preparation.get("log_directories", {}).items()
-        for entry in directory.get("skipped_sources", [])
+        for log_directory, manifest in preparation.get("log_directories", {}).items()
+        for entry in manifest.get("skipped_sources", [])
     ]
 
     notes: dict[str, Any] = {}
